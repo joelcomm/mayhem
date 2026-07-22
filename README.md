@@ -64,7 +64,13 @@ independently**, because a town where everyone is the same thickness reads as cl
 however much the heights differ, and the side-on silhouette is what gives that away. On foot the crowd has
 substance: people shove past each other rather than overlapping,
 and you can't walk through them — you shoulder past. **Barge someone and they square up**
-and chase you for a few seconds, swinging; a punch knocks you down. **Left click kicks**:
+and chase you for a few seconds, swinging; a punch knocks you down. **It has to be your
+fault, though.** The crowd walks its own lanes and blunders into a standing player all
+day; anger used to fire on any overlap, so a townsperson could walk into you, take
+offence, and put you on the floor for the crime of standing still. The contact is now
+judged by whether *you* were closing — your own movement that frame projected onto the
+line between you, over 1.2 m/s against a walking pace of about 4. Shove someone and they
+fight. Get shoved and they apologise. **Left click kicks**:
 whoever is in front of you goes flying, gets up, and runs away. Kicks feed the combo.
 Townsfolk knocked down by your car get up scared and run too.
 
@@ -232,6 +238,16 @@ Two things make it pass rather than just measure:
   ignored. Without it the audit drowns in false positives and hides the real ones.
 
 ### Going inside
+**Shop windows are real glass.** The glazing is a transparent material on its own
+bucket (surface kind `glass`, `depthWrite` off so it neither occludes the room nor
+collects an ink outline), and — the part that actually matters — the window is a *hole*.
+A transparent pane in front of a solid wall shows you the wall, which is all the first
+attempt achieved. `cutWall` punches the band's opening through everything standing in
+the way: the shell's front wall, the room's own lining, and the dark band the glass sits
+in, which was a solid slab and is now a frame. Walk down the high street and you can see
+the diners, the shelves and the staff inside without opening a door. The wall colliders
+are untouched, so the window is glass, not a doorway.
+
 **Every storefront in town is enterable** (35 rooms across the six scattered
 quarters — a few candidates whose interiors can't be cleared stay solid), plus
 **742 Evergreen Terrace**. Walk up to the door on foot,

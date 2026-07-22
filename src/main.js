@@ -835,12 +835,23 @@ const SURFACES = {
   stucco:  { tex: texStucco,  scale: 0.3  },
   tile:    { tex: texTile,    scale: 0.42 },
   plank:   { tex: texPlank,   scale: 0.34 },
+  // Not a texture at all — a surface kind with no map, riding the same bucket split so
+  // shop glazing can be its own material without inventing a second mechanism.
+  glass:   { tex: null, scale: 1, see: true },
 };
 const surfCache = new Map();
 function surfMat(color, kind) {
   const k = color + ':' + kind;
-  if (!surfCache.has(k)) surfCache.set(k,
-    new THREE.MeshToonMaterial({ color, gradientMap: RAMP, map: SURFACES[kind].tex }));
+  if (!surfCache.has(k)) {
+    const S = SURFACES[kind];
+    // depthWrite off, or the pane occludes the room behind it and you are back to
+    // looking at a blue rectangle. It also keeps the ink pass off the glass, so the
+    // outlines you see through a window are the shelves' own.
+    surfCache.set(k, S.see
+      ? new THREE.MeshToonMaterial({ color, gradientMap: RAMP, transparent: true,
+                                     opacity: 0.3, depthWrite: false })
+      : new THREE.MeshToonMaterial({ color, gradientMap: RAMP, map: S.tex }));
+  }
   return surfCache.get(k);
 }
 // Project every triangle onto the world plane its normal points at. Merged town geometry
@@ -918,26 +929,47 @@ const WALL_T = 0.8;                    // visible wall thickness, and the collid
 const CEIL_H = 4.6;
 const ROOMS = [];
 
+// The glazing band's opening, in building-local Y. Everything that stands in front of a
+// shop window — the shell wall, the room's own lining, the dark band the glass sits in —
+// has to have this hole cut in it, or a transparent pane just shows you the wall behind.
+const WIN0 = 0.62, WIN1 = 3.52;
+// Emit a wall run with that hole punched through it. Anything outside the glazing's own
+// x-span stays solid, as does the sill below the band and the spandrel above it. If the
+// run doesn't overlap the glazing at all it comes out as one box, exactly as before.
+// `emit(cx, cy, width, height)` builds the piece.
+function cutWall(emit, x0, x1, yBot, yTop, gLo, gHi) {
+  if (x1 - x0 < 0.02 || yTop - yBot < 0.02) return;
+  const a = Math.max(x0, gLo), b = Math.min(x1, gHi);
+  const w0 = Math.max(yBot, WIN0), w1 = Math.min(yTop, WIN1);
+  if (b - a < 0.3 || w1 - w0 < 0.1) { emit((x0+x1)/2, (yBot+yTop)/2, x1-x0, yTop-yBot); return; }
+  if (a - x0 > 0.02) emit((x0+a)/2, (yBot+yTop)/2, a-x0, yTop-yBot);      // jamb, left
+  if (x1 - b > 0.02) emit((b+x1)/2, (yBot+yTop)/2, x1-b, yTop-yBot);      // jamb, right
+  const cw = b - a, cx = (a + b)/2;
+  if (w0 - yBot > 0.02) emit(cx, (yBot+w0)/2, cw, w0-yBot);               // sill
+  if (yTop - w1 > 0.02) emit(cx, (w1+yTop)/2, cw, yTop-w1);               // spandrel
+}
+
 // The building's outer walls, with a gap cut for the doorway. `L` maps building-local
 // geometry into the world; `q` slides the doorway along the facade in local x, so the
-// opening can dodge whatever ended up parked outside.
-function buildShell(L, w, d, h, wallCol, dw, dh, q, skin) {
+// opening can dodge whatever ended up parked outside. `gz` is the glazing's half-width
+// when the front is a shopfront — the front wall gets a window hole to match.
+function buildShell(L, w, d, h, wallCol, dw, dh, q, skin, gz) {
   const T = WALL_T, hw = w/2, hd = d/2;
-  const lw = (q - dw/2) + hw, rw = hw - (q + dw/2);            // wall either side of the gap
-  const lc = -hw + lw/2, rc = hw - rw/2;
   put(wallCol, L(baked(BOX(w, h, T), 0, h/2, -hd + T/2)), skin);                // back
   put(wallCol, L(baked(BOX(T, h, d - T*2), -hw + T/2, h/2, 0)), skin);          // left
   put(wallCol, L(baked(BOX(T, h, d - T*2),  hw - T/2, h/2, 0)), skin);          // right
-  put(wallCol, L(baked(BOX(lw, h, T), lc, h/2, hd - T/2)), skin);               // front, door-left
-  put(wallCol, L(baked(BOX(rw, h, T), rc, h/2, hd - T/2)), skin);               // front, door-right
-  put(wallCol, L(baked(BOX(dw, h - dh, T), q, dh + (h - dh)/2, hd - T/2)), skin);  // header
+  const face = (cx, cy, pw, ph) => put(wallCol, L(baked(BOX(pw, ph, T), cx, cy, hd - T/2)), skin);
+  const g = gz || 0;
+  cutWall(face, -hw, q - dw/2, 0, h, -g, g);                                   // front, door-left
+  cutWall(face, q + dw/2, hw,  0, h, -g, g);                                   // front, door-right
+  face(q, dh + (h - dh)/2, dw, h - dh);                                        // header over the door
 }
 
 // The habitable room inside the shell. `ir` is its local rect, which is the shell's
 // interior trimmed back off anything the town had already built inside this footprint —
 // so the far side of a partition may be a dead space nobody can reach. `ir.z1` is always
 // the door wall and never moves.
-function buildRoomBox(L, ir, dw, dh, q, floor) {
+function buildRoomBox(L, ir, dw, dh, q, floor, gz) {
   const rw = ir.x1 - ir.x0, rd = ir.z1 - ir.z0, cxl = (ir.x0 + ir.x1)/2, czl = (ir.z0 + ir.z1)/2;
   const LIN = 0xf2e4c8, SK = 0x8c6a44, P = 0.3;
   put(0xf0efe6, L(baked(BOX(rw, 0.3, rd), cxl, CEIL_H + 0.15, czl)));           // ceiling
@@ -948,10 +980,14 @@ function buildRoomBox(L, ir, dw, dh, q, floor) {
   put(LIN, L(baked(BOX(rw, CEIL_H, P), cxl, CEIL_H/2, ir.z0 + P/2)));           // back
   put(LIN, L(baked(BOX(P, CEIL_H, rd), ir.x0 + P/2, CEIL_H/2, czl)));           // left
   put(LIN, L(baked(BOX(P, CEIL_H, rd), ir.x1 - P/2, CEIL_H/2, czl)));           // right
-  const lw = (q - dw/2) - ir.x0, rr = ir.x1 - (q + dw/2);                       // door wall, split
-  if (lw > 0.02) put(LIN, L(baked(BOX(lw, CEIL_H, P), ir.x0 + lw/2, CEIL_H/2, ir.z1 - P/2)));
-  if (rr > 0.02) put(LIN, L(baked(BOX(rr, CEIL_H, P), ir.x1 - rr/2, CEIL_H/2, ir.z1 - P/2)));
-  put(LIN, L(baked(BOX(dw, CEIL_H - dh, P), q, dh + (CEIL_H - dh)/2, ir.z1 - P/2)));
+  // the door wall, split around the doorway — and around the shop window, so the lining
+  // isn't the thing you end up looking at through the glass
+  const face = (cx, cy, pw, ph) => put(LIN, L(baked(BOX(pw, ph, P), cx, cy, ir.z1 - P/2)));
+  const g = gz || 0;
+  const lw = (q - dw/2) - ir.x0, rr = ir.x1 - (q + dw/2);      // skirting runs, below the window
+  cutWall(face, ir.x0, q - dw/2, 0, CEIL_H, -g, g);
+  cutWall(face, q + dw/2, ir.x1, 0, CEIL_H, -g, g);
+  face(q, dh + (CEIL_H - dh)/2, dw, CEIL_H - dh);
   put(SK, L(baked(BOX(rw, 0.34, 0.14), cxl, 0.17, ir.z0 + P + 0.07)));
   put(SK, L(baked(BOX(0.14, 0.34, rd), ir.x0 + P + 0.07, 0.17, czl)));
   put(SK, L(baked(BOX(0.14, 0.34, rd), ir.x1 - P - 0.07, 0.17, czl)));
@@ -1111,8 +1147,8 @@ function makeShop(cx, cz, fx, fz, w, d, name, bodyCol, signCol) {   // bodyCol i
   const front = d/2 + 0.06;
   put(0x2f3550, L(baked(BOX(w*0.86, 3.4, 0.2), 0, 2.0, front)));      // glazing band
   if (walkIn) drop.push(lastPut(0x2f3550));
-  put(GLASS,   L(baked(BOX(w*0.8, 2.9, 0.26), 0, 2.05, front+0.05)));
-  if (walkIn) drop.push(lastPut(GLASS));
+  put(GLASS,   L(baked(BOX(w*0.8, 2.9, 0.26), 0, 2.05, front+0.05)), 'glass');
+  if (walkIn) drop.push(lastPut(GLASS, 'glass'));
   put(signCol, L(baked(BOX(w*0.94, 2.4, 0.5), 0, h-1.6, front+0.1))); // signboard
   // Storefront trim. Deterministic throughout — see the note in makeHouse. This is the
   // cheapest detail in the game: shops are merged into colour buckets, so all of it
@@ -2426,15 +2462,19 @@ rngNeutral(() => {
     const fi = colliders.indexOf(b.foot); if (fi >= 0) colliders.splice(fi, 1);
     const L = g => baked(g, b.cx, 0, b.cz, 0, b.yaw, 0);
     const dx = b.cx + b.fx*b.front + sx*q, dz = b.cz + b.fz*b.front + sz*q;
-    buildShell(L, b.w, b.d, b.h, b.bodyCol, b.dw, b.dh, q, b.skin);
-    buildRoomBox(L, ir, b.dw, b.dh, q, vary(b.cx, b.cz, 3) ? 'tile' : 'plank');
+    const gz = b.glazed ? b.w*0.40 : 0;
+    buildShell(L, b.w, b.d, b.h, b.bodyCol, b.dw, b.dh, q, b.skin, gz);
+    buildRoomBox(L, ir, b.dw, b.dh, q, vary(b.cx, b.cz, 3) ? 'tile' : 'plank', gz);
     if (b.glazed) {                 // glazing either side, replacing the band across the front
-      const lw = (q - b.dw/2) + b.w*0.43, rw = b.w*0.43 - (q + b.dw/2);
       const gl = (q - b.dw/2) + b.w*0.40, gr = b.w*0.40 - (q + b.dw/2);
-      if (lw > 0.3) put(0x2f3550, L(baked(BOX(lw, 3.4, 0.2), -b.w*0.43 + lw/2, 2.0, b.front)));
-      if (rw > 0.3) put(0x2f3550, L(baked(BOX(rw, 3.4, 0.2),  b.w*0.43 - rw/2, 2.0, b.front)));
-      if (gl > 0.3) put(GLASS, L(baked(BOX(gl, 2.9, 0.26), -b.w*0.40 + gl/2, 2.05, b.front+0.05)));
-      if (gr > 0.3) put(GLASS, L(baked(BOX(gr, 2.9, 0.26),  b.w*0.40 - gr/2, 2.05, b.front+0.05)));
+      // The band is the frame the glass sits in, so it gets the window cut out of it too
+      // — left solid it is a dark panel behind the pane, which is exactly what you saw
+      // before: a transparent window onto a wall.
+      const band = (cx, cy, pw, ph) => put(0x2f3550, L(baked(BOX(pw, ph, 0.2), cx, cy, b.front)));
+      cutWall(band, -b.w*0.43, q - b.dw/2, 0.3, 3.7, -gz, gz);
+      cutWall(band, q + b.dw/2,  b.w*0.43, 0.3, 3.7, -gz, gz);
+      if (gl > 0.3) put(GLASS, L(baked(BOX(gl, 2.9, 0.26), -b.w*0.40 + gl/2, 2.05, b.front+0.05)), 'glass');
+      if (gr > 0.3) put(GLASS, L(baked(BOX(gr, 2.9, 0.26),  b.w*0.40 - gr/2, 2.05, b.front+0.05)), 'glass');
       // mullions, minus any that would stand in the opening — the centre one is at the
       // middle of the frontage and the doorway usually is too
       for (let k = -1; k <= 1; k++) {
@@ -3075,7 +3115,7 @@ const blimps = [];
 for (const [, b] of BUCKETS) {
   if (!b.list.length) continue;
   const geo = merge(b.list);
-  if (b.kind) projectUV(geo, SURFACES[b.kind].scale);
+  if (b.kind && SURFACES[b.kind].tex) projectUV(geo, SURFACES[b.kind].scale);
   const m = new THREE.Mesh(geo, b.kind ? surfMat(b.color, b.kind) : toon(b.color));
   m.castShadow = true; m.receiveShadow = true; scene.add(m);
 }
@@ -4993,11 +5033,20 @@ function updateAngry(p, dt) {
   return true;
 }
 
-// Walking into someone is a shove, not a pass-through — and they take it personally.
+// Walking into someone is a shove, not a pass-through — and they take it personally,
+// but only if it was *your* doing. The crowd walks its own lanes and blunders into a
+// standing player all day long; anger used to fire on any overlap, so a townsperson
+// could walk into you, square up about it, and put you on the floor for the crime of
+// standing still. Now the contact is judged by whether you were closing on them: your
+// own movement this frame, projected onto the line between you. Bump them and they
+// fight; get bumped and they apologise.
+let lastFootX = 0, lastFootZ = 0;
 function playerVsPeds(dt) {
+  const px = player.position.x, pz = player.position.z;
+  const mvx = px - lastFootX, mvz = pz - lastFootZ;   // measured before the give-way below
+  lastFootX = px; lastFootZ = pz;
   if (mode !== 'foot' || playerRag.active) return;
   const R = 0.75 + PED_R, R2 = R*R;
-  const px = player.position.x, pz = player.position.z;
   const gx = Math.floor(px/GAP_Q), gz = Math.floor(pz/GAP_Q);
   for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
     const b = pedGrid.get((gx+ox)+','+(gz+oz)); if (!b) continue;
@@ -5012,7 +5061,14 @@ function playerVsPeds(dt) {
       p.g.position.z += nz*push*0.55;
       p.ox = THREE.MathUtils.clamp((p.ox||0) + nx*push*0.55, -1.1, 1.1);
       p.oz = THREE.MathUtils.clamp((p.oz||0) + nz*push*0.55, -1.1, 1.1);
-      angerPed(p);
+      // n runs from you to them, so this is how fast you were closing. Walking pace is
+      // about 4 m/s and running about 6, so 1.2 clears incidental drift while still
+      // catching a deliberate shoulder — and standing still can never trip it.
+      const closing = (mvx*nx + mvz*nz) / Math.max(dt, 1e-4);
+      if (closing > 1.2) angerPed(p);
+      else if (Math.random() < 0.3) sayOuch('bump');   // their fault, and they know it
+                                                      // (not every time — standing in a
+                                                      // crowd should not be a wall of apology)
     }
   }
 }
@@ -5278,6 +5334,10 @@ const OUCH = {
     'Ohh, that smarts!', 'I just had these pressed!', 'Somebody hold my bag!',
     'Not the shins, anything but the shins!', "That's coming out of someone's wages!",
     'My knee does not bend that way!', 'Rude and painful!'],
+  // they walked into you, not the other way round
+  bump: ['Sorry!', 'Oh — sorry!', 'My fault!', 'Beg your pardon.', 'Whoops!',
+    'Excuse me!', "Didn't see you there!", 'Pardon me!', 'Oh! Hello.', 'Sorry about that!',
+    'Coming through — sorry!', 'Miles away, sorry.'],
   car:  ['My groceries!', 'Look out!', 'Whoaaa!', 'Not again!', 'My back!', 'Aaargh!',
     'Learn to drive!', 'Oh come on!', 'My casserole!', 'I was nearly home!',
     'I only came out for milk!', "There's a pavement for that!", 'My hip!',
