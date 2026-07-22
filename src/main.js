@@ -891,20 +891,33 @@ function makeHouse(cx, cz, fx, fz, w, d) {
   put(roof, L(baked(roofPrism(w+1.4, rnd(2.6,3.8), d+1.4), 0, h, 0)));
 
   const front = d/2 + 0.06;
-  // door + step
+  // Trim detail. All of it is derived from w/d/h — no rnd() anywhere in here, so the
+  // seeded stream never sees it and the town stays byte-identical. (Adding new bucket
+  // colours is free now too: three.js takes its UUIDs from the real Math.random.)
+  put(0x9a8f7a, L(baked(BOX(w+0.5, 0.65, d+0.5), 0, 0.32, 0)));      // plinth course
+  put(TRIM, L(baked(BOX(w+1.5, 0.34, d+1.5), 0, h - 0.17, 0)));      // eaves fascia
+  // door: recessed frame, panel, step, and a knob you can actually see
+  put(TRIM, L(baked(BOX(2.4, 3.5, 0.14), 0, 1.72, front - 0.02)));
   put(door, L(baked(BOX(1.9, 3.1, 0.25), 0, 1.55, front)));
+  put(0xc9a24b, L(baked(new THREE.SphereGeometry(0.1, 10, 8), 0.68, 1.62, front + 0.15)));
   put(TRIM, L(baked(BOX(2.5, 0.22, 0.9), 0, 0.11, front+0.4)));
-  // windows either side, and upstairs
+  // windows either side, and upstairs — each gets a sill and a mullion cross, which
+  // is what stops a window reading as a flat blue rectangle
   const winY = [1.9], colsX = [-w*0.28, w*0.28];
   if (storeys === 2) winY.push(h - 2.3);
   for (const wy of winY) for (const wx of colsX) {
     put(TRIM, L(baked(BOX(2.3, 2.1, 0.18), wx, wy, front)));
     put(GLASS, L(baked(BOX(1.8, 1.6, 0.24), wx, wy, front+0.04)));
+    put(TRIM, L(baked(BOX(2.6, 0.16, 0.44), wx, wy - 1.12, front + 0.16)));   // sill
+    put(TRIM, L(baked(BOX(0.12, 1.6, 0.3), wx, wy, front + 0.06)));           // mullion
+    put(TRIM, L(baked(BOX(1.8, 0.12, 0.3), wx, wy, front + 0.06)));
   }
   // side windows
   for (const s of [1,-1]) {
     put(TRIM, L(baked(BOX(0.18, 1.9, 2.1), s*(w/2+0.05), h*0.55, 0)));
     put(GLASS, L(baked(BOX(0.24, 1.4, 1.6), s*(w/2+0.09), h*0.55, 0)));
+    put(TRIM, L(baked(BOX(0.3, 0.14, 2.4), s*(w/2+0.14), h*0.55 - 1.0, 0)));  // sill
+    put(TRIM, L(baked(BOX(0.3, 1.4, 0.11), s*(w/2+0.12), h*0.55, 0)));        // mullion
   }
   if (prng() < 0.55) {                                    // chimney
     const bx = rnd(-w*0.3, w*0.3);
@@ -938,7 +951,24 @@ function makeShop(cx, cz, fx, fz, w, d, name, bodyCol, signCol) {
   put(GLASS,   L(baked(BOX(w*0.8, 2.9, 0.26), 0, 2.05, front+0.05)));
   if (walkIn) drop.push(lastPut(GLASS));
   put(signCol, L(baked(BOX(w*0.94, 2.4, 0.5), 0, h-1.6, front+0.1))); // signboard
-  put(TRIM,    L(baked(BOX(w*0.98, 0.4, 1.7), 0, 4.1, front+0.75)));  // awning lip
+  // Storefront trim. Deterministic throughout — see the note in makeHouse. This is the
+  // cheapest detail in the game: shops are merged into colour buckets, so all of it
+  // costs vertices once at build and nothing per frame.
+  put(0x6f6a58, L(baked(BOX(w+1.5, 0.5, d+1.5), 0, h - 0.25, 0)));    // cornice under the parapet
+  put(TRIM,     L(baked(BOX(w*0.99, 0.34, 0.34), 0, h - 2.95, front + 0.2)));  // sign ledge
+  // a sloped awning on brackets instead of a flat lip
+  put(signCol,  L(baked(BOX(w*0.9, 0.28, 2.0), 0, 4.25, front + 0.95, -0.22)));
+  put(TRIM,     L(baked(BOX(w*0.92, 0.34, 0.28), 0, 3.88, front + 1.85)));     // valance
+  for (const s of [-1, 1])
+    put(TRIM, L(baked(BOX(0.16, 1.5, 0.16), s*w*0.42, 3.6, front + 1.7, 0.5)));  // brackets
+  // mullions across the glazing band, so the shopfront isn't one blue slab
+  for (let k = -1; k <= 1; k++)
+    put(0x2f3550, L(baked(BOX(0.16, 3.0, 0.3), k*w*0.22, 2.05, front + 0.1)));
+  put(0x5a5346, L(baked(BOX(w*0.88, 0.4, 0.34), 0, 0.2, front + 0.08)));       // kick plate
+  // rooftop clutter: plant boxes and a vent give the skyline something to bite on
+  put(0x8b929a, L(baked(BOX(w*0.24, 1.1, d*0.3), -w*0.22, h + 1.2, -d*0.1)));
+  put(0x6f7178, L(baked(new THREE.CylinderGeometry(0.42, 0.42, 1.5, 14), w*0.26, h + 1.4, d*0.12)));
+  put(0x8b929a, L(baked(new THREE.CylinderGeometry(0.55, 0.55, 0.24, 14), w*0.26, h + 2.2, d*0.12)));
   const W = Math.abs(fx)>0.5 ? d : w, D = Math.abs(fx)>0.5 ? w : d;
   signs.push({ text: name, x: cx + fx*(front+0.45), z: cz + fz*(front+0.45), y: h-1.6, yaw, w: w*0.9 });
   shopSpots.push({ name, cx, cz, fx, fz, w, d, h, yaw });

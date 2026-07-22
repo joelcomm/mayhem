@@ -413,7 +413,19 @@ guide arrow) and were left alone. On top of that, the things the camera spends i
 time on got real geometry: car wheels have 28-segment tyres, rims, three spokes and
 an arch lip so the body no longer hovers over them; trees went from three lobes to
 five plus a flared root and a branch stub; the crowd gained hands, rounded shoe toes
-and a 22x16 head. Roughly 70 primitives rounded out, at a measured ~57 fps.
+and a 22x16 head. Roughly 70 primitives rounded out.
+
+**Buildings** got the same treatment, and they are the cheapest place in the game to
+spend detail: houses and shops are merged into colour buckets, so trim costs vertices
+once at build time and nothing per frame. Houses gained a plinth course, eaves fascia,
+a recessed door frame with a visible knob, and — the change that does the most work —
+window **sills and mullion crosses**, which is what stops a window reading as a flat
+blue rectangle. Shops gained a cornice under the parapet, a sloped awning on brackets
+in place of the old flat lip, mullions dividing the glazing band, a kick plate, and
+rooftop plant boxes and a vent so the skyline has something to bite on.
+
+All of it is derived from each building's own `w`/`d`/`h` with **no `rnd()` anywhere**,
+which is why the town stays byte-identical through the whole pass.
 
 This pass is only cheap because of the private-PRNG work: geometry no longer draws
 from the town's stream, so poly counts can change freely and the build stays
