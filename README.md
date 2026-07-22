@@ -16,6 +16,8 @@ so the first load needs an internet connection).
 | C | cycle camera distance |
 | R | reset (also clears heat) |
 | M | map view — pull back over the whole town |
+| H | air horn (once bought from the garage) |
+| 1-4 | buy, while standing on Gus's forecourt |
 
 ## The game
 Wreck things. Every pedestrian, car and bit of street furniture you hit feeds a **combo**:
@@ -281,9 +283,29 @@ behind a partition. A doorway is treated as a hole, not a wall, so standing just
 shallow shop the camera sits out in the street and looks in through the door, which is
 what it should do. `roomT` ramps the camera distance in across the threshold.
 
-**To do** — spend coins somewhere (a dealership storefront: car types, engine/armor,
-a horn that scatters chickens); hidden tokens in the 42 furnished rooms; street
-races vs AI cars on the road graph.
+### Coins are for spending
+**Gus's Garage** is a forecourt just up the street from the spawn — a green glow,
+a name board and a man in a cap. It is *not* a mission: walk into the forecourt and
+a keyboard menu opens, number keys buy, walking off closes it, and it never blocks
+or shares state with an active job.
+
+| # | Buy | Effect |
+|---|-----|--------|
+| 1 | **ENGINE** ×3 — 150 / 400 / 900 | top speed 42 → 63, acceleration 32 → 50 (`MAX_SPEED`/`ACCEL` are `let` for this; everything reading them is written as a fraction of `MAX_SPEED`, so steering authority, the FOV stretch and the camera pull-back all scale for free) |
+| 2 | **ARMOR** ×3 — 120 / 320 / 700 | damage taken ×0.72 / ×0.5 / ×0.32 (`armorMul` in `damageCar`) |
+| 3 | **AIR HORN** — 200 | **H** blasts a chord; every pedestrian within 30 m bolts and the castle flock scatters. Feeds the combo |
+| 4 | **NEW RIDE** — 250 | cycles your car through all five body types in a fresh colour |
+
+**Thirty-five trophies, one hidden in every walk-in room.** The furnished interiors
+were beautiful and pointless; now each holds a gold trophy tucked in the corner
+*furthest from its own doorway*, skipping any spot the fit-out registered as solid.
+They only count **on foot** — a trophy is a reward for going inside, not for driving
+past — and pay 40 coins each, with a 1000-coin bonus for clearing all thirty-five.
+The HUD keeps a 🏆 count under the chaos score. One InstancedMesh, like the coins,
+built well after the tree stage so it costs nothing seeded.
+
+**To do** — street races vs AI cars on the road graph; day/night; stunt scoring
+and ramps; reviving the shelved prison minigame in some better form.
 
 ## How it's drawn
 Everything is `MeshToonMaterial` on a 3-step ramp, with black back-face shells for

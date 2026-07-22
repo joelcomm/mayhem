@@ -20,6 +20,8 @@
   #coins { position:absolute; left:124px; top:34px; font-size:34px; font-weight:900; color:var(--sun);
     -webkit-text-stroke:3px var(--ink); paint-order:stroke fill; letter-spacing:1px; }
   #coins small { font-size:17px; opacity:.9; }
+  #trophies { position:absolute; left:126px; top:104px; font-size:17px; font-weight:900;
+    color:#fff; -webkit-text-stroke:4px var(--ink); paint-order:stroke fill; letter-spacing:.5px; }
 
   #chaos { position:absolute; left:124px; top:74px; font-size:22px; font-weight:900; color:#ff8a3d;
     -webkit-text-stroke:3px var(--ink); paint-order:stroke fill; letter-spacing:1px; }
@@ -92,6 +94,19 @@
     margin:-2px 0 0 -2px; background:#fff; border-radius:50%;
     box-shadow:0 0 0 1.5px rgba(20,25,46,.7); }
 
+  #shop { position:absolute; left:50%; bottom:96px; transform:translateX(-50%); display:none;
+    padding:14px 20px 12px; background:rgba(20,25,46,.88); border:4px solid var(--ink);
+    border-radius:14px; color:#fff; min-width:420px; }
+  #shop b { font-size:20px; font-weight:900; color:var(--sun); letter-spacing:1px; }
+  #shop small { float:right; font-size:14px; font-weight:800; opacity:.85; padding-top:5px; }
+  #shop table { width:100%; border-collapse:collapse; margin-top:9px; font-size:14px; font-weight:800; }
+  #shop td { padding:3px 6px; white-space:nowrap; }
+  #shop td:first-child { color:var(--sun); width:18px; }
+  #shop td:nth-child(3) { opacity:.7; font-weight:700; }
+  #shop td:last-child { text-align:right; color:var(--sun); }
+  #shop tr.no td { opacity:.42; }
+  #shop tr.max td:last-child { color:#5ed85e; }
+
   #tank { position:absolute; left:50%; top:calc(50% + 28px); width:132px; height:11px;
     margin-left:-66px; border:3px solid var(--ink); border-radius:7px;
     background:rgba(255,255,255,.55); display:none; pointer-events:none; }
@@ -115,6 +130,7 @@
   <div id="portrait"><canvas width="128" height="128"></canvas></div>
   <div id="coins">0 <small>COINS</small></div>
   <div id="chaos">0 <small>CHAOS</small></div>
+  <div id="trophies">🏆 0/0</div>
   <div id="stars"></div>
   <div id="combo"><div class="m">x1</div><div class="p">0</div><div class="bar"><i></i></div></div>
   <div id="objective" class="panel">Explore <b>Maplewood</b> · grab the coins</div>
@@ -123,7 +139,7 @@
     <b>Mouse</b> look &nbsp; <b>Shift</b> run<br>
     <b>Space</b> handbrake / jump<br>
     <b>F</b> get in / out &nbsp; <b>C</b> camera<br>
-    <b>R</b> reset &nbsp; <b>M</b> map
+    <b>R</b> reset &nbsp; <b>M</b> map &nbsp; <b>H</b> horn
   </div>
   <div id="speedo"><div class="val">0</div><div class="unit">MPH</div></div>
   <div id="health"><i></i></div>
@@ -134,6 +150,7 @@
   <div id="round"><div class="clk"></div><div class="sc"></div></div>
   <div id="reticle"></div>
   <div id="tank"><i></i></div>
+  <div id="shop"></div>
 </div>
 
 <div id="loader">
@@ -4232,6 +4249,8 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyM') mapView = !mapView;
   if (e.code === 'KeyR') resetAll();
   if (e.code === 'KeyF' && !tryGate() && !tryDoor()) toggleVehicle();   // gate, then doorway, then car
+  if (e.code === 'KeyH') honk();
+  if (e.code.startsWith('Digit')) shopBuy(+e.code.slice(5) - 1);        // the garage menu
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
 
@@ -4262,7 +4281,13 @@ car.position.set(SPAWN.x, 0, SPAWN.z);
 let heading = SPAWN.heading, speed = 0, steerSmooth = 0, drift = 0;
 camYaw = SPAWN.heading;
 car.rotation.y = heading;
-const MAX_SPEED = 42, MAX_REV = -14, ACCEL = 32, BRAKE = 66, DRAG = 12;
+// Top speed and acceleration are raised by garage upgrades, so they are bindings
+// rather than constants; everything that reads them (steering authority, the FOV
+// stretch, the camera pull-back) is written as a fraction of MAX_SPEED and scales
+// with it for free.
+let MAX_SPEED = 42, ACCEL = 32;
+const MAX_REV = -14, BRAKE = 66, DRAG = 12;
+let armorMul = 1, hasHorn = false;
 let carHealth = 100, shake = 0, coinCount = 0, smokeT = 0, exhaustT = 0, carVY = 0, drowning = 0;
 
 const coinEl = document.getElementById('coins');
@@ -4276,7 +4301,7 @@ const toastEl = document.getElementById('toast');
 let toastT = 0;
 function toast(msg) { toastEl.textContent = msg; toastEl.classList.add('show'); toastT = 1.4; }
 
-function damageCar(n) { carHealth = Math.max(0, carHealth - n); if (carHealth <= 0) explode(); }
+function damageCar(n) { carHealth = Math.max(0, carHealth - n*armorMul); if (carHealth <= 0) explode(); }
 function explode() {
   missionEvent('carWrecked');
   burst(car.position.x, 1.2, car.position.z, 0xff8a2b, 16);
@@ -5044,9 +5069,13 @@ function updateChickens(dt) {
 
 // =================================================================
 //  TOWNSFOLK WITH SOMETHING TO SAY
+//  (GARAGE is declared here rather than with the shop below: the markers block
+//  runs at module-evaluation time and plants Gus on his forecourt, so the object
+//  has to exist before it — a later `const` would be in the temporal dead zone.)
 //  The floating "!" over a character, straight off the show's game — walk
 //  into the glow and they'll chat.
 // =================================================================
+const GARAGE = { x: 0, z: 0, open: false, ride: 0 };
 const MARKERS = [];
 {
   const c = document.createElement('canvas'); c.width = 128; c.height = 160;
@@ -5119,6 +5148,28 @@ const MARKERS = [];
   //   'WARDEN NORRIS', "They're going over the walls! Grab the soaker and stop 'em.", 'soak');
   marker(SPAWN.x - 32, SPAWN.z - (ROAD_HW + 3.5),
     'AXEL', 'One lap of the ring, through the mountain. Beat the clock.', 'race');
+
+  // ---- Gus, on his forecourt: not a job giver, a shop ----
+  {
+    const s = clearSpot(SPAWN.x + 14, SPAWN.z + (ROAD_HW + 8));
+    if (s) {
+      GARAGE.x = s.x; GARAGE.z = s.z;
+      const g3 = buildPerson({ skin: 0xffd90f, hair: 0x6b4a2f, shirt: 0x2f5fb0,
+        pants: 0x3a3f4a, shoe: 0x14192e, style: 'cap' });
+      g3.position.set(s.x, 0, s.z); scene.add(g3);
+      GARAGE.fig = g3;
+      const disc = new THREE.Mesh(discGeo, new THREE.MeshBasicMaterial(
+        { color: 0x5ed85e, transparent: true, opacity: 0.65, depthWrite: false }));
+      disc.position.set(s.x, 0.07, s.z); disc.scale.setScalar(1.5); scene.add(disc);
+      const bd = signTexture('GUS\'S GARAGE', '#2f3550', '#ffd23b', 512, 128);
+      const brd = new THREE.Mesh(new THREE.PlaneGeometry(9, 2.25),
+        new THREE.MeshBasicMaterial({ map: bd, transparent: true, side: THREE.DoubleSide }));
+      // faces -z, the way the forecourt is approached from the street; without this
+      // the DoubleSide plane shows you its back and the name reads mirrored
+      brd.position.set(s.x, 5.2, s.z); brd.rotation.y = Math.PI; scene.add(brd);
+      GARAGE.board = brd;
+    }
+  }
 }
 let markerBob = 0;
 function updateMarkers(dt, sub) {
@@ -5146,6 +5197,157 @@ function updateMarkers(dt, sub) {
       }
     }
   }
+}
+
+// =================================================================
+//  LOST PROPERTY
+//  One hidden trophy in every walk-in room. Thirty-five rooms were furnished and
+//  staffed and then had no reason to exist; a trophy each turns the whole high
+//  street into a collection. Built here, well after the tree stage, as a single
+//  InstancedMesh like the coins — so it costs one draw call and no seeded randoms.
+// =================================================================
+const trophies = [];
+{
+  const geo = merge([
+    baked(new THREE.CylinderGeometry(0.30, 0.34, 0.10, 8), 0, 0.05, 0),   // plinth
+    baked(new THREE.CylinderGeometry(0.07, 0.07, 0.22, 6), 0, 0.20, 0),   // stem
+    baked(new THREE.SphereGeometry(0.23, 10, 8).scale(1, 0.85, 1), 0, 0.48, 0),
+  ]);
+  const mesh = instanced(geo, toon(0xffd23b), Math.max(1, ROOMS.length), false);
+  for (const R of ROOMS) {
+    const I = R.inner;
+    // tuck it away from the doorway, and off anything solid the fit-out registered
+    const spots = [];
+    for (const fx of [0.16, 0.5, 0.84]) for (const fz of [0.16, 0.5, 0.84])
+      spots.push({ x: I.x0 + (I.x1 - I.x0)*fx, z: I.z0 + (I.z1 - I.z0)*fz });
+    const door = R.door;
+    let best = null, bd = -1;
+    for (const s of spots) {
+      const solid = (R.walls || []).some(c =>
+        s.x > c.minX - 0.5 && s.x < c.maxX + 0.5 && s.z > c.minZ - 0.5 && s.z < c.maxZ + 0.5);
+      if (solid) continue;
+      const d = door ? Math.hypot(s.x - door.x, s.z - door.z) : 1;   // the far corner reads as "hidden"
+      if (d > bd) { bd = d; best = s; }
+    }
+    if (best) trophies.push({ x: best.x, z: best.z, got: false, i: trophies.length, room: R.name });
+  }
+  mesh.count = trophies.length;
+  scene.add(mesh);
+  addWithOutline(mesh, 0.04);
+  var trophyMesh = mesh;
+}
+let trophyCount = 0, trophySpin = 0;
+const trophyEl = document.getElementById('trophies');
+function updateTrophies(dt, sub) {
+  if (!trophies.length) return;
+  trophySpin += dt*1.8;
+  for (const t of trophies) {
+    if (t.got) { dummy.position.set(t.x, -20, t.z); dummy.scale.setScalar(0); }
+    else {
+      dummy.position.set(t.x, 0.95 + Math.sin(trophySpin + t.i)*0.12, t.z);
+      dummy.rotation.set(0, trophySpin*1.2, 0); dummy.scale.setScalar(1);
+      // on foot only: a trophy is a reward for walking in, not for driving past
+      if (mode === 'foot') {
+        const dx = t.x - player.position.x, dz = t.z - player.position.z;
+        if (dx*dx + dz*dz < 2.6) {
+          t.got = true; trophyCount++;
+          addCoins(40); coinSfx();
+          burst(t.x, 1.2, t.z, 0xffd23b, 14);
+          const left = trophies.length - trophyCount;
+          banner('TROPHY ' + trophyCount + '/' + trophies.length,
+            left ? '+40 coins · ' + left + ' still out there' : 'every room cleared!');
+          if (!left) { addCoins(1000); toast('COMPLETIONIST! +1000'); }
+        }
+      }
+    }
+    dummy.updateMatrix(); trophyMesh.setMatrixAt(t.i, dummy.matrix);
+  }
+  trophyMesh.instanceMatrix.needsUpdate = true;
+  trophyEl.textContent = '🏆 ' + trophyCount + '/' + trophies.length;
+}
+
+// =================================================================
+//  GUS'S GARAGE
+//  Somewhere to spend the coins. Walk into the forecourt and a keyboard menu
+//  opens: number keys buy, and every purchase changes how the car actually
+//  drives. Deliberately not a mission — the shop is always open, never blocks
+//  a job, and shares no state with MI.
+// =================================================================
+const RIDES = ['convert', 'sedan', 'wagon', 'compact', 'truck'];
+const RIDE_NAMES = ['the ragtop', 'a saloon', 'the estate', 'a runabout', 'the pickup'];
+const SHOP = [
+  { key: 'engine', name: 'ENGINE', lvl: 0, max: 3, cost: [150, 400, 900],
+    blurb: ['stock', 'tuned', 'blown', 'insane'],
+    apply() { MAX_SPEED = 42 + this.lvl*7; ACCEL = 32 + this.lvl*6; } },
+  { key: 'armor', name: 'ARMOR', lvl: 0, max: 3, cost: [120, 320, 700],
+    blurb: ['paper', 'plated', 'reinforced', 'tank'],
+    apply() { armorMul = [1, 0.72, 0.5, 0.32][this.lvl]; } },
+  { key: 'horn', name: 'AIR HORN', lvl: 0, max: 1, cost: [200],
+    blurb: ['none', 'fitted — press H'],
+    apply() { hasHorn = this.lvl > 0; } },
+  { key: 'ride', name: 'NEW RIDE', lvl: 0, max: 99, cost: [250],
+    blurb: ['—'],
+    apply() { GARAGE.ride = (GARAGE.ride + 1) % RIDES.length;
+              setPlayerCar(RIDES[GARAGE.ride], rpick(CAR_COLS)); } },
+];
+const shopEl = document.getElementById('shop');
+const priceOf = it => it.key === 'ride' ? 250 : it.cost[it.lvl];
+function shopBuy(n) {
+  if (!GARAGE.open) return false;
+  const it = SHOP[n]; if (!it) return false;
+  if (it.lvl >= it.max) { toast('MAXED OUT'); return true; }
+  const p = priceOf(it);
+  if (coinCount < p) { toast('NOT ENOUGH COINS'); return true; }
+  addCoins(-p);
+  if (it.key !== 'ride') it.lvl++;
+  it.apply();
+  coinSfx();
+  toast(it.key === 'ride' ? 'NICE — ' + RIDE_NAMES[GARAGE.ride].toUpperCase() : it.name + ' UP!');
+  burst(player.position.x, 1.4, player.position.z, 0xffd23b, 12);
+  drawShop();
+  return true;
+}
+function drawShop() {
+  let h = '<b>GUS\'S GARAGE</b><small>' + coinCount + ' coins</small><table>';
+  SHOP.forEach((it, i) => {
+    const maxed = it.lvl >= it.max;
+    const p = priceOf(it);
+    const state = it.key === 'ride' ? RIDE_NAMES[GARAGE.ride]
+                : maxed ? it.blurb[it.lvl] : it.blurb[it.lvl] + ' → ' + it.blurb[it.lvl+1];
+    const afford = !maxed && coinCount >= p;
+    h += '<tr class="' + (maxed ? 'max' : afford ? 'ok' : 'no') + '"><td>' + (i+1) +
+      '</td><td>' + it.name + '</td><td>' + state + '</td><td>' +
+      (maxed ? 'MAX' : p) + '</td></tr>';
+  });
+  shopEl.innerHTML = h + '</table>';
+}
+function updateGarage() {
+  const near = mode === 'foot' && !playerRag.active &&
+    (player.position.x - GARAGE.x)**2 + (player.position.z - GARAGE.z)**2 < 90;
+  if (near !== GARAGE.open) { GARAGE.open = near; shopEl.style.display = near ? 'block' : 'none'; }
+  if (near) drawShop();
+}
+// the horn: everyone in earshot bolts, and the flock loses its mind
+let hornCd = 0;
+function honk() {
+  if (!hasHorn || hornCd > 0) return;
+  hornCd = 1.2;
+  const sub = mode === 'car' ? car.position : player.position;
+  if (sirenCtx) { const t = sirenCtx.currentTime;
+    tone(196, t, 0.34, 0.16, 'square'); tone(262, t + 0.02, 0.32, 0.12, 'square');
+    tone(392, t + 0.05, 0.26, 0.07, 'square'); }
+  for (const p of peds) {
+    if (p.rag.active) continue;
+    const dx = p.g.position.x - sub.x, dz = p.g.position.z - sub.z;
+    if (dx*dx + dz*dz < 900) setFlee(p, sub.x, sub.z);
+  }
+  for (const c of chickens) {
+    if (c.dead > 0) continue;
+    const dx = c.x - sub.x, dz = c.z - sub.z;
+    if (dx*dx + dz*dz < 900) { c.fled = 1.4; c.speed = 8; c.yaw = Math.atan2(dx, dz) + rnd(-0.4, 0.4); }
+  }
+  burst(sub.x, 1.6, sub.z, 0xe8eaf0, 8);
+  chaosHit(3);
 }
 
 // =================================================================
@@ -6289,7 +6491,10 @@ function animate() {
   updateChickens(dt);
   updateProps(dt);
   updateCoins(dt, sub);
+  updateTrophies(dt, sub);
   updateMarkers(dt, sub);
+  updateGarage();
+  if (hornCd > 0) hornCd -= dt;
   updateMissions(dt, sub);
   updateParticles(dt);
   renderCrowd(sub);
