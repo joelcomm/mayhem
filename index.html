@@ -2777,9 +2777,17 @@ rngNeutral(() => {
       }
       if (inBuilding) continue;
       const len = Math.hypot(FSTEP, zb-za) + 0.2, yaw = Math.atan2(FSTEP, zb-za);
-      fence.push(baked(BOX(0.13, 0.13, len), mx, 0.52, mz, 0, yaw));
-      fence.push(baked(BOX(0.13, 0.13, len), mx, 0.96, mz, 0, yaw));
-      fpost.push(baked(BOX(0.2, 1.08, 0.2), x, 0.54, za));
+      // Build first, discard after: the geometry has to be created either way or the
+      // seeded stream shifts and the whole town re-rolls (same lesson as lastPut).
+      const g1 = baked(BOX(0.13, 0.13, len), mx, 0.52, mz, 0, yaw);
+      const g2 = baked(BOX(0.13, 0.13, len), mx, 0.96, mz, 0, yaw);
+      const g3 = baked(BOX(0.2, 1.08, 0.2), x, 0.54, za);
+      // The midpoint test above is not enough: a 5 m chunk can straddle a kerb with
+      // its centre on the grass, which laid rails straight across the crossings. The
+      // WHOLE chunk has to clear the carriageway — same lesson the building test learned.
+      if (onRoad(x, za, 1.4) || onRoad(x2, zb, 1.4) || onRoad(mx, mz, 1.4)) continue;
+      fence.push(g1, g2);
+      fpost.push(g3);
       colliders.push({ minX: x - 0.3, maxX: x2 + 0.3,
                        minZ: Math.min(za, zb) - 0.3, maxZ: Math.max(za, zb) + 0.3 });
     }
@@ -3386,6 +3394,20 @@ function cityAudit(tag) {
 }
 cityAudit();
 
+// Road-surface sweep. carriagewayBlocked only samples the centreline against a car's
+// width, so anything parked near the kerb — a fence chunk straddling a crossing, a
+// stray post — slips past it and reads in-game as a bump or a rail lying on the tarmac.
+// This walks every solid box instead and asks whether its centre is on a carriageway.
+{
+  const bad = [];
+  for (const c of colliders) {
+    const cx = (c.minX + c.maxX)/2, cz = (c.minZ + c.maxZ)/2;
+    if (cx > 1e8) continue;                       // parked-away door blocks
+    if (onRoad(cx, cz, -0.6)) bad.push([Math.round(cx), Math.round(cz)]);
+  }
+  console.log('solids on the carriageway:', bad.length, JSON.stringify(bad.slice(0, 8)));
+}
+
 // Only now do the bridge railings become solid. Their chunks were collected during
 // the river pass, which runs before the trees, hedges, props and coins are filtered —
 // pushing the colliders up there would have re-counted every scatter filter and moved
@@ -3607,6 +3629,14 @@ function updateGaps() {
     }
     if (mode === 'car') look(car.position.x, car.position.z);
     const rx = -a.fz, rz = a.fx;
+    // The player on foot is not in pedGrid, so traffic used to shove you down the
+    // road instead of braking. Give yourself the same yield every townsperson gets —
+    // that is what makes stepping out in front of a car a carjack rather than a mugging.
+    if (mode === 'foot' && !playerRag.active) {
+      const dx = player.position.x - a.x, dz = player.position.z - a.z;
+      const fwd = dx*a.fx + dz*a.fz;
+      if (fwd > 0 && fwd < 17 && Math.abs(dx*rx + dz*rz) < 2.4) a.gap = Math.min(a.gap, fwd + 3.2);
+    }
     for (let ox=-1; ox<=1; ox++) for (let oz=-1; oz<=1; oz++) {
       const b = pedGrid.get((gx+ox)+','+(gz+oz)); if (!b) continue;
       for (const p of b) {
@@ -3975,11 +4005,22 @@ function pedPlace(p) {
   p.g.position.y = 0;
   p.g.rotation.y = Math.atan2(d.dx, d.dz);
 }
+// Nobody walks the ring highway: it has no pavement, and a pedestrian on the hard
+// shoulder of a 40 m/s road is both a hazard to the traffic sim and plainly absurd.
+// pickNext is shared with cars and happily turns onto a spur, which is how walkers
+// were ending up out there.
+function pedNext(node, cur, dx, dz) {
+  const n = pickNext(node, cur, dx, dz);
+  if (!NET.edges[n].hw) return n;
+  const town = NET.nodes[node].e.filter(ei => !NET.edges[ei].hw && ei !== cur);
+  if (town.length) return town[(Math.random()*town.length)|0];
+  return cur;                                    // highway-only junction: about-face
+}
 function attachPed(p) {
   if (p.stroll) { p.stroll = null; strollers--; }
   const ni = nearestNode(p.g.position.x, p.g.position.z); if (ni < 0) return;
   let opts = NET.nodes[ni].e.filter(ei => !NET.edges[ei].hw);
-  if (!opts.length) opts = NET.nodes[ni].e;
+  if (!opts.length) opts = WALKABLE;              // stranded on the ring — rejoin the town
   p.ei = opts[(Math.random()*opts.length)|0];
   p.from = ni;
   // rejoin the lane at the point nearest where they are, not at the junction — snapping
@@ -4112,7 +4153,7 @@ function updatePeds(dt) {
         continue;
       }
       p.dist -= e.len;
-      const next = pickNext(d.to, p.ei, d.dx, d.dz);
+      const next = pedNext(d.to, p.ei, d.dx, d.dz);
       p.from = d.to; p.ei = next; e = NET.edges[next];
       if (p.dist >= e.len) p.dist = 0;
       // step out onto the zebra?
@@ -5354,7 +5395,13 @@ function updateMarkers(dt, sub) {
     const dx = m.x - sub.x, dz = m.z - sub.z;
     if (dx*dx + dz*dz < 16) {
       if (m.mission) {
-        if (!MI) startMission(m.mission, m);
+        // jobs that are all about driving refuse to start while you are on foot,
+        // rather than handing you a delivery you cannot possibly make
+        const def = MISSION_DEFS[m.mission];
+        if (def && def.needsCar && mode !== 'car') {
+          m.nagT = (m.nagT || 0) - dt;
+          if (m.nagT <= 0) { toast('YOU NEED TO BE IN A CAR'); m.nagT = 3; }
+        } else if (!MI) startMission(m.mission, m);
       } else {
         m.done = true;
         m.spr.visible = false; m.disc.visible = false;
@@ -5393,9 +5440,11 @@ function updateMarkers(dt, sub) {
   if (big && big.r.x1 - big.r.x0 > 46 && big.r.z1 - big.r.z0 > 46) {
     const cx = (big.r.x0 + big.r.x1)/2, cz = (big.r.z0 + big.r.z1)/2;
     const mat = new THREE.MeshToonMaterial({ color: 0xe8792b, gradientMap: RAMP, side: THREE.DoubleSide });
+    // steeper than they look sensible: a shallow wedge just lifts the car, a ~22-25°
+    // kicker throws it. Length is short relative to height for exactly that reason.
     const specs = [                               // yaw, distance out, width, length, height
-      [0,          20, 9, 14, 3.4], [Math.PI,   20, 9, 14, 3.4],
-      [Math.PI/2,  20, 8, 16, 4.6], [-Math.PI/2, 20, 8, 12, 2.6],
+      [0,          20, 9, 11, 4.4], [Math.PI,   20, 9, 11, 4.4],
+      [Math.PI/2,  20, 8, 12, 5.6], [-Math.PI/2, 20, 8, 10, 3.8],
     ];
     for (const [yaw, off, w, len, h] of specs) {
       const ux = Math.sin(yaw), uz = Math.cos(yaw);
@@ -6196,6 +6245,7 @@ const TAXI_CHAT = ["RITA: Faster! I'm late!", 'RITA: My ex owns this street. Flo
 
 const MISSION_DEFS = {
   donut: {
+    needsCar: true,
     title: 'DONUT RUN', late: 'the donuts went cold',
     start(m) {
       const b = BLOCKS.find(b2 => b2.zone === 'plant');
@@ -6208,6 +6258,7 @@ const MISSION_DEFS = {
     },
   },
   taxi: {
+    needsCar: true,
     title: 'FARE GAME', late: 'Rita got out and walked',
     start(m) {
       const g = m.giver;
@@ -6271,6 +6322,7 @@ const MISSION_DEFS = {
     hud(m) { return m.stage ? 'kick the flock · <b>' + (m.data.n || 0) + '/7</b>' : null; },
   },
   derby: {
+    needsCar: true,
     title: 'DEMOLITION DERBY', late: 'the crowd went home',
     start(m) {
       m.timed = true; m.t = driveTime(m.giver.x, m.giver.z, STADIUM.cx, STADIUM.cz, 13) + 25;
@@ -6336,6 +6388,7 @@ const MISSION_DEFS = {
     },
   },
   street: {
+    needsCar: true,
     title: 'BACK ALLEY DASH', late: 'the grid left without you',
     start(m) {
       const cps = townCircuit();
@@ -6389,6 +6442,7 @@ const MISSION_DEFS = {
     },
   },
   race: {
+    needsCar: true,
     title: 'RING RUSH',
     start(m) {
       const cps = ringCheckpoints();

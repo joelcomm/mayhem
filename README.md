@@ -157,6 +157,17 @@ giver, The Rusty Mug's bar) resolves its position at runtime.
 and lawns out front; sheds, pools, trampolines, swing sets, barbecues and hedgerows out back.
 
 ### Keeping the map clean
+A second build-time sweep, **`solids on the carriageway`, must print 0**. `cityAudit`'s
+blockade test only samples street *centrelines* against a car's width, so anything
+sitting near a kerb slips past it and shows up in-game as a bump or a rail lying
+across a crossing. This one walks every collider instead and asks whether its centre
+is on tarmac. It is what caught the riverside fence: that fence tested `onRoad` at
+each chunk's **midpoint only**, so a 5 m chunk could sit centred on the grass with
+one end out across the zebra. It now tests both ends and the middle — and, so the
+fix costs nothing, it still *builds* every chunk's geometry and discards the bad
+ones afterwards, because skipping the `baked()` calls outright would shift the
+seeded stream and re-roll the whole town.
+
 `cityAudit()` runs at build time and **must print all zeros**. It checks, over the finished
 town: buildings overlapping each other, scenery inside buildings, coins sealed inside
 buildings, dead-end streets, houses crowding the shop frontages, and — by driving every
@@ -261,7 +272,9 @@ the thing that welds the job loop onto the chaos loop instead of competing with 
   highway (highway nodes filtered to the outer loop, sorted by angle), one lap
   through the tunnel vs a par from the octagon perimeter; session best tracked.
 
-Failure is wired through `missionEvent()`: wrecking your car, getting busted, or
+Jobs that are about driving carry `needsCar` and **refuse to start while you are on
+foot** ("YOU NEED TO BE IN A CAR") rather than handing you a timed delivery you have
+no way of making. Failure is wired through `missionEvent()`: wrecking your car, getting busted, or
 R/reset all fail the active job cleanly — and then the **retry guide** takes over:
 the giver re-arms in 2.5 s and the arrow, beacon, objective line ("TRY AGAIN ·
 back to …") and radar blip all lead back to them until you're close or you start
@@ -374,7 +387,14 @@ are bucketed by colour and merged, so the whole town is a few dozen draw calls.
 
 ## Simulation
 - Traffic drives a road graph built from the grid, obeys the signals, queues, and
-  **yields to pedestrians** (judged by lateral offset, not an angular cone)
+  **yields to pedestrians** (judged by lateral offset, not an angular cone) — and
+  that includes **you on foot**. The player isn't in `pedGrid`, so for a long time
+  cars simply shoved you down the road instead of braking; stepping out in front of
+  one is now a carjack rather than a mugging
+- **Nobody walks the ring highway.** `pickNext` is shared with the cars and happily
+  turns a walker onto a spur, so peds route through `pedNext`, which refuses highway
+  edges and turns around at a highway-only junction. `attachPed` falls back to the
+  town street list rather than whatever edge is nearest
 - Pedestrians walk sidewalk lanes, round corners, and cross at the painted zebras
   when the signal holds the traffic they'd step in front of. **Nobody walks single
   file**: each person owns a lateral lane across the pavement width (`p.lat`, derived
