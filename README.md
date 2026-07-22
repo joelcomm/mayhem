@@ -676,6 +676,16 @@ are bucketed by colour and merged, so the whole town is a few dozen draw calls.
   bulging metres onto the carriageway. Short chunks hug the rail; the
   `carriagewayBlocked` audit is the proof it worked. They are pushed to `colliders`
   directly, not through `addBox`, so the radar and the overlap audit ignore them.
+- **Every part of a shopfront that spans the frontage has to be dropped when the shop
+  becomes a walk-in**, not just the body and the glazing. The mullions and the kick
+  plate were left behind by the storefront-trim pass, and since the centre mullion sits
+  at the middle of the frontage — where the doorway usually ends up — most walk-in shops
+  had a dark bar standing in the open doorway and a sill across its foot, visible from
+  inside and out. They join `drop` now and are rebuilt in the deferred pass around the
+  opening: mullions skipped where `|x - q| <= dw/2`, the kick plate cut into two runs
+  like the glazing band above it. The rule for anything added to `makeShop` in future:
+  if it crosses the full width of the front face, it needs a `drop` entry and a
+  door-aware rebuild.
 - **A transparent material must not write depth.** The ink pass is an edge detect
   over the scene's depth buffer, so anything that stamps itself into depth gets an
   outline — including the quad of a free-standing billboard sign, which comes back as

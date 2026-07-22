@@ -955,10 +955,16 @@ function makeShop(cx, cz, fx, fz, w, d, name, bodyCol, signCol) {
   put(TRIM,     L(baked(BOX(w*0.92, 0.34, 0.28), 0, 3.88, front + 1.85)));     // valance
   for (const s of [-1, 1])
     put(TRIM, L(baked(BOX(0.16, 1.5, 0.16), s*w*0.42, 3.6, front + 1.7, 0.5)));  // brackets
-  // mullions across the glazing band, so the shopfront isn't one blue slab
-  for (let k = -1; k <= 1; k++)
+  // Mullions across the glazing band, so the shopfront isn't one blue slab, and a kick
+  // plate along the bottom. Both are dropped for a walk-in and rebuilt around the
+  // doorway in the deferred pass: they run the full width of the frontage, and the
+  // centre mullion in particular stands dead in the middle of the opening.
+  for (let k = -1; k <= 1; k++) {
     put(0x2f3550, L(baked(BOX(0.16, 3.0, 0.3), k*w*0.22, 2.05, front + 0.1)));
+    if (walkIn) drop.push(lastPut(0x2f3550));
+  }
   put(0x5a5346, L(baked(BOX(w*0.88, 0.4, 0.34), 0, 0.2, front + 0.08)));       // kick plate
+  if (walkIn) drop.push(lastPut(0x5a5346));
   // rooftop clutter: plant boxes and a vent give the skyline something to bite on
   put(0x8b929a, L(baked(BOX(w*0.24, 1.1, d*0.3), -w*0.22, h + 1.2, -d*0.1)));
   put(0x6f7178, L(baked(new THREE.CylinderGeometry(0.42, 0.42, 1.5, 14), w*0.26, h + 1.4, d*0.12)));
@@ -2260,6 +2266,17 @@ rngNeutral(() => {
       if (rw > 0.3) put(0x2f3550, L(baked(BOX(rw, 3.4, 0.2),  b.w*0.43 - rw/2, 2.0, b.front)));
       if (gl > 0.3) put(GLASS, L(baked(BOX(gl, 2.9, 0.26), -b.w*0.40 + gl/2, 2.05, b.front+0.05)));
       if (gr > 0.3) put(GLASS, L(baked(BOX(gr, 2.9, 0.26),  b.w*0.40 - gr/2, 2.05, b.front+0.05)));
+      // mullions, minus any that would stand in the opening — the centre one is at the
+      // middle of the frontage and the doorway usually is too
+      for (let k = -1; k <= 1; k++) {
+        const mx = k*b.w*0.22;
+        if (Math.abs(mx - q) > b.dw/2 + 0.1)
+          put(0x2f3550, L(baked(BOX(0.16, 3.0, 0.3), mx, 2.05, b.front + 0.1)));
+      }
+      // and the kick plate in two runs, like the band above it
+      const kl = (q - b.dw/2) + b.w*0.44, kr = b.w*0.44 - (q + b.dw/2);
+      if (kl > 0.3) put(0x5a5346, L(baked(BOX(kl, 0.4, 0.34), -b.w*0.44 + kl/2, 0.2, b.front + 0.08)));
+      if (kr > 0.3) put(0x5a5346, L(baked(BOX(kr, 0.4, 0.34),  b.w*0.44 - kr/2, 0.2, b.front + 0.08)));
     }
     const walls = shellColliders(r, b.fx, b.fz, b.dw, dx, dz);
     const R = addRoom(b.name, r, b.cx, b.cz, b.fx, b.fz, b.dw, walls);
