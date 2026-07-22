@@ -1,8 +1,8 @@
 # Maplewood Mayhem
 
 A cartoon open-world driving game in the spirit of *The Simpsons: Hit & Run*.
-Open `index.html` — it's one self-contained file (three.js loads from a CDN,
-so the first load needs an internet connection).
+`docs/index.html` is the built game — one self-contained file with three.js inlined,
+so it runs from a web server or straight off `file://`, online or not.
 
 ## Running it
 
@@ -41,6 +41,7 @@ that cost the most round trips.
 | F | enter a building at its door · otherwise get in / out of a car — near stopped traffic it borrows theirs |
 | C | cycle camera distance |
 | R | reset (also clears heat) |
+| N | mute / unmute (or the 🔊 button, top right) |
 | M | map view — pull back over the whole town |
 | H | air horn (once bought from the garage) |
 | 1-4 | buy, while standing on Gus's forecourt |
@@ -58,7 +59,9 @@ decide how long to keep pushing before you run for it.
 
 The crowd is a real mix: mostly the classic yellow with tan and brown townsfolk
 among them, nine hairstyles (ball caps, afros, mohawks, long hair beside the
-originals), a wide wardrobe, and varied heights and builds. On foot the crowd has
+originals), a wide wardrobe, and varied heights and builds — **width and depth vary
+independently**, because a town where everyone is the same thickness reads as clones
+however much the heights differ, and the side-on silhouette is what gives that away. On foot the crowd has
 substance: people shove past each other rather than overlapping,
 and you can't walk through them — you shoulder past. **Barge someone and they square up**
 and chase you for a few seconds, swinging; a punch knocks you down. **Left click kicks**:
@@ -81,6 +84,17 @@ beeps and booms at the prison — and the townsfolk **speak**: kicks, car hits a
 trigger a speech-synthesis "Hey!", "Ouch!", "Cut it out!" and friends
 (`sayOuch()`, rate-limited, high pitch, zero assets — degrades to silence where
 `speechSynthesis` is unavailable).
+
+**Mute** is the 🔊 button top right, or **N**. Everything audible routes through one
+master gain rather than straight to the destination, which makes mute a single number
+instead of a flag every sound site has to remember to check — and killing the gain
+leaves the scheduled notes and the engine oscillator running, so unmuting is instant
+rather than a rebuild. The one thing that gain cannot reach is `speechSynthesis`: it is
+its own pipe, so `sayOuch` checks the flag directly and the toggle cancels anything
+mid-word. The choice is remembered in `localStorage` — someone who plays with the sound
+off wants it off next time too. The HUD is `pointer-events:none` so clicks fall through
+to the canvas (look, kick); the button is the one element that opts back in, and it
+stops the event so pressing it doesn't also throw a kick.
 
 **The arrest is made on foot.** Ramming damages your car but never busts you. When a
 pursuer closes on a slow or stopped target it parks, an officer steps out ("PULL OVER!")
@@ -450,6 +464,28 @@ by the device ratio, so a line is the same weight on a retina display as on a pl
 one. The whole thing is live under **Ink outlines** in the G panel, including an
 on/off toggle for A/B and a `show buffer` view that dumps linearised depth or the raw
 edge mask to the screen — how the sub-texel bug above was found.
+
+**The characters.** The crowd is ~20 InstancedMeshes, one per body part, so the cheap
+place to add detail is *inside the existing geometry* — a merge costs vertices once at
+build time and nothing per frame, while a new part costs a draw call across up to 1,400
+people. So: the skull gained ears and a **neck**, and the neck is the one that does the
+work — without it the head visibly floated above the collar. The torso gained a collar
+band, a shoulder shelf and a shirt hem overhanging the trousers; all three are boxes,
+because the torso is scaled on X per person and anything round in it squashes into an
+ellipse. Two parts were worth their own draw call: **eyebrows** (hair-coloured — two
+small wedges are the cheapest expression in the game; without them a face is two eyes
+and a mouth and the whole crowd reads blank) and **hands**, which used to be merged into
+the sleeve and were therefore the colour of their owner's shirt. Both hands share one
+mesh at twice the capacity — a left and a right hand are the same object with different
+matrices, so two draw calls would buy nothing — and they are drawn with the arm's own
+matrix, so they swing for free. The **pupils wander**: same mesh, parked a few
+millimetres off centre on each person's own phase, which costs nothing and stops
+fourteen hundred people staring dead ahead in unison. The hero is built from the same
+geometry, so he doesn't look like a visitor from another game standing next to a
+townsperson.
+
+*(One trap: the skull must stay a true sphere at r 0.28. Egg-shaping it by 6% in Y
+pushed the crown through all nine hairstyles, which are cut to fit that radius.)*
 
 **The detail pass.** Every primitive that was meant to be round now is: cylinders and
 spheres swept up to 16-28 segments, cones to 16 — *except* cones with four or fewer

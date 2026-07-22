@@ -49,6 +49,16 @@
     text-align:right; opacity:.9; transition:opacity .5s; }
   #controls b { color:var(--sun); }
 
+  /* The HUD is pointer-events:none so clicks fall through to the canvas (look, kick).
+     This is the one thing you can actually press, so it opts back in. */
+  #mute { position:absolute; right:18px; top:172px; width:46px; height:46px; padding:0;
+    pointer-events:auto; cursor:pointer; font-size:21px; line-height:1; color:#fff;
+    font-family:inherit; -webkit-tap-highlight-color:transparent;
+    transition:background .15s, transform .1s; }
+  #mute:hover { background:rgba(24,32,60,.85); }
+  #mute:active { transform:translateY(2px); box-shadow:0 2px 0 rgba(0,0,0,.28); }
+  #mute.off { opacity:.72; }
+
   #speedo { position:absolute; right:24px; bottom:210px; text-align:right; }
   #speedo .val { font-size:52px; font-weight:900; -webkit-text-stroke:4px var(--ink); paint-order:stroke fill; line-height:.95; }
   #speedo .unit { font-size:13px; letter-spacing:4px; opacity:.85; -webkit-text-stroke:2px var(--ink); paint-order:stroke fill; }
@@ -139,8 +149,11 @@
     <b>Mouse</b> look &nbsp; <b>Shift</b> run<br>
     <b>Space</b> handbrake / jump<br>
     <b>F</b> get in / out &nbsp; <b>C</b> camera<br>
-    <b>R</b> reset &nbsp; <b>M</b> map &nbsp; <b>H</b> horn
+    <b>R</b> reset &nbsp; <b>M</b> map &nbsp; <b>H</b> horn<br>
+    <b>N</b> mute
   </div>
+  <button id="mute" class="panel" type="button" title="Mute sound (N)"
+    aria-label="Mute sound" aria-pressed="false">🔊</button>
   <div id="speedo"><div class="val">0</div><div class="unit">MPH</div></div>
   <div id="health"><i></i></div>
   <div id="radar"><canvas width="154" height="154"></canvas></div>

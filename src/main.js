@@ -3736,6 +3736,9 @@ function pickLook() {
   const hair = style === 'tall' ? BLUE_HAIR : style === 'cap' ? rpick(CAP_COLS) : rpick(HAIR);
   return {
     shoulder: female ? rnd(0.44, 0.55) : rnd(0.56, 0.68),
+    // depth, independent of width: a town of one build reads as clones however much
+    // the heights vary, because the silhouette from the side never changes
+    build: rnd(0.86, 1.28),
     tall: rnd(0.85, 1.15), style,
     skin:new THREE.Color(rpick(SKIN)), hair:new THREE.Color(hair),
     shirt:new THREE.Color(rpick(SHIRT)), pants:new THREE.Color(rpick(PANTS)),
@@ -3796,29 +3799,59 @@ const hairMohawk = merge(
   [[-0.18, 0.22], [-0.06, 0.3], [0.06, 0.3], [0.18, 0.22]].map(([sz, h]) =>
     baked(BOX(0.09, h, 0.15), 0, 1.95 + h/2 - 0.1, sz - 0.02))
 );
-// a rounded toe on the shoe, and a hand on the arm: two small merges that stop the
-// crowd reading as a pile of rectangles once you are close enough to see them
+// a rounded toe on the shoe: a small merge that stops the crowd reading as a pile of
+// rectangles once you are close enough to see them
 const shoeGeo = merge([
   BOX(0.25, 0.13, 0.36).translate(0, -0.87, 0.07),
   baked(new THREE.SphereGeometry(0.125, 12, 8).scale(1, 0.62, 1), 0, -0.87, 0.24),
 ]);
-const armGeo = merge([
-  BOX(0.16, 0.58, 0.16).translate(0, -0.29, 0),
-  baked(new THREE.SphereGeometry(0.105, 12, 9), 0, -0.61, 0),
+// The arm is sleeve only. The hand used to be merged into it, which meant every hand
+// in town was the colour of its owner's shirt — invisible at a distance, glaring the
+// moment you shoulder past someone. It is its own mesh now, drawn with the arm's
+// matrix (so it swings for free) but coloured skin.
+const armGeo = BOX(0.16, 0.58, 0.16).translate(0, -0.29, 0);
+const handGeo = baked(new THREE.SphereGeometry(0.105, 12, 9).scale(1, 0.92, 0.8), 0, -0.62, 0);
+// The head is what every camera angle puts front and centre, so it carries the most
+// detail: an egg rather than a ball, ears, and a neck. The neck is the one that does
+// the work — without it the head visibly floats a centimetre above the collar.
+// (The skull stays a true sphere at r 0.28. Egg-shaping it by 6% in Y pushed the crown
+// through every one of the nine hairstyles, which are all cut to fit this radius.)
+const headGeo = merge([
+  baked(new THREE.SphereGeometry(0.28, 22, 16), 0, 1.72, 0),
+  baked(new THREE.SphereGeometry(0.085, 12, 9).scale(0.5, 1.05, 0.85), -0.272, 1.70, -0.015),
+  baked(new THREE.SphereGeometry(0.085, 12, 9).scale(0.5, 1.05, 0.85),  0.272, 1.70, -0.015),
+  baked(new THREE.CylinderGeometry(0.115, 0.14, 0.18, 14), 0, 1.43, -0.01),
+]);
+// Eyebrows, hair-coloured, sitting on the upper curve of the eyeballs. Two small
+// wedges are the cheapest expression in the game: without them a face is two eyes and
+// a mouth, and the whole crowd reads blank.
+const browGeo = merge([
+  baked(BOX(0.17, 0.042, 0.085), -0.128, 2.008, 0.185, -0.2, 0,  0.11),
+  baked(BOX(0.17, 0.042, 0.085),  0.128, 2.008, 0.185, -0.2, 0, -0.11),
+]);
+// The torso is scaled on X per person (shoulder width), so everything merged into it
+// has to squash gracefully — which rules out anything round. A collar band, a shoulder
+// shelf and a shirt hem overhanging the trousers are all boxes, and all scale right.
+const torsoGeo = merge([
+  BOX(1, 0.62, 0.3).translate(0, 1.16, 0),
+  BOX(0.88, 0.09, 0.315).translate(0, 1.5, 0),        // shoulder shelf
+  BOX(0.44, 0.075, 0.335).translate(0, 1.525, 0.005), // collar band
+  BOX(1.05, 0.07, 0.335).translate(0, 0.875, 0),      // hem, sitting proud of the waist
 ]);
 const CI = {
   legL:  instanced(BOX(0.2, 0.85, 0.2).translate(0,-0.425,0), toon(0xffffff), CROWD_MAX),
   legR:  instanced(BOX(0.2, 0.85, 0.2).translate(0,-0.425,0), toon(0xffffff), CROWD_MAX),
   shoeL: instanced(shoeGeo, toon(0xffffff), CROWD_MAX),
   shoeR: instanced(shoeGeo, toon(0xffffff), CROWD_MAX),
-  torso: instanced(BOX(1, 0.62, 0.3).translate(0,1.16,0), toon(0xffffff), CROWD_MAX),
-  // arms get a hand on the end, merged into the arm rather than instanced separately
-  // so it swings with the limb for free and costs no extra draw call
+  torso: instanced(torsoGeo, toon(0xffffff), CROWD_MAX),
   armL:  instanced(armGeo, toon(0xffffff), CROWD_MAX),
   armR:  instanced(armGeo, toon(0xffffff), CROWD_MAX),
-  // the head is the one part every camera angle puts front and centre
-  head:  instanced(new THREE.SphereGeometry(0.28, 22, 16).translate(0,1.72,0), toon(0xffffff), CROWD_MAX),
+  // both hands share one mesh at twice the capacity — a left and a right hand are the
+  // same object with different matrices, so two draw calls would buy nothing
+  hands: instanced(handGeo, toon(0xffffff), CROWD_MAX*2),
+  head:  instanced(headGeo, toon(0xffffff), CROWD_MAX),
   muzzle:instanced(muzzleGeo, toon(0xffffff), CROWD_MAX),
+  brow:  instanced(browGeo, toon(0xffffff), CROWD_MAX),
   mouth: instanced(mouthGeo, new THREE.MeshBasicMaterial({ color:0x7a3b34 }), CROWD_MAX, false),
   eyes:  instanced(baked(eyePair, 0, 1.85, 0.185), new THREE.MeshToonMaterial({ color:0xffffff, gradientMap:RAMP }), CROWD_MAX),
   pupil: instanced(baked(pupilPair, 0, 1.85, 0.185), new THREE.MeshBasicMaterial({ color:0x14192e }), CROWD_MAX, false),
@@ -3846,11 +3879,12 @@ for (const k in CI) {
 const rootM = new THREE.Matrix4(), partM = new THREE.Matrix4(), cCnt = {};
 function renderCrowd(sub) {
   for (const k in CI) cCnt[k] = 0;
-  const put2 = (key, col, px, py, pz, rx, rz, sx) => {
+  const gazeT = performance.now() * 0.001;
+  const put2 = (key, col, px, py, pz, rx, rz, sx, sz) => {
     const mesh = CI[key], i = cCnt[key];
-    if (i >= CROWD_MAX) return;
+    if (i >= mesh.instanceMatrix.count) return;      // hands hold two per person
     dummy.position.set(px, py, pz); dummy.rotation.set(rx||0, 0, rz||0);
-    dummy.scale.set(sx||1, 1, 1); dummy.updateMatrix();
+    dummy.scale.set(sx||1, 1, sz||1); dummy.updateMatrix();
     mesh.setMatrixAt(i, partM.multiplyMatrices(rootM, dummy.matrix));
     if (col) mesh.setColorAt(i, col);
     cCnt[key] = i+1;
@@ -3860,12 +3894,18 @@ function renderCrowd(sub) {
     dummy.position.set(g.position.x, g.position.y, g.position.z);
     dummy.rotation.set(g.rotation.x, g.rotation.y, g.rotation.z);
     dummy.scale.set(1, L.tall, 1); dummy.updateMatrix(); rootM.copy(dummy.matrix);
-    put2('torso', L.shirt, 0,0,0, 0,0, sh);
+    put2('torso', L.shirt, 0,0,0, 0,0, sh, L.build);
     put2('head',  L.skin,  0,0,0);
     put2('muzzle',L.skin,  0,0,0);
     put2('mouth', null,    0,0,0);
     put2('eyes',  null,    0,0,0);
-    put2('pupil', null,    0,0,0);
+    // The pupils are the same mesh every frame, just parked a few millimetres off
+    // centre — so a slow wander costs nothing and stops fourteen hundred people
+    // staring dead ahead in unison. Everyone drifts on their own phase.
+    const gx = Math.sin(gazeT * 0.53 + u.phase) * 0.035;
+    const gy = Math.sin(gazeT * 0.37 + u.phase * 1.7) * 0.018;
+    put2('pupil', null, gx, gy, 0);
+    put2('brow', L.hair, 0,0,0);
     put2(HAIR_MESH[L.style], L.hair, 0,0,0);
     put2('legL', L.pants, -0.14, 0.86, 0, u.legL.rotation.x);
     put2('legR', L.pants,  0.14, 0.86, 0, u.legR.rotation.x);
@@ -3873,6 +3913,9 @@ function renderCrowd(sub) {
     put2('shoeR', L.shoe,  0.14, 0.86, 0, u.legR.rotation.x);
     put2('armL', L.shirt, -sh/2-0.06, 1.42, 0, u.armL.rotation.x, u.armL.rotation.z);
     put2('armR', L.shirt,  sh/2+0.06, 1.42, 0, u.armR.rotation.x, u.armR.rotation.z);
+    // hands ride the arms' own matrices, so they swing without any extra maths
+    put2('hands', L.skin, -sh/2-0.06, 1.42, 0, u.armL.rotation.x, u.armL.rotation.z);
+    put2('hands', L.skin,  sh/2+0.06, 1.42, 0, u.armR.rotation.x, u.armR.rotation.z);
   };
   for (const p of peds) {
     const g = p.g, dx = g.position.x - sub.x, dz = g.position.z - sub.z;
@@ -4215,20 +4258,28 @@ function buildPerson(look) {
     m.castShadow = true; g.add(m);
     return m;
   };
-  put3(BOX(0.62, 0.62, 0.3).translate(0,1.16,0), look.shirt);
-  put3(new THREE.SphereGeometry(0.28, 16, 14).translate(0,1.72,0), look.skin);
+  // the hero is built from the same geometry as the crowd, so he doesn't look like a
+  // visitor from a different game the moment he stands next to somebody
+  put3(torsoGeo.clone().scale(0.62, 1, 1), look.shirt);
+  put3(headGeo.clone(), look.skin);
   put3(muzzleGeo.clone(), look.skin);
   const style = look.style || 'short';
   const HG = { short:hairShort, tall:hairTall, spiky:hairSpiky, bun:hairBun, bald:hairBald };
   put3((HG[style] || hairShort).clone(), look.hair);
+  put3(browGeo.clone(), look.hair);
   g.add(new THREE.Mesh(mouthGeo.clone(), new THREE.MeshBasicMaterial({ color:0x7a3b34 })));
   g.add(new THREE.Mesh(baked(eyePair, 0, 1.85, 0.185), new THREE.MeshToonMaterial({ color:0xffffff, gradientMap:RAMP })));
   g.add(new THREE.Mesh(baked(pupilPair, 0, 1.85, 0.185), new THREE.MeshBasicMaterial({ color:0x14192e })));
-  const limb = (px, color, w, len, top) => {
+  const limb = (px, color, w, len, top, hand) => {
     const j = new THREE.Group(); j.position.set(px, top, 0);
     const geo = BOX(w, len, w).translate(0, -len/2, 0);
     const m = new THREE.Mesh(geo, new THREE.MeshToonMaterial({ color, gradientMap: RAMP }));
     m.castShadow = true; j.add(m);
+    if (hand) {                       // skin, not sleeve — same split as the crowd
+      const h = new THREE.Mesh(handGeo.clone().translate(0, 0.62 - len - 0.04, 0),
+        new THREE.MeshToonMaterial({ color: look.skin, gradientMap: RAMP }));
+      h.castShadow = true; j.add(h);
+    }
     g.add(j); return j;
   };
   const legL = limb(-0.14, look.pants, 0.2, 0.85, 0.86);
@@ -4237,8 +4288,8 @@ function buildPerson(look) {
     const sh2 = new THREE.Mesh(shoeGeo.clone(), new THREE.MeshToonMaterial({ color: look.shoe || 0x2b2f38, gradientMap: RAMP }));
     sh2.castShadow = true; lg.add(sh2);
   }
-  const armL = limb(-0.37, look.shirt, 0.16, 0.58, 1.42);
-  const armR = limb( 0.37, look.shirt, 0.16, 0.58, 1.42);
+  const armL = limb(-0.37, look.shirt, 0.16, 0.58, 1.42, true);
+  const armR = limb( 0.37, look.shirt, 0.16, 0.58, 1.42, true);
   g.userData = { legL, legR, armL, armR, phase: 0 };
   return g;
 }
@@ -4279,6 +4330,7 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyR') resetAll();
   if (e.code === 'KeyF' && !tryGate() && !tryDoor()) toggleVehicle();   // gate, then doorway, then car
   if (e.code === 'KeyH') honk();
+  if (e.code === 'KeyN') setMuted(!muted);
   if (e.code.startsWith('Digit')) shopBuy(+e.code.slice(5) - 1);        // the garage menu
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
@@ -4781,11 +4833,44 @@ function updateOfficer(dt, sub) {
   if (d < 2.4) busted();
 }
 
-let sirenCtx = null;
+let sirenCtx = null, sirenOut = null;
+
+// Mute. Remembered across sessions, because someone who plays with the sound off
+// wants it off next time too — and it has to be readable before sirenInit runs, since
+// the button is clickable (and audio therefore creatable) at any moment.
+let muted = false;
+try { muted = localStorage.getItem('mm_mute') === '1'; } catch (e) {}
+const muteBtn = document.getElementById('mute');
+function setMuted(v) {
+  muted = v;
+  try { localStorage.setItem('mm_mute', v ? '1' : '0'); } catch (e) {}
+  if (sirenOut) sirenOut.gain.setTargetAtTime(v ? 0 : 1, sirenCtx.currentTime, 0.02);
+  if (v) { try { speechSynthesis.cancel(); } catch (e) {} }
+  if (muteBtn) {
+    muteBtn.textContent = v ? '🔇' : '🔊';
+    muteBtn.classList.toggle('off', v);
+    muteBtn.setAttribute('aria-label', v ? 'Unmute sound' : 'Mute sound');
+    muteBtn.setAttribute('aria-pressed', String(v));
+  }
+}
+if (muteBtn) muteBtn.addEventListener('click', e => {
+  e.stopPropagation();
+  sirenInit();                       // the click is a gesture, so it may as well count
+  setMuted(!muted);
+  muteBtn.blur();                    // else Space/Enter re-triggers it while driving
+});
+setMuted(muted);                     // paint the remembered state onto the button
+// Everything that makes a noise goes through one master gain instead of straight to
+// the destination, so mute is a single number rather than a flag every sound site has
+// to remember to check — and killing the gain leaves the scheduled notes and the
+// engine oscillator running, so unmuting is instant rather than a rebuild.
 function sirenInit() {                          // must happen inside a user gesture
   if (sirenCtx) return;
   try { sirenCtx = new (window.AudioContext || window.webkitAudioContext)(); }
-  catch (e) { sirenCtx = null; }
+  catch (e) { sirenCtx = null; return; }
+  sirenOut = sirenCtx.createGain();
+  sirenOut.gain.value = muted ? 0 : 1;
+  sirenOut.connect(sirenCtx.destination);
 }
 // a short note, scheduled on the shared context
 function tone(freq, at, dur, vol, type) {
@@ -4795,7 +4880,7 @@ function tone(freq, at, dur, vol, type) {
   g.gain.setValueAtTime(0.0001, at);
   g.gain.linearRampToValueAtTime(vol, at + 0.012);
   g.gain.setTargetAtTime(0.0001, at + dur, 0.03);
-  o.connect(g); g.connect(sirenCtx.destination);
+  o.connect(g); g.connect(sirenOut);
   o.start(at); o.stop(at + dur + 0.2);
 }
 // the quick double chirp a patrol car gives when it's right on your tail
@@ -4822,7 +4907,7 @@ function updateEngine() {
   if (!engineOsc) {
     engineOsc = sirenCtx.createOscillator(); engineOsc.type = 'sawtooth';
     engineGain = sirenCtx.createGain(); engineGain.gain.value = 0;
-    engineOsc.connect(engineGain); engineGain.connect(sirenCtx.destination);
+    engineOsc.connect(engineGain); engineGain.connect(sirenOut);
     engineOsc.start();
   }
   const driving = mode === 'car' && drowning <= 0;
@@ -4886,7 +4971,8 @@ function pickVoice(re) {
   return hits.length ? rpick(hits) : null;
 }
 function sayOuch() {
-  if (sayT > 0) return;
+  if (sayT > 0 || muted) return;      // speech is its own pipe — the master gain can't reach it
+
   sayT = 1.4;
   try {
     if (!window.speechSynthesis || speechSynthesis.speaking) return;
