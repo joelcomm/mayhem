@@ -3305,6 +3305,49 @@ function hitPropsAt(x, z, dx, dz, speed, radius, maxMass) {
   }
 }
 
+// Coins in shapes, not just scatter.
+//
+// The block loop drops a handful into every landmark and yard, which is fine but reads
+// as confetti: nothing about where a coin sits tells you anything. These are the ones
+// that do — a ring round a tree you can circle, and a run down the middle of a street
+// you can take at speed in one pass. The scattered ones stay exactly as they were, and
+// deliberately so: they are placed during the block loop, and changing how many randoms
+// that loop draws would re-roll the whole town.
+//
+// This runs after the tree stage, so treeSpots is already filtered down to the trees
+// that actually exist, and after every canary is computed — which is why it can draw
+// from the seeded stream freely.
+{
+  // RINGS — a wide spread of trees rather than a clump, so they read as landmarks
+  const ringed = [];
+  for (const t of treeSpots) {
+    if (ringed.length >= 10) break;
+    if (ringed.some(o => (o.x-t.x)**2 + (o.z-t.z)**2 < 150*150)) continue;
+    ringed.push(t);
+  }
+  for (const t of ringed) {
+    const n = 8, r = 3.6, off = rnd(0, 6.28);
+    for (let k = 0; k < n; k++) {
+      const a = off + k*Math.PI*2/n;
+      coinsSpots.push({ x: t.x + Math.cos(a)*r, z: t.z + Math.sin(a)*r });
+    }
+  }
+  // ROWS — straight down the carriageway. Not filtered against onRoad on purpose: the
+  // whole point is that you collect the run in one pass without leaving the road.
+  const town = STREETS.filter(st => st.kind !== 'highway');
+  for (let i = 0; i < town.length; i += Math.max(1, (town.length/12)|0)) {
+    const st = town[i];
+    const L = Math.hypot(st.bx-st.ax, st.bz-st.az);
+    if (L < 60) continue;
+    const ux = (st.bx-st.ax)/L, uz = (st.bz-st.az)/L;
+    const n = 7, gap = 3.6, d0 = (L - (n-1)*gap)/2;      // centred on the street
+    for (let k = 0; k < n; k++) {
+      const d = d0 + k*gap;
+      coinsSpots.push({ x: st.ax + ux*d, z: st.az + uz*d });
+    }
+  }
+}
+
 // spinning collectible coins
 const coins = [];
 {
@@ -4579,9 +4622,11 @@ function buildPlayerCar(type, color) {
 }
 const car = new THREE.Group(); scene.add(car);
 let carRig = null, carType = 'convert';
+let riderSeat = null;                    // set once the rider is built (see seatRider)
 function setPlayerCar(type, color) {
   if (carRig) car.remove(carRig);
   carType = type; carRig = buildPlayerCar(type, color); car.add(carRig);
+  if (riderSeat) riderSeat(type);        // null until the rider exists, below
 }
 setPlayerCar('convert', 0xf07ab0);
 
@@ -4634,10 +4679,29 @@ player.visible = false; scene.add(player);
 const playerVel = new THREE.Vector3();
 let playerOnGround = true;
 
-// a rider that sits in the player's convertible
+// The rider sitting in the player's car. He used to be parked at one fixed height that
+// suited the convertible, so in anything with a roof his head went straight through the
+// headlining — the sedan's roof is at 2.29 and his crown was at 2.46. He is now *seated*
+// (folded at the hip, hands up on the wheel, which is what he should always have been)
+// and the seat drops per car type until the crown clears the roof.
 const rider = buildPerson(HERO_LOOK);
 rider.scale.setScalar(0.92); car.add(rider);
-rider.position.set(0, 0.62, -0.35);
+{
+  const u = rider.userData;
+  u.legL.rotation.x = u.legR.rotation.x = -1.45;      // knees up, into the footwell
+  u.armL.rotation.x = u.armR.rotation.x = -1.15;      // hands on the wheel
+  u.armL.rotation.z = 0.18; u.armR.rotation.z = -0.18;
+}
+const RIDER_CROWN = 2.02 * 0.92;                      // head top in car-local units
+function seatRider(type) {
+  const s = CAR_TYPES[type] || CAR_TYPES.sedan;
+  const roof = s.clr + s.bodyH + s.roofH;
+  // open-top cars keep him sitting high and proud; roofed ones drop him until he fits
+  const y = s.roofH > 0.05 ? Math.min(0.62, roof - 0.14 - RIDER_CROWN) : 0.62;
+  rider.position.set(0, y, -0.35);
+}
+riderSeat = seatRider;
+seatRider(carType);                      // the opening car was built before the rider existed
 
 // blob shadows under the hero objects
 function blobShadow(size) {

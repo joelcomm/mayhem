@@ -400,6 +400,21 @@ behind a partition. A doorway is treated as a hole, not a wall, so standing just
 shallow shop the camera sits out in the street and looks in through the door, which is
 what it should do. `roomT` ramps the camera distance in across the threshold.
 
+### Coins in shapes
+The block loop drops a handful of coins into every landmark and yard, which is fine but
+reads as confetti — nothing about where a coin sits tells you anything. Two structured
+sets now sit on top of that: a **ring of eight around a tree**, on ten trees spread at
+least 150 m apart so they read as landmarks rather than a clump, and **a run of seven
+straight down the middle of a street**, which you take in one pass at speed. The road
+rows are deliberately *not* filtered against `onRoad` — being on the carriageway is the
+entire point. Total went 129 → 288.
+
+The scattered ones are untouched, and deliberately so: they are placed during the block
+loop, and changing how many randoms that loop draws would re-roll the whole town. The
+structured pass runs after the tree stage — so `treeSpots` is already filtered down to
+the trees that actually exist — and after every canary is computed, which is why it can
+draw from the seeded stream freely.
+
 ### Coins are for spending
 **Gus's Garage** is a real building just up the street from the spawn: a
 **pull-through service bay** — a 22 m canopy on four posts with an office and
@@ -829,6 +844,13 @@ are bucketed by colour and merged, so the whole town is a few dozen draw calls.
   sets `camera.near = 250` while the map is up and restores 0.4 on the way out.
 - Buildings no longer overlap, but any building you hollow out is still trimmed back off
   its neighbours — see "Going inside". Don't assume a clear room *centre* means a clear room.
+- **The driver has to fit under the roof.** The rider in the player's car was parked at
+  one fixed height that suited the convertible, so in anything with a roof his head went
+  through the headlining — the sedan's roof is at 2.29 and his crown was at 2.46. He is
+  seated now (folded at the hip, hands on the wheel) and `seatRider` drops the seat per
+  car type until the crown clears. Note the ordering trap: `setPlayerCar` runs before the
+  rider exists, so it calls through a `riderSeat` hook that is null until then — calling
+  the hoisted `seatRider` directly would hit the temporal dead zone on `rider`.
 - **A rotated footprint is not its bounding box.** Houses on a jittered block frontage face
   any angle. `addBox` takes the axis-aligned box for collision (so a diagonal house is
   actually solid) and separately the true `{w, d, yaw}` footprint for the road audit —
