@@ -517,6 +517,32 @@ past — and pay 40 coins each, with a 1000-coin bonus for clearing all thirty-f
 The HUD keeps a 🏆 count under the chaos score. One InstancedMesh, like the coins,
 built well after the tree stage so it costs nothing seeded.
 
+### The fair
+Three rides on a real fairground — striped-canopy **carousel** with eight bobbing
+horses, **THE MAPLE MOUSE**, a closed-loop coaster whose cart is paced by gravity
+(quick through the dips, laboured over the crests, with a floor under the speed so it
+can never stall on a hill), and a walled **bumper car** arena with six cars that drive
+themselves — under a MAPLEWOOD FAIR board. Walk up to any of them and **F** puts you
+**in the seat, first person**: the camera rides the horse, the cart or the car, the
+mouse still looks around on top of wherever the ride is pointing, and F gets you off.
+(The brief said click, but left click is the punch and right click is the kick — F is
+already the game's one interact verb.) On the bumper cars you steer yours with WASD
+while the other five wander and ram you; wall hits turn you round rather than stopping
+you, and car-on-car hits ding and kick both shells. While riding, the player's position
+rides the seat too, so the radar and everything else that reads `sub` follows you round
+the track. Punch and kick are disabled mid-ride.
+
+**Finding the ground was the actual work.** The fair wanted "the biggest unused green",
+and the obvious tool — the zoning — turned out to be a lie: this seed has **no `park`
+block at all** and its one `plaza` is 286 m². Which surfaced something worse: the stunt
+park had been filtering for the same zones, and had been silently building **nothing**
+since the seed re-roll. Four ramps the README described did not exist in the game.
+`findGreen(w, d)` fixes both: a coarse occupancy grid of every building footprint and
+every planted tree, plus the road and river tests, scanned for the most central
+rectangle that is genuinely empty; whatever it hands out is reserved so two set pieces
+cannot land on the same green. The stunt park is back (4 ramps) and the fair sits on
+the next-best open ground.
+
 ### The stunt park
 The biggest open green in town has four orange kickers in it. They are **not
 colliders** — a ramp is a wedge that raises `surfaceY` over its footprint (see
@@ -893,6 +919,10 @@ are bucketed by colour and merged, so the whole town is a few dozen draw calls.
   sat at exactly the steeple base's front face (`cz-20.5`); the fix is to stand one proud.
   Note it is only a problem when *both* faces are visible — a door's back face flush with a
   wall is fine, because it is culled.
+- **The convertible's "seat back" was a beam through the driver's spine.** Its width
+  and depth were swapped — 0.16 of the roof *width* by 0.9 of its *length* — which made
+  it a 2 m spar down the centreline of the car instead of a panel across the back of
+  the seats. One line; visible in every convertible from the day it was built.
 - Vehicle collision is an **oriented** box sized to each car type. It used to be a fixed
   4.2 m axis-aligned square regardless of heading, which is what made cars feel like they
   had an invisible wall around them.

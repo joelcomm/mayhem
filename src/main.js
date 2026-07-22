@@ -3788,7 +3788,11 @@ function carGeo(type) {
     glass.push(baked(BOX(s.roofW*1.02, s.roofH*0.62, s.roofL*0.92), 0, cy+0.06, s.roofZ));
   } else {
     dark.push(baked(BOX(s.roofW*0.9, 0.5, s.roofL*0.9), 0, s.clr + s.bodyH - 0.15, s.roofZ));   // seats well
-    paint.push(baked(BOX(s.roofW*0.16, 0.7, s.roofL*0.9), 0, s.clr + s.bodyH + 0.2, s.roofZ - s.roofL*0.5));
+    // The seat back. Its width and depth were the wrong way round — 0.16 of the roof
+    // *width* and 0.9 of its *length* — which made it a 2 m beam running down the
+    // centreline of the car and straight through the driver's back instead of a panel
+    // across the back of the seats.
+    paint.push(baked(BOX(s.roofW*0.9, 0.7, s.roofL*0.16), 0, s.clr + s.bodyH + 0.2, s.roofZ - s.roofL*0.5));
   }
   if (type === 'truck') {
     dark.push(baked(BOX(s.W*0.95, 0.9, 2.4), 0, s.clr + s.bodyH + 0.4, -1.6));
@@ -4815,7 +4819,8 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyC') camIdx = (camIdx+1) % 3;
   if (e.code === 'KeyM') mapView = !mapView;
   if (e.code === 'KeyR') resetAll();
-  if (e.code === 'KeyF' && !tryGate() && !tryDoor()) toggleVehicle();   // gate, then doorway, then car
+  // ride, then gate, then doorway, then car — F is the one interact key
+  if (e.code === 'KeyF' && !tryRide() && !tryGate() && !tryDoor()) toggleVehicle();
   if (e.code === 'KeyH') honk();
   if (e.code === 'KeyN') setMuted(!muted);
   if (e.code.startsWith('Digit')) shopBuy(+e.code.slice(5) - 1);        // the garage menu
@@ -5020,6 +5025,15 @@ const GRAV = 26, WALK = 7, RUN = 12, JUMP = 9.5;
 let playerIFrames = 0;
 function updatePlayer(dt) {
   if (mode !== 'foot') return;
+  if (riding) {
+    // You are a passenger. Ride the seat rather than walking — keeping the player's
+    // position under the seat is what makes the radar, the coins and everything else
+    // that reads `sub` follow you round the track instead of standing at the gate.
+    const s2 = rideSeat(riding);
+    player.position.set(s2.x, 0, s2.z);
+    playerShadow.position.set(s2.x, surfaceY(s2.x, s2.z) + 0.09, s2.z);
+    return;
+  }
   if (playerRag.active) {
     // a moment of mercy on getting up, or a crowd re-decks you the frame you stand
     if (updateRag(player, playerRag, dt)) playerIFrames = 2.0;
@@ -5247,7 +5261,7 @@ function playerVsPeds(dt) {
 let punchCd = 0, punchT = 0;
 const PUNCH_REACH = 1.75;
 function punch() {
-  if (mode !== 'foot' || playerRag.active || punchCd > 0) return;
+  if (mode !== 'foot' || playerRag.active || punchCd > 0 || riding) return;
   punchCd = 0.34; punchT = 0.22;
   const fx = Math.sin(player.rotation.y), fz = Math.cos(player.rotation.y);
   const px = player.position.x, pz = player.position.z;
@@ -5295,7 +5309,7 @@ function punch() {
 // thing chickens care about — Feather Frenzy runs on this counter.
 let kickCd = 0, kickT = 0;
 function kick() {
-  if (mode !== 'foot' || playerRag.active || kickCd > 0) return;
+  if (mode !== 'foot' || playerRag.active || kickCd > 0 || riding) return;
   kickCd = 0.55; kickT = 0.3;
   const fx = Math.sin(player.rotation.y), fz = Math.cos(player.rotation.y);
   const ox = player.position.x + fx*1.0, oz = player.position.z + fz*1.0;
@@ -6275,6 +6289,50 @@ function updateMarkers(dt, sub) {
 }
 
 // =================================================================
+//  FINDING OPEN GROUND
+//  Zones turned out to be the wrong tool for "put this on the biggest green".
+//  This seed has no `park` block at all and its one `plaza` is 286 m2, so the
+//  stunt park had been quietly building nothing at all since the seed re-roll —
+//  four ramps the README describes that were not in the game. This looks at the
+//  ground instead of the zoning: a coarse occupancy set of every building
+//  footprint and every planted tree, plus the road and river tests, scanned for
+//  the most central rectangle that is genuinely empty. Whatever it hands out is
+//  reserved, so two set pieces can never land on top of each other.
+// =================================================================
+const OCC = new Set();
+{
+  const CELL = 6, key = (x, z) => Math.floor(x/CELL) + ',' + Math.floor(z/CELL);
+  for (const b of mapBoxes)
+    for (let x = b.x - b.w/2 - 4; x <= b.x + b.w/2 + 4; x += CELL)
+      for (let z = b.z - b.d/2 - 4; z <= b.z + b.d/2 + 4; z += CELL) OCC.add(key(x, z));
+  for (const t of treeSpots)
+    for (let x = t.x - 3; x <= t.x + 3; x += CELL)
+      for (let z = t.z - 3; z <= t.z + 3; z += CELL) OCC.add(key(x, z));
+  var occKey = key;
+}
+const TAKEN = [];
+function findGreen(w, d) {
+  const hw = w/2, hd = d/2;
+  const clear = (cx, cz) => {
+    for (const t of TAKEN)
+      if (Math.abs(cx - t.x) < (w + t.w)/2 && Math.abs(cz - t.z) < (d + t.d)/2) return false;
+    for (let i = -3; i <= 3; i++) for (let j = -3; j <= 3; j++) {
+      const x = cx + i*hw/3, z = cz + j*hd/3;
+      if (onRoad(x, z, 3) || overRiver(x, z, 12) || OCC.has(occKey(x, z))) return false;
+    }
+    return true;
+  };
+  let best = null, bestD = Infinity;
+  for (let cx = -TOWN; cx <= TOWN; cx += 12) for (let cz = -TOWN; cz <= TOWN; cz += 12) {
+    const dd = cx*cx + cz*cz;
+    if (dd >= bestD || !clear(cx, cz)) continue;         // prefer the middle of town
+    bestD = dd; best = { x: cx, z: cz };
+  }
+  if (best) TAKEN.push({ x: best.x, z: best.z, w, d });
+  return best;
+}
+
+// =================================================================
 //  THE STUNT PARK
 //  A green with four kickers in it. The ramps are wedges that raise surfaceY (see
 //  RAMPS) rather than colliders, so you drive up and fly off the lip for real, and
@@ -6296,10 +6354,9 @@ function updateMarkers(dt, sub) {
     return g;
   };
   // the biggest open green that isn't cut by the river
-  const big = BLOCKS.filter(b => (b.zone === 'park' || b.zone === 'plaza') && !b.riverside)
-    .sort((a, b) => (b.r.x1-b.r.x0)*(b.r.z1-b.r.z0) - (a.r.x1-a.r.x0)*(a.r.z1-a.r.z0))[0];
-  if (big && big.r.x1 - big.r.x0 > 46 && big.r.z1 - big.r.z0 > 46) {
-    const cx = (big.r.x0 + big.r.x1)/2, cz = (big.r.z0 + big.r.z1)/2;
+  const site = findGreen(58, 58);
+  if (site) {
+    const cx = site.x, cz = site.z;
     const mat = new THREE.MeshToonMaterial({ color: 0xe8792b, gradientMap: RAMP, side: THREE.DoubleSide });
     // steeper than they look sensible: a shallow wedge just lifts the car, a ~22-25°
     // kicker throws it. Length is short relative to height for exactly that reason.
@@ -6323,13 +6380,291 @@ function updateMarkers(dt, sub) {
       const t = signTexture('STUNT PARK', '#2f3550', '#ffd23b', 512, 128);
       const brd = new THREE.Mesh(new THREE.PlaneGeometry(14, 3.5),
         new THREE.MeshBasicMaterial({ map: t, transparent: true, side: THREE.DoubleSide }));
-      brd.position.set(cx, 6.5, big.r.z0 + 3); brd.rotation.y = Math.PI; scene.add(brd);
+      brd.position.set(cx, 6.5, cz - 27); brd.rotation.y = Math.PI; scene.add(brd);
       for (const sx of [-6.4, 6.4]) {
         const p = new THREE.Mesh(BOX(0.7, 6.5, 0.7), toon(0x6b6f76));
-        p.position.set(cx + sx, 3.25, big.r.z0 + 3); scene.add(p);
+        p.position.set(cx + sx, 3.25, cz - 27); scene.add(p);
       }
     }
   }
+}
+
+// =================================================================
+//  THE FAIR
+//  Three attractions on the biggest green the stunt park didn't take. All three
+//  are *rides*: walk up, press F, and the camera leaves your shoulder and sits in
+//  the seat. The brief asked for a click, but left click is the punch and right
+//  click is the kick — F is already the game's one interact key (get in, get out,
+//  open a door, work the portcullis) and a ride is exactly that verb again.
+//
+//  Everything here is built after every audit and every flush, so it is entirely
+//  free of the seeded stream: geometry goes straight into meshes rather than the
+//  colour buckets, and the only randoms are runtime ones.
+// =================================================================
+const FAIR = [];
+let riding = null, rideExitCd = 0;
+{
+  const FW = 78, FD = 52;
+  const site = findGreen(FW, FD);
+  console.log('stunt park ramps:', RAMPS.length);
+  if (site) {
+    const cx = site.x, cz = site.z;
+    const alongX = true, off = 24;
+    const at = k => [cx + k*off, cz - 6];
+    const mesh = (geo, col, x, y, z) => {
+      const m = new THREE.Mesh(geo, typeof col === 'number' ? toon(col) : col);
+      m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true;
+      scene.add(m); return m;
+    };
+
+    // ---- the carousel -------------------------------------------------
+    {
+      const [mx, mz] = at(-1);
+      const base = new THREE.Group(); base.position.set(mx, 0, mz); scene.add(base);
+      mesh(new THREE.CylinderGeometry(7.4, 7.8, 0.5, 32), 0xc9ccd2, mx, 0.25, mz);
+      const spin = new THREE.Group(); spin.position.set(mx, 0.5, mz); scene.add(spin);
+      const deck = new THREE.Mesh(new THREE.CylinderGeometry(7, 7, 0.35, 32), toon(0xe8d06a));
+      deck.position.y = 0.17; deck.castShadow = deck.receiveShadow = true; spin.add(deck);
+      const pole = new THREE.Mesh(new THREE.CylinderGeometry(0.42, 0.42, 6.2, 16), toon(0xd8dde4));
+      pole.position.y = 3.3; spin.add(pole);
+      // a canopy in fairground stripes: alternating cone wedges, which is cheaper and
+      // reads better than trying to get a radial texture onto a cone's UVs
+      for (let k = 0; k < 12; k++) {
+        const seg = new THREE.Mesh(
+          new THREE.ConeGeometry(8.2, 2.4, 8, 1, true, k*Math.PI/6, Math.PI/6),
+          new THREE.MeshToonMaterial({ color: k % 2 ? 0xd0392b : 0xf6f3ea,
+                                       gradientMap: RAMP, side: THREE.DoubleSide }));
+        seg.position.y = 7.4; spin.add(seg);
+      }
+      const SEATS = 8;
+      const horses = [];
+      for (let k = 0; k < SEATS; k++) {
+        const a = k*Math.PI*2/SEATS, hx = Math.cos(a)*4.9, hz = Math.sin(a)*4.9;
+        const h = new THREE.Group(); h.position.set(hx, 0.35, hz); h.rotation.y = -a;
+        const col = [0xf07ab0, 0x8ad14f, 0x3fa9d8, 0xf0b429][k % 4];
+        const body = new THREE.Mesh(new THREE.SphereGeometry(0.52, 16, 12).scale(0.7, 0.78, 1.5), toon(col));
+        body.position.y = 1.5; h.add(body);
+        const neck = new THREE.Mesh(BOX(0.34, 0.9, 0.42), toon(col));
+        neck.position.set(0, 2.0, 0.5); neck.rotation.x = -0.4; h.add(neck);
+        const head = new THREE.Mesh(new THREE.SphereGeometry(0.3, 14, 10).scale(0.8, 0.8, 1.3), toon(col));
+        head.position.set(0, 2.42, 0.78); h.add(head);
+        for (const sx of [-1, 1]) for (const sz of [0.5, -0.5]) {
+          const leg = new THREE.Mesh(BOX(0.16, 1.1, 0.16), toon(col));
+          leg.position.set(sx*0.26, 0.9, sz); h.add(leg);
+        }
+        const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 3.4, 10), toon(0xd8dde4));
+        bar.position.y = 2.6; h.add(bar);
+        spin.add(h); horses.push({ g: h, a });
+      }
+      FAIR.push({ kind: 'carousel', label: 'CAROUSEL', x: mx, z: mz, r: 9.5,
+                   spin, horses, t: 0, seat: 0, cx: mx, cz: mz });
+      // the deck is solid so you cannot stand inside the machinery
+      colliders.push({ minX: mx-7.2, maxX: mx+7.2, minZ: mz-7.2, maxZ: mz+7.2 });
+    }
+
+    // ---- the coaster --------------------------------------------------
+    {
+      const [ox, oz] = at(1);
+      const RX = 15, RZ = 11, BASE = 2.2;
+      // one closed lap, so the cart never has to be re-railed: two hills and a dip,
+      // all periodic in 2*PI or the track would not meet itself
+      const P = t => [ ox + Math.cos(t)*RX,
+                       BASE + 3.6*(0.5 - 0.5*Math.cos(2*t)) + 1.7*(0.5 - 0.5*Math.cos(3*t + 1)),
+                       oz + Math.sin(t)*RZ ];
+      const N = 120, rails = [], ties = [], posts = [];
+      const v0 = new THREE.Vector3(), v1 = new THREE.Vector3(), up = new THREE.Vector3(0,1,0);
+      for (let i = 0; i < N; i++) {
+        const t0 = i/N*Math.PI*2, t1 = (i+1)/N*Math.PI*2;
+        v0.set(...P(t0)); v1.set(...P(t1));
+        const mid = v0.clone().lerp(v1, 0.5), len = v0.distanceTo(v1);
+        const dir = v1.clone().sub(v0).normalize();
+        const side = new THREE.Vector3().crossVectors(dir, up).normalize();
+        const yaw = Math.atan2(dir.x, dir.z), pitch = -Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
+        for (const sgn of [-1, 1]) {
+          const p = mid.clone().addScaledVector(side, sgn*0.52);
+          rails.push(baked(BOX(0.1, 0.12, len*1.06), p.x, p.y + 0.16, p.z, pitch, yaw, 0));
+        }
+        if (i % 2 === 0) ties.push(baked(BOX(1.5, 0.09, 0.28), mid.x, mid.y + 0.05, mid.z, pitch, yaw, 0));
+        if (i % 8 === 0 && mid.y > 0.6)
+          posts.push(baked(BOX(0.26, mid.y, 0.26), mid.x, mid.y/2, mid.z));
+      }
+      mesh(merge(rails), 0xd0392b, 0, 0, 0);
+      mesh(merge(ties), 0x8c6a44, 0, 0, 0);
+      mesh(merge(posts), 0x6b6f76, 0, 0, 0);
+      const cart = new THREE.Group();
+      const cb = new THREE.Mesh(BOX(1.3, 0.7, 2.0), toon(0xf0b429));
+      cb.position.y = 0.55; cb.castShadow = true; cart.add(cb);
+      const cn = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.9, 12), toon(0xd0392b));
+      cn.position.set(0, 0.55, 1.4); cn.rotation.x = Math.PI/2; cart.add(cn);
+      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+        const w = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.14, 12).rotateZ(Math.PI/2), toon(0x2b2f38));
+        w.position.set(sx*0.6, 0.22, sz*0.7); cart.add(w);
+      }
+      scene.add(cart);
+      FAIR.push({ kind: 'coaster', label: 'COASTER', x: ox, z: oz, r: 26, P, cart, t: 0, cx: ox, cz: oz });
+      const sign = new THREE.Mesh(new THREE.PlaneGeometry(11, 2.8),
+        new THREE.MeshBasicMaterial({ map: signTexture('THE MAPLE MOUSE', '#2f3550', '#ffd23b', 512, 128),
+                                      transparent: true, side: THREE.DoubleSide }));
+      sign.position.set(ox, 5.4, oz - RZ - 2.5); sign.rotation.y = Math.PI; scene.add(sign);
+    }
+
+    // ---- the bumper cars ----------------------------------------------
+    {
+      const [bx, bz] = [cx, cz + 15];
+      const HW = 11, HD = 8;
+      mesh(BOX(HW*2, 0.16, HD*2), 0x4a4f58, bx, 0.08, bz);            // the steel floor
+      // A low wall all the way round with one gap to walk in by. The wall segments are
+      // real colliders, which is what keeps the cars — and you — inside.
+      const WALLH = 1.1, GAP = 3.4;
+      const wall = (wx, wz, w, d) => {
+        mesh(BOX(w, WALLH, d), 0xd0392b, bx + wx, WALLH/2 + 0.16, bz + wz);
+        colliders.push({ minX: bx+wx-w/2, maxX: bx+wx+w/2, minZ: bz+wz-d/2, maxZ: bz+wz+d/2 });
+      };
+      wall(0,  HD, HW*2 + 0.6, 0.5);                                   // back
+      wall(-HW, 0, 0.5, HD*2);  wall(HW, 0, 0.5, HD*2);                // sides
+      const half = (HW*2 + 0.6 - GAP)/2;                               // front, split for the way in
+      wall(-(GAP/2 + half/2), -HD, half, 0.5);
+      wall( (GAP/2 + half/2), -HD, half, 0.5);
+      const CARS = 6, cars = [];
+      for (let k = 0; k < CARS; k++) {
+        const g = new THREE.Group();
+        const col = [0xd0392b, 0x2f6fc4, 0x8ad14f, 0xf0b429, 0x7b4fa7, 0x59c9a5][k];
+        const shell = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 0.95, 0.75, 16), toon(col));
+        shell.position.y = 0.5; shell.castShadow = true; g.add(shell);
+        const rim = new THREE.Mesh(new THREE.TorusGeometry(1.08, 0.16, 8, 18).rotateX(Math.PI/2), toon(0x2b2f38));
+        rim.position.y = 0.42; g.add(rim);
+        const seat = new THREE.Mesh(BOX(0.7, 0.5, 0.22), toon(0x2b2f38));
+        seat.position.set(0, 1.1, -0.45); g.add(seat);
+        const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.2, 8), toon(0x8b929a));
+        mast.position.set(0, 1.95, -0.6); g.add(mast);
+        scene.add(g);
+        const a = k*Math.PI*2/CARS;
+        cars.push({ g, x: bx + Math.cos(a)*6, z: bz + Math.sin(a)*4.5,
+                    yaw: a, spd: 3 + Math.random()*2, turn: 0, bump: 0 });
+      }
+      FAIR.push({ kind: 'bumper', label: 'BUMPER CARS', x: bx, z: bz - HD - 2.5, r: 6,
+                   cars, HW, HD, bx, bz, seat: 0, cx: bx, cz: bz });
+    }
+
+    // one board on the way in
+    const [sx0, sz0] = [cx, cz - FD/2 + 2];
+    const brd = new THREE.Mesh(new THREE.PlaneGeometry(16, 4),
+      new THREE.MeshBasicMaterial({ map: signTexture('MAPLEWOOD FAIR', '#7b4fa7', '#ffd23b', 512, 128),
+                                    transparent: true, side: THREE.DoubleSide }));
+    brd.position.set(sx0, 7, sz0); brd.rotation.y = Math.PI; scene.add(brd);   // faces the way in
+    for (const dxp of [-7.4, 7.4]) {
+      const p = new THREE.Mesh(BOX(0.6, 7, 0.6), toon(0x6b6f76));
+      p.position.set(sx0 + (alongX ? dxp : 0), 3.5, sz0 + (alongX ? 0 : dxp)); scene.add(p);
+    }
+    console.log(`fair: ${FAIR.length} rides at ${cx|0},${cz|0}`);
+  }
+}
+
+// The seat, in world space, for whichever ride you are on. Returns a position and the
+// direction you are facing — the camera is placed from this every frame, so a ride only
+// has to move its own geometry and the view follows for free.
+const rideSeat = (R) => {
+  if (R.kind === 'carousel') {
+    const h = R.horses[R.seat], a = h.a + R.spin.rotation.y;
+    const bob = Math.sin(R.t*3 + R.seat)*0.28;
+    return { x: R.cx + Math.cos(a)*4.9, y: 2.5 + bob, z: R.cz + Math.sin(a)*4.9,
+             yaw: -a + Math.PI/2 };                       // facing the way round you go
+  }
+  if (R.kind === 'coaster') {
+    const [x, y, z] = R.P(R.t), [x2, , z2] = R.P(R.t + 0.05);
+    const yaw = Math.atan2(x2 - x, z2 - z);
+    // Sat at the front of the cart, not in the middle of it. At the cart's own origin
+    // the camera is inside the nose cone and the screen is a red octagon; a metre back
+    // and the body fills the bottom half. Forward of the body and just above the cone,
+    // you get what a coaster POV should be: the nose dipping over the crest and the
+    // rails running away in front of you.
+    return { x: x + Math.sin(yaw)*0.55, y: y + 1.45, z: z + Math.cos(yaw)*0.55, yaw };
+  }
+  const c = R.cars[R.seat];
+  return { x: c.x, y: 1.5, z: c.z, yaw: c.yaw };
+};
+function updateRides(dt) {
+  if (rideExitCd > 0) rideExitCd -= dt;
+  for (const R of FAIR) {
+    if (R.kind === 'carousel') {
+      R.t += dt; R.spin.rotation.y += dt*0.45;
+      for (const h of R.horses) h.g.position.y = 0.35 + Math.sin(R.t*3 + h.a*2)*0.28;
+    } else if (R.kind === 'coaster') {
+      // gravity does the pacing: quick through the dips, laboured over the crests,
+      // with a floor under it so it can never stall on top of a hill
+      const y = R.P(R.t)[1];
+      const v = Math.sqrt(Math.max(1.6, 2*9.8*(8.2 - y))) * 0.055;
+      R.t = (R.t + v*dt*6) % (Math.PI*2);
+      const [x, cy, z] = R.P(R.t), [x2, y2, z2] = R.P(R.t + 0.04);
+      R.cart.position.set(x, cy + 0.32, z);
+      R.cart.rotation.set(-Math.asin(THREE.MathUtils.clamp((y2 - cy)/Math.max(0.001, Math.hypot(x2-x, y2-cy, z2-z)), -1, 1)),
+                          Math.atan2(x2 - x, z2 - z), 0, 'YXZ');
+    } else {
+      for (const c of R.cars) {
+        const ridden = riding === R && R.cars[R.seat] === c;
+        if (ridden) {                                    // you get to steer yours
+          const t = (keys.KeyA||keys.ArrowLeft?1:0) - (keys.KeyD||keys.ArrowRight?1:0);
+          const g = (keys.KeyW||keys.ArrowUp?1:0) - (keys.KeyS||keys.ArrowDown?1:0);
+          c.yaw += t*2.2*dt; c.spd += (g*6 - c.spd)*Math.min(1, dt*2.2);
+        } else {
+          c.turn += (Math.random()-0.5)*dt*6;
+          c.turn = THREE.MathUtils.clamp(c.turn, -1.6, 1.6);
+          c.yaw += c.turn*dt;
+          c.spd += (4.2 - c.spd)*Math.min(1, dt);
+        }
+        let nx = c.x + Math.sin(c.yaw)*c.spd*dt, nz = c.z + Math.cos(c.yaw)*c.spd*dt;
+        // the wall turns you round rather than stopping you dead
+        if (nx < R.bx - R.HW + 1.2) { nx = R.bx - R.HW + 1.2; c.yaw = -c.yaw + Math.PI; c.bump = 0.2; }
+        if (nx > R.bx + R.HW - 1.2) { nx = R.bx + R.HW - 1.2; c.yaw = -c.yaw + Math.PI; c.bump = 0.2; }
+        if (nz < R.bz - R.HD + 1.2) { nz = R.bz - R.HD + 1.2; c.yaw = Math.PI - c.yaw; c.bump = 0.2; }
+        if (nz > R.bz + R.HD - 1.2) { nz = R.bz + R.HD - 1.2; c.yaw = Math.PI - c.yaw; c.bump = 0.2; }
+        c.x = nx; c.z = nz;
+        for (const o of R.cars) {                        // and each other, which is the point
+          if (o === c) continue;
+          const dx = c.x - o.x, dz = c.z - o.z, d = Math.hypot(dx, dz);
+          if (d > 2.1 || d < 1e-4) continue;
+          const push = (2.1 - d)/2;
+          c.x += dx/d*push; c.z += dz/d*push; o.x -= dx/d*push; o.z -= dz/d*push;
+          c.yaw += 0.7; o.yaw -= 0.7; c.bump = o.bump = 0.25;
+          if (!c.hitT || performance.now() - c.hitT > 400) { c.hitT = performance.now(); dingSfx(); }
+        }
+        c.bump = Math.max(0, c.bump - dt);
+        c.g.position.set(c.x, c.bump*0.12, c.z);
+        c.g.rotation.set(0, c.yaw, c.bump*0.18, 'YXZ');
+      }
+    }
+  }
+}
+// F on a ride: get on, or get off. Returns true when it has taken the keypress.
+function tryRide() {
+  if (riding) {
+    const s = rideSeat(riding);
+    riding = null; rideExitCd = 0.4;
+    camYaw = s.yaw + camYaw; camPitch = -0.15;   // carry the look angle back out with you
+    player.visible = true;
+    player.position.set(s.x + Math.sin(s.yaw + Math.PI/2)*3.5, 0, s.z + Math.cos(s.yaw + Math.PI/2)*3.5);
+    playerVel.set(0,0,0);
+    return true;
+  }
+  if (mode !== 'foot' || playerRag.active || rideExitCd > 0) return false;
+  for (const R of FAIR) {
+    const dx = R.x - player.position.x, dz = R.z - player.position.z;
+    if (dx*dx + dz*dz > R.r*R.r) continue;
+    if (R.kind === 'bumper') R.seat = (R.seat + 1) % R.cars.length;
+    else if (R.kind === 'carousel') R.seat = (R.seat + 1) % R.horses.length;
+    riding = R; player.visible = false; camYaw = 0; camPitch = 0;   // look starts dead ahead
+    toast('ENJOY THE RIDE');
+    return true;
+  }
+  return false;
+}
+function nearRide() {
+  if (mode !== 'foot' || playerRag.active) return null;
+  for (const R of FAIR) {
+    const dx = R.x - player.position.x, dz = R.z - player.position.z;
+    if (dx*dx + dz*dz <= R.r*R.r) return R;
+  }
+  return null;
 }
 
 // =================================================================
@@ -7582,6 +7917,19 @@ function updateCamera(dt, now) {
   }
   if (camera.near !== 0.4) { camera.near = 0.4; camera.updateProjectionMatrix(); }
   scene.fog = townFog;
+  if (riding) {
+    // First person, straight from the seat. The mouse still looks around, added on top
+    // of whichever way the ride is pointing, so you can watch the fair go past.
+    const s2 = rideSeat(riding);
+    camera.position.set(s2.x, s2.y, s2.z);
+    camera.fov += (72 - camera.fov) * Math.min(1, dt*4);   // a touch wide, for the speed
+    camera.updateProjectionMatrix();
+    const yaw = s2.yaw + camYaw, pitch = THREE.MathUtils.clamp(camPitch, -0.9, 0.7);
+    camera.lookAt(camTarget.set(s2.x + Math.sin(yaw)*Math.cos(pitch)*10,
+                                s2.y + Math.sin(pitch)*10,
+                                s2.z + Math.cos(yaw)*Math.cos(pitch)*10));
+    return;
+  }
   const inCar = mode === 'car';
   const subject = inCar ? car.position : player.position;
   const eye = inCar ? 2.0 : 1.7;
@@ -7657,6 +8005,9 @@ function updateHUD(dt) {
     else if (door) { promptEl.style.display='block';
       promptEl.innerHTML = door.swing > 0.5 ? 'Press <b>F</b> to close the door'
                                             : `Press <b>F</b> to open ${door.name}`; }
+    else if (riding) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to get off'; }
+    else if (nearRide()) { promptEl.style.display='block';
+      promptEl.innerHTML = 'Press <b>F</b> to ride the <b>' + nearRide().label + '</b>'; }
     else if (nearestJackable()) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to borrow this car'; }
     else if (car.position.distanceTo(player.position) < 7) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to get in'; }
     else promptEl.style.display = 'none';
@@ -8023,6 +8374,7 @@ function animate() {
   updatePeds(dt);
   updateChickens(dt);
   updateBombs(dt);
+  updateRides(dt);
   updatePets(dt);
   updateProps(dt);
   updateCoins(dt, sub);
