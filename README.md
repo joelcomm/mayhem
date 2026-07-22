@@ -24,7 +24,8 @@ mean getting asset base paths right in two places for no gain here.
 
 **Press `G` for the tuning panel** (`lil-gui`). Top speed, acceleration, armour, ramp
 height and run-up, traffic density, fog, sun, ambient and interior lamp intensity,
-camera distance, plus coins/heat/repair cheats — all live, while you drive. Almost
+camera distance, ink-outline weight/tolerance/fade (with an on-off A/B and a raw
+buffer view), plus coins/heat/repair cheats — all live, while you drive. Almost
 every constant in this game was originally landed by editing a number, reloading,
 waiting for the town to generate and driving back to look at it; these are the dials
 that cost the most round trips.
@@ -234,8 +235,8 @@ so a hundred of them cost no extra draw calls. They never join `peds`, so the ki
 anger and separation systems ignore them. Their bodies are built after the ped spawn
 (pickLook's palettes don't exist when the interiors pass runs), inside `rngNeutral`.
 
-Doors are **three InstancedMeshes** (leaf, ink shell, knob), not a hinge Group each —
-at forty-plus doors that's the difference between 3 draw calls and ~130. A swinging door
+Doors are **two InstancedMeshes** (leaf, knob), not a hinge Group each —
+at forty-plus doors that's the difference between 2 draw calls and ~90. A swinging door
 is just its instance matrix recomputed. And since `SHOP_NAMES` cycles, shop names repeat:
 a door must hold a **direct reference to its room** — looking the room up by name binds
 every duplicate to the first copy.
@@ -400,11 +401,55 @@ light reads better than a brighter patch of ground.
 
 **To do** — lit windows and Club Inferno coming alive after dark; stunt scoring for
 air time; wanted escalation (roadblocks, spike strips); reviving the shelved prison
-minigame in some better form.
+minigame in some better form. On the graphics side: authored GLTF props (sparingly —
+the code-built box aesthetic is a genuine strength), rim lighting, a water shader for
+the river, LOD.
 
 ## How it's drawn
-Everything is `MeshToonMaterial` on a 3-step ramp, with black back-face shells for
-ink outlines.
+Everything is `MeshToonMaterial` on a 3-step ramp. **The ink outlines are a
+post-process**, not geometry.
+
+**The ink pass.** Outlines used to be a back-face shell mesh per object — a second
+copy of the geometry pushed out along its normals and drawn in flat ink. It looked
+right, but it duplicated the draw of the 1,400-person crowd, all the traffic and all
+~1,650 trees, and it could only ever draw a *silhouette*: a box seen face-on had no
+lines on it at all. It is now a screen-space edge detect over the depth buffer the
+scene render already produced (`InkPass`, in the POST section).
+
+The test is the **second difference** of view depth across a pixel, not the first. A
+first difference lights up any receding surface — the whole road ahead of you. The
+second difference is zero across a flat plane *however steeply it leans away*, and
+spikes only where the surface genuinely breaks. That is what separates a silhouette
+from a floor. It also draws interior lines, because a crease between two flat faces
+is a break in the depth **gradient**: kerbs, window reveals, roof ridges, the corner
+where two walls of a room meet — detail the shells could never see.
+
+Measured at the spawn, per frame: **489 draw calls / 22.9M vertices, down from
+553 / 32.0M** with the shells. A depth *and* view-normal version was built first and
+thrown away: the extra full-scene render into a normal buffer cost 917 calls / 46.6M
+vertices — far more than the shells it was meant to replace — for a marginally
+cleaner crease on shallow angles. The depth buffer this reads is free.
+
+Two things the pass depends on:
+- **Nothing transparent may write depth.** Every transparent thing in this game —
+  glow discs, beacons, headlight cones, billboard signs, the sky dome, car glass —
+  stands in for light rather than for mass, and a free-standing billboard that stamps
+  its quad into depth comes back as an ink rectangle floating in mid-air. `tagNoInk`
+  walks the finished scene once and sets `depthWrite = false` on all of them (it is
+  called again for a new car rig from the garage). Transparent materials have no
+  business writing depth anyway.
+- **`composer.setSize` takes CSS pixels** and applies the pixel ratio itself, so a
+  pass's own `setSize` receives drawing-buffer pixels. Multiplying by the ratio at
+  the call site makes every sample offset sub-texel and the lines simply never
+  appear — which looks exactly like a broken shader.
+
+Lines fade out between 150 m and 340 m: a one-pixel line on a townsperson 300 m away
+is a crawling speck, and the fog has taken them anyway. The map view (near plane 250)
+therefore has no ink, which is what it wants. `thickness` is in **CSS** pixels, scaled
+by the device ratio, so a line is the same weight on a retina display as on a plain
+one. The whole thing is live under **Ink outlines** in the G panel, including an
+on/off toggle for A/B and a `show buffer` view that dumps linearised depth or the raw
+edge mask to the screen — how the sub-texel bug above was found.
 
 **The detail pass.** Every primitive that was meant to be round now is: cylinders and
 spheres swept up to 16-28 segments, cones to 16 — *except* cones with four or fewer
@@ -430,8 +475,9 @@ which is why the town stays byte-identical through the whole pass.
 This pass is only cheap because of the private-PRNG work: geometry no longer draws
 from the town's stream, so poly counts can change freely and the build stays
 byte-identical (`spawn 145,-197`, `trees 1641/176`, 43 rooms — verified before and
-after). Under the old scheme every one of these edits would have re-rolled the town. Outline meshes **share the `instanceMatrix`** of the mesh they wrap, so
-an outlined crowd costs no extra matrix maths.
+after). Under the old scheme every one of these edits would have re-rolled the town.
+The same is true of *deleting* geometry: ripping out ~14 outline wrappers, the door
+ink InstancedMesh and every per-mesh shell moved no canary at all.
 
 Crowds, traffic, trees, props, coins and signals are all `InstancedMesh`. Buildings
 are bucketed by colour and merged, so the whole town is a few dozen draw calls.
@@ -594,6 +640,12 @@ are bucketed by colour and merged, so the whole town is a few dozen draw calls.
   bulging metres onto the carriageway. Short chunks hug the rail; the
   `carriagewayBlocked` audit is the proof it worked. They are pushed to `colliders`
   directly, not through `addBox`, so the radar and the overlap audit ignore them.
+- **A transparent material must not write depth.** The ink pass is an edge detect
+  over the scene's depth buffer, so anything that stamps itself into depth gets an
+  outline — including the quad of a free-standing billboard sign, which comes back as
+  an ink rectangle in mid-air. `tagNoInk` forces `depthWrite = false` across the
+  finished scene; anything transparent built *after* that (a new car rig from the
+  garage) has to be passed through it too.
 - Two **visible coplanar faces** z-fight into a dithered mess. The church door's front face
   sat at exactly the steeple base's front face (`cz-20.5`); the fix is to stand one proud.
   Note it is only a problem when *both* faces are visible — a door's back face flush with a

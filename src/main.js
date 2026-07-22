@@ -6,6 +6,7 @@ import { EffectComposer } from 'three/examples/jsm/postprocessing/EffectComposer
 import { RenderPass } from 'three/examples/jsm/postprocessing/RenderPass.js';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
+import { Pass, FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import * as BGU from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import GUI from 'lil-gui';
 
@@ -79,9 +80,12 @@ const rnd = (a, b) => a + prng()*(b-a);
 
 // =================================================================
 //  CARTOON SHADING
-//  Toon ramp + a black back-face shell gives the flat, inked look of the
-//  show. Outline meshes share the instanceMatrix of the mesh they wrap,
-//  so an outlined crowd costs no extra matrix maths.
+//  Toon ramp for the flat colour; the ink lines are a post-process
+//  (see POST, at the bottom) rather than a back-face shell per mesh.
+//  The shells doubled the vertex work on exactly the heaviest objects
+//  in the game — 1,400 townsfolk, all traffic, ~1,650 trees — and only
+//  ever drew silhouettes. The edge-detect pass draws interior lines too,
+//  at a constant screen-space weight, for one extra full-screen quad.
 // =================================================================
 function toonRamp(steps) {
   const c = document.createElement('canvas'); c.width = steps; c.height = 1;
@@ -103,29 +107,19 @@ function toon(color) {                       // shared per colour, so merging st
   return matCache.get(color);
 }
 function toonMapped(map) { return new THREE.MeshToonMaterial({ map, gradientMap: RAMP }); }
-const INK = new THREE.MeshBasicMaterial({ color: 0x14192e, side: THREE.BackSide });
-// expand a geometry along its normals so the shell sits just outside the silhouette
-function shell(geo, amt) {
-  const g = geo.clone();
-  const p = g.attributes.position, n = g.attributes.normal;
-  for (let i = 0; i < p.count; i++)
-    p.setXYZ(i, p.getX(i)+n.getX(i)*amt, p.getY(i)+n.getY(i)*amt, p.getZ(i)+n.getZ(i)*amt);
-  p.needsUpdate = true; return g;
-}
-// an InstancedMesh that traces another one, reusing its matrices
-function outlineOf(src, amt) {
-  const o = new THREE.InstancedMesh(shell(src.geometry, amt), INK, src.count);
-  o.instanceMatrix = src.instanceMatrix;      // shared: written once, drawn twice
-  o.frustumCulled = false; o.castShadow = false; o.receiveShadow = false;
-  o.renderOrder = -1;
-  return o;
-}
-const outlines = [];
-function addWithOutline(mesh, amt) {
-  scene.add(mesh);
-  const o = outlineOf(mesh, amt || 0.035);
-  outlines.push({ o, src: mesh }); scene.add(o);
-  return mesh;
+const INK_COLOR = 0x14192e;
+// The ink pass reads the scene's depth buffer, so anything that writes depth gets
+// outlined. Every transparent thing in this game — glow discs, beacons, headlight
+// cones, billboard signs, the sky dome, car glass — stands in for light rather than
+// for mass, and a free-standing billboard that stamps its quad into depth comes back
+// as an ink rectangle floating in mid-air. Transparent materials have no business
+// writing depth anyway (they are drawn back-to-front after the opaque pass), so this
+// just makes that explicit.
+function tagNoInk(root) {
+  root.traverse(o => {
+    const m = o.material;
+    if (m && !Array.isArray(m) && (m.transparent || o.isSprite)) m.depthWrite = false;
+  });
 }
 
 // =================================================================
@@ -2963,7 +2957,7 @@ for (let i = 0; i < 1600; i++) {
     lv.setColorAt(i, col.setHex(rpick(LEAFC)));
   });
   tr.instanceMatrix.needsUpdate = true; lv.instanceMatrix.needsUpdate = true;
-  scene.add(tr); addWithOutline(lv, 0.09);
+  scene.add(tr, lv);
 }
 {
   const hk = hedges.filter(h => !onRoad(h.x, h.z, 1.6) && !pointBlocked(h.x, h.z, 0.6));
@@ -2976,7 +2970,7 @@ if (hedges.length) {
     dummy.scale.set(h.r*1.5, h.r, h.r*1.5); dummy.updateMatrix();
     hg.setMatrixAt(i, dummy.matrix);
   });
-  hg.instanceMatrix.needsUpdate = true; addWithOutline(hg, 0.05);
+  hg.instanceMatrix.needsUpdate = true; scene.add(hg);
 }
 
 // street furniture along the sidewalks
@@ -3093,7 +3087,6 @@ const coins = [];
   coinsSpots.forEach((c, i) => coins.push({ x:c.x, z:c.z, got:false, i }));
   mesh.count = coins.length;
   scene.add(mesh);
-  addWithOutline(mesh, 0.05);
   var coinMesh = mesh;
 }
 let coinSpin = 0;
@@ -3479,7 +3472,6 @@ for (const type in CAR_TYPES) {
     if (!geo[p]) continue;
     set[p] = instanced(geo[p], VEH_MATS[p], VEH_CAP, p !== 'glass');
     set[p].count = 0; scene.add(set[p]);
-    if (p === 'paint' || p === 'dark') addWithOutline(set[p], 0.05);
   }
   set.paint.setColorAt(0, new THREE.Color(0xffffff));
   set.paint.instanceColor.array.fill(1);
@@ -3849,8 +3841,7 @@ for (const k in CI) {
   CI[k].setColorAt(0, new THREE.Color(0xffffff));
   CI[k].instanceColor.array.fill(1);
   CI[k].instanceColor.needsUpdate = true;
-  if (k === 'pupil' || k === 'mouth') scene.add(CI[k]);
-  else addWithOutline(CI[k], k === 'eyes' ? 0.012 : 0.028);
+  scene.add(CI[k]);
 }
 const rootM = new THREE.Matrix4(), partM = new THREE.Matrix4(), cCnt = {};
 function renderCrowd(sub) {
@@ -3918,7 +3909,6 @@ function renderCrowd(sub) {
     CI[k].instanceMatrix.needsUpdate = true;
     if (CI[k].instanceColor) CI[k].instanceColor.needsUpdate = true;
   }
-  for (const { o, src } of outlines) o.count = src.count;
 }
 
 const peds = [];
@@ -4196,17 +4186,17 @@ function hitPeopleAt(x, z, dx, dz, speed, radius, byPlayer) {
 // =================================================================
 function buildPlayerCar(type, color) {
   const g = carGeo(type), grp = new THREE.Group();
-  const mk = (geo, mat, outline) => {
+  const mk = (geo, mat) => {
     if (!geo) return null;
     const m = new THREE.Mesh(geo, mat); m.castShadow = true; m.receiveShadow = true; grp.add(m);
-    if (outline) { const o = new THREE.Mesh(shell(geo, 0.055), INK); grp.add(o); }
     return m;
   };
-  mk(g.paint, new THREE.MeshToonMaterial({ color, gradientMap: RAMP }), true);
-  mk(g.dark, VEH_MATS.dark, true);
-  mk(g.chrome, VEH_MATS.chrome, false);
-  mk(g.glass, VEH_MATS.glass, false);
-  mk(g.lamp, VEH_MATS.lamp, false);
+  mk(g.paint, new THREE.MeshToonMaterial({ color, gradientMap: RAMP }));
+  mk(g.dark, VEH_MATS.dark);
+  mk(g.chrome, VEH_MATS.chrome);
+  mk(g.glass, VEH_MATS.glass);
+  mk(g.lamp, VEH_MATS.lamp);
+  tagNoInk(grp);                     // the glass, so the windscreen isn't outlined
   return grp;
 }
 const car = new THREE.Group(); scene.add(car);
@@ -4220,18 +4210,17 @@ setPlayerCar('convert', 0xf07ab0);
 // the visible driver, a full mesh rather than an instance
 function buildPerson(look) {
   const g = new THREE.Group();
-  const put3 = (geo, color, outline) => {
+  const put3 = (geo, color) => {
     const m = new THREE.Mesh(geo, new THREE.MeshToonMaterial({ color, gradientMap: RAMP }));
     m.castShadow = true; g.add(m);
-    if (outline) g.add(new THREE.Mesh(shell(geo, 0.035), INK));
     return m;
   };
-  put3(BOX(0.62, 0.62, 0.3).translate(0,1.16,0), look.shirt, true);
-  put3(new THREE.SphereGeometry(0.28, 16, 14).translate(0,1.72,0), look.skin, true);
-  put3(muzzleGeo.clone(), look.skin, true);
+  put3(BOX(0.62, 0.62, 0.3).translate(0,1.16,0), look.shirt);
+  put3(new THREE.SphereGeometry(0.28, 16, 14).translate(0,1.72,0), look.skin);
+  put3(muzzleGeo.clone(), look.skin);
   const style = look.style || 'short';
   const HG = { short:hairShort, tall:hairTall, spiky:hairSpiky, bun:hairBun, bald:hairBald };
-  put3((HG[style] || hairShort).clone(), look.hair, true);
+  put3((HG[style] || hairShort).clone(), look.hair);
   g.add(new THREE.Mesh(mouthGeo.clone(), new THREE.MeshBasicMaterial({ color:0x7a3b34 })));
   g.add(new THREE.Mesh(baked(eyePair, 0, 1.85, 0.185), new THREE.MeshToonMaterial({ color:0xffffff, gradientMap:RAMP })));
   g.add(new THREE.Mesh(baked(pupilPair, 0, 1.85, 0.185), new THREE.MeshBasicMaterial({ color:0x14192e })));
@@ -4239,7 +4228,7 @@ function buildPerson(look) {
     const j = new THREE.Group(); j.position.set(px, top, 0);
     const geo = BOX(w, len, w).translate(0, -len/2, 0);
     const m = new THREE.Mesh(geo, new THREE.MeshToonMaterial({ color, gradientMap: RAMP }));
-    m.castShadow = true; j.add(m); j.add(new THREE.Mesh(shell(geo, 0.03), INK));
+    m.castShadow = true; j.add(m);
     g.add(j); return j;
   };
   const legL = limb(-0.14, look.pants, 0.2, 0.85, 0.86);
@@ -4247,7 +4236,6 @@ function buildPerson(look) {
   for (const lg of [legL, legR]) {
     const sh2 = new THREE.Mesh(shoeGeo.clone(), new THREE.MeshToonMaterial({ color: look.shoe || 0x2b2f38, gradientMap: RAMP }));
     sh2.castShadow = true; lg.add(sh2);
-    lg.add(new THREE.Mesh(shell(shoeGeo.clone(), 0.03), INK));
   }
   const armL = limb(-0.37, look.shirt, 0.16, 0.58, 1.42);
   const armR = limb( 0.37, look.shirt, 0.16, 0.58, 1.42);
@@ -5060,8 +5048,8 @@ const chickens = [];
   const N = 12;
   const cBody = instanced(bodyGeo, new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP }), N);
   const cTrim = instanced(trimGeo, toon(0xe8952f), N, false);
-  cTrim.instanceMatrix = cBody.instanceMatrix;         // shared, like the ink outlines
-  addWithOutline(cBody, 0.02); scene.add(cTrim);
+  cTrim.instanceMatrix = cBody.instanceMatrix;         // shared: written once, drawn twice
+  scene.add(cBody, cTrim);
   const FEATHER = [0xffffff, 0xf3e6c8, 0xc9863f, 0xe8e3d3];
   const col = new THREE.Color();
   for (let i = 0; i < N; i++) {
@@ -5126,7 +5114,6 @@ function updateChickens(dt) {
   }
   chickens.mesh.count = chickens.trim.count = i;
   chickens.mesh.instanceMatrix.needsUpdate = true;
-  for (const { o, src: s } of outlines) if (s === chickens.mesh) o.count = i;
 }
 
 // =================================================================
@@ -5383,9 +5370,6 @@ function updateMarkers(dt, sub) {
       m.position.set(rx, 0.02, rz); m.rotation.y = yaw;
       m.castShadow = true; m.receiveShadow = true;
       scene.add(m);
-      const ink = new THREE.Mesh(shell(g, 0.06), INK);   // position/rotation are copied
-      ink.position.copy(m.position); ink.rotation.copy(m.rotation);
-      ink.renderOrder = -1; scene.add(ink);
       RAMPS.push({ x: rx, z: rz, ux, uz, w, len, h });
     }
     if (RAMPS.length) {
@@ -5465,7 +5449,6 @@ const trophies = [];
   }
   mesh.count = trophies.length;
   scene.add(mesh);
-  addWithOutline(mesh, 0.04);
   var trophyMesh = mesh;
 }
 let trophyCount = 0, trophySpin = 0;
@@ -5626,7 +5609,6 @@ const arrowGeo = merge([
   baked(BOX(0.52, 0.3, 1.4), 0, 0, -0.6),
 ]);
 const guideArrow = new THREE.Mesh(arrowGeo, new THREE.MeshBasicMaterial({ color: 0xffd23b }));
-guideArrow.add(new THREE.Mesh(shell(arrowGeo, 0.045), INK));
 guideArrow.visible = false; scene.add(guideArrow);
 // and the pillar of light on the destination, ringed at its trigger radius
 const beaconMat = new THREE.MeshBasicMaterial({ color: 0xffd23b, transparent: true, opacity: 0.2,
@@ -6434,16 +6416,14 @@ const roomLight = new THREE.PointLight(0xfff2d0, 26, 34, 1.8);
 roomLight.visible = false; scene.add(roomLight);
 
 // Exterior doors. With every shop enterable there are dozens of leaves, so they are
-// three InstancedMeshes (leaf, ink shell, knob) rather than a hinge Group each — a
-// swinging door is just its instance matrix recomputed. The unit leaf has its hinge
+// two InstancedMeshes (leaf, knob) rather than a hinge Group each — a swinging
+// door is just its instance matrix recomputed. The unit leaf has its hinge
 // edge at the origin; per-door width/height ride in the instance scale.
 const DOOR_MAT = new THREE.MeshToonMaterial({ color: 0x8c4a2f, gradientMap: RAMP });
 const doorLeafG = BOX(1, 1, 0.16).translate(0.5, 0.5, 0);
 const doorLeaf = instanced(doorLeafG, DOOR_MAT, ENTERABLE.length);
-const doorInk = new THREE.InstancedMesh(shell(doorLeafG, 0.035), INK, ENTERABLE.length);
-doorInk.frustumCulled = false; doorInk.renderOrder = -1;
 const doorKnob = instanced(new THREE.SphereGeometry(0.1, 16, 12), toon(0xc9a24b), ENTERABLE.length, false);
-scene.add(doorLeaf, doorInk, doorKnob);
+scene.add(doorLeaf, doorKnob);
 const hingeM = new THREE.Matrix4(), knobLocal = new THREE.Matrix4();
 function setDoorMatrix(i) {
   const e = ENTERABLE[i];
@@ -6453,7 +6433,6 @@ function setDoorMatrix(i) {
   hingeM.copy(dummy.matrix);
   dummy.scale.set(e.w, e.h, 1); dummy.updateMatrix();
   doorLeaf.setMatrixAt(i, dummy.matrix);
-  doorInk.setMatrixAt(i, dummy.matrix);
   knobLocal.makeTranslation(e.w - 0.28, e.h*0.5, 0.16);
   doorKnob.setMatrixAt(i, partM.multiplyMatrices(hingeM, knobLocal));
 }
@@ -6470,9 +6449,8 @@ ENTERABLE.forEach((e, i) => {
   e.block = { minX: 0, maxX: 0, minZ: 0, maxZ: 0 };
   colliders.push(e.block);
 });
-doorLeaf.count = doorInk.count = doorKnob.count = ENTERABLE.length;
+doorLeaf.count = doorKnob.count = ENTERABLE.length;
 doorLeaf.instanceMatrix.needsUpdate = true;
-doorInk.instanceMatrix.needsUpdate = true;
 doorKnob.instanceMatrix.needsUpdate = true;
 function setDoorBlock(e) {
   if (e.open > 0.35 || !e.room) { e.block.minX = e.block.maxX = 1e9; e.block.minZ = e.block.maxZ = 1e9; return; }
@@ -6529,7 +6507,6 @@ function updateDoors(dt) {
   }
   if (moved) {
     doorLeaf.instanceMatrix.needsUpdate = true;
-    doorInk.instanceMatrix.needsUpdate = true;
     doorKnob.instanceMatrix.needsUpdate = true;
   }
 }
@@ -6829,12 +6806,149 @@ function updateHUD(dt) {
 setTimeout(() => document.getElementById('controls').style.opacity = '0.35', 12000);
 
 // =================================================================
-//  POST
+//  POST — the ink pass
+//
+//  The outlines used to be a back-face shell mesh per object: a second copy of
+//  the geometry, pushed out along its normals, drawn in flat ink. It cost a
+//  duplicate draw of the crowd, the traffic and every tree, and it could only
+//  ever draw a silhouette — a box seen face-on had no lines on it at all.
+//
+//  This finds the edges in screen space instead, out of the depth buffer the
+//  scene render already produced. The test is the *second* difference across a
+//  pixel, not the first: a first difference lights up any receding surface (the
+//  whole road ahead of you), while the second difference is zero across a flat
+//  plane however steeply it leans away, and spikes wherever the surface breaks.
+//  That is what separates a silhouette from a floor — and, because a crease
+//  between two flat faces is a break in the depth *gradient*, it draws the
+//  interior lines (kerbs, window reveals, roof ridges) the shells never could.
+//
+//  Depth alone was a deliberate choice. Rendering the scene a second time into a
+//  view-normal buffer gives a slightly cleaner crease, but measured here it cost
+//  +364 draw calls and +14.6M vertices a frame — far more than the shells it was
+//  meant to replace. The buffer this reads is free.
+//
+//  Lines fade out with distance (fadeNear/fadeFar): a one-pixel line on a
+//  townsperson 300 m away is a crawling speck, and the fog has taken them anyway.
 // =================================================================
+
+// The composer's two ping-pong buffers need depth *textures*, not just depth
+// buffers, or there is nothing to sample. Both get one, because which of the two
+// holds the scene render when this pass runs depends on how many passes have
+// swapped ahead of it.
 const composer = new EffectComposer(renderer);
+for (const rt of [composer.renderTarget1, composer.renderTarget2]) {
+  rt.depthTexture = new THREE.DepthTexture(rt.width, rt.height, THREE.UnsignedIntType);
+  rt.depthTexture.minFilter = rt.depthTexture.magFilter = THREE.NearestFilter;
+}
+
+// `thickness` is in CSS pixels; the shader works in drawing-buffer pixels, so it is
+// scaled by the device ratio at setSize time. Otherwise a line is half as heavy on a
+// retina display as on a plain one — the one thing a screen-space outline must not do.
+const inkParams = {
+  on: true, thickness: 1.0, depthSense: 0.9,
+  fadeNear: 150, fadeFar: 340, strength: 1.0, debug: 'off',
+};
+const INK_DEBUG = { off: 0, depth: 1, edges: 2 };
+
+const InkShader = {
+  uniforms: {
+    tDiffuse: { value: null }, tDepth: { value: null },
+    resolution: { value: new THREE.Vector2(1, 1) },
+    cameraNear: { value: 0.4 }, cameraFar: { value: 4000 },
+    thickness: { value: inkParams.thickness },
+    depthSense: { value: inkParams.depthSense },
+    fadeNear: { value: inkParams.fadeNear }, fadeFar: { value: inkParams.fadeFar },
+    strength: { value: inkParams.strength },
+    debugMode: { value: 0 },
+    inkColor: { value: new THREE.Color(INK_COLOR) },
+  },
+  vertexShader: /* glsl */`
+    varying vec2 vUv;
+    void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }
+  `,
+  fragmentShader: /* glsl */`
+    #include <packing>
+    uniform sampler2D tDiffuse, tDepth;
+    uniform vec2  resolution;
+    uniform float cameraNear, cameraFar, thickness, depthSense;
+    uniform float fadeNear, fadeFar, strength;
+    uniform int   debugMode;
+    uniform vec3  inkColor;
+    varying vec2 vUv;
+
+    float dist(vec2 uv) {
+      float d = texture2D(tDepth, uv).x;
+      return -perspectiveDepthToViewZ(d, cameraNear, cameraFar);   // metres, positive
+    }
+
+    void main() {
+      vec4 base = texture2D(tDiffuse, vUv);
+      vec2 t = thickness / resolution;
+      vec2 dx = vec2(t.x, 0.0), dy = vec2(0.0, t.y);
+
+      float d0 = dist(vUv);
+      float dl = dist(vUv - dx), dr = dist(vUv + dx);
+      float du = dist(vUv - dy), dd = dist(vUv + dy);
+
+      float curve = abs(dl + dr - 2.0*d0) + abs(du + dd - 2.0*d0);
+      // a plane's *projected* curvature still grows with distance, so the tolerance
+      // has to grow with it or the far pavement fills up with lines
+      float tol = depthSense * (0.05 + d0*0.004 + d0*d0*0.0009);
+      float edge = smoothstep(0.9, 1.8, curve / tol);
+
+      float fade = 1.0 - smoothstep(fadeNear, fadeFar, d0);
+      float e = clamp(edge * fade * strength, 0.0, 1.0);
+      if (debugMode == 1) { gl_FragColor = vec4(vec3(fract(d0*0.1)), 1.0); return; }
+      if (debugMode == 2) { gl_FragColor = vec4(vec3(e), 1.0); return; }
+      gl_FragColor = vec4(mix(base.rgb, inkColor, e), base.a);
+    }
+  `,
+};
+
+const COPY_SHADER = {
+  uniforms: { tDiffuse: { value: null } },
+  vertexShader: InkShader.vertexShader,
+  fragmentShader: 'uniform sampler2D tDiffuse; varying vec2 vUv; void main(){ gl_FragColor = texture2D(tDiffuse, vUv); }',
+};
+
+class InkPass extends Pass {
+  constructor() {
+    super();
+    this.material = new THREE.ShaderMaterial(InkShader);
+    this.copy = new THREE.ShaderMaterial(COPY_SHADER);
+    this.fsq = new FullScreenQuad(this.material);
+    this.needsSwap = true;
+  }
+  setSize(w, h) {                       // w/h are drawing-buffer pixels
+    this.material.uniforms.resolution.value.set(w, h);
+    this.retune();
+  }
+  retune() { this.material.uniforms.thickness.value = inkParams.thickness * renderer.getPixelRatio(); }
+  render(renderer, writeBuffer, readBuffer) {
+    const off = !inkParams.on;          // straight passthrough, for A/B in the panel
+    const mat = off ? this.copy : this.material;
+    const u = mat.uniforms;
+    u.tDiffuse.value = readBuffer.texture;
+    if (!off) {
+      u.tDepth.value = readBuffer.depthTexture;
+      u.cameraNear.value = camera.near; u.cameraFar.value = camera.far;
+    }
+    this.fsq.material = mat;
+    renderer.setRenderTarget(this.renderToScreen ? null : writeBuffer);
+    if (this.clear) renderer.clear();
+    this.fsq.render(renderer);
+  }
+}
+
 composer.addPass(new RenderPass(scene, camera));
+const inkPass = new InkPass();
+composer.addPass(inkPass);            // before bloom: ink lines are not a light source
 composer.addPass(new UnrealBloomPass(new THREE.Vector2(innerWidth, innerHeight), 0.16, 0.7, 0.85));
 composer.addPass(new OutputPass());
+// composer.setSize takes CSS pixels and applies the pixel ratio itself — a pass's own
+// setSize then receives drawing-buffer pixels, which is what the ink offsets want.
+// (Multiplying by the ratio here instead makes every offset sub-texel and the lines
+// simply never appear.)
 addEventListener('resize', () => {
   camera.aspect = innerWidth/innerHeight; camera.updateProjectionMatrix();
   renderer.setSize(innerWidth, innerHeight); composer.setSize(innerWidth, innerHeight);
@@ -6908,6 +7022,18 @@ rngNeutral(() => {
   const camP = { distance: carDists[0], height: 0, fov: 60 };
   cam$.add(camP, 'distance', 4, 30, 0.5).onChange(v => carDists[0] = v);
 
+  // The ink pass has no "reload and look" shortcut — a line weight is only judgeable
+  // against the actual town, moving. `on` is the A/B: flick it and the lines vanish.
+  const ink$ = gui.addFolder('Ink outlines');
+  const iu = inkPass.material.uniforms;
+  ink$.add(inkParams, 'on').name('outlines');
+  ink$.add(inkParams, 'thickness', 0.25, 3, 0.05).name('thickness (px)').onChange(() => inkPass.retune());
+  ink$.add(inkParams, 'debug', Object.keys(INK_DEBUG)).name('show buffer').onChange(v => iu.debugMode.value = INK_DEBUG[v]);
+  ink$.add(inkParams, 'strength', 0, 1, 0.02).onChange(v => iu.strength.value = v);
+  ink$.add(inkParams, 'depthSense', 0.1, 4, 0.05).name('tolerance').onChange(v => iu.depthSense.value = v);
+  ink$.add(inkParams, 'fadeNear', 20, 600, 5).name('fade from').onChange(v => iu.fadeNear.value = v);
+  ink$.add(inkParams, 'fadeFar', 40, 1200, 10).name('fade to').onChange(v => iu.fadeFar.value = v);
+
   const cheats$ = gui.addFolder('Cheats');
   cheats$.add({ coins: () => addCoins(1000) }, 'coins').name('+1000 coins');
   cheats$.add({ heat: () => clearHeat() }, 'heat').name('clear heat');
@@ -6916,6 +7042,11 @@ rngNeutral(() => {
   addEventListener('keydown', e => { if (e.code === 'KeyG') gui.show(gui._hidden); });
   gui.hide();                                   // out of the way until G is pressed
 }
+
+// Every glow disc, beacon, billboard and sprite in the finished scene, kept out of the
+// depth buffer the ink pass reads.
+tagNoInk(scene);
+
 
 const clock = new THREE.Clock();
 function animate() {
