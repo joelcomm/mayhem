@@ -11,7 +11,7 @@ so the first load needs an internet connection).
 | Mouse | look around (click for pointer lock, or drag) |
 | Shift | run (on foot) |
 | Space | handbrake / jump |
-| Left click | kick (on foot) — during the Yard Soaker round it fires the water gun instead |
+| Left click | kick (on foot) |
 | F | enter a building at its door · otherwise get in / out of a car — near stopped traffic it borrows theirs |
 | C | cycle camera distance |
 | R | reset (also clears heat) |
@@ -215,26 +215,16 @@ the thing that welds the job loop onto the chaos loop instead of competing with 
   with chickens (feather burst, respawn timer, chaos) and the round counts the
   dedicated `chickenKicked` counter, so running birds over with the car doesn't
   score — the boot is the whole game.
-- **YARD SOAKER** (Warden Norris, at the Penitentiary gate) — the full arena
-  ritual: raise the **portcullis** with F from the button outside, and *stepping
-  into the yard on foot* starts the round — the bars slam down behind you
-  (lockdown: F just says no mid-round). Prisoners in orange spawn on a ring
-  around the cell block and run radially out to the walls (never through the
-  gate span), where each one kneels and **plants a beeping wall charge** —
-  4.5 s of blinking red bulb and accelerating beeps, a stationary and very
-  soakable target. If a charge detonates the wall gets a **breach**: a dark
-  hole with rubble, an instant open exit — later runners mostly sprint straight
-  for an existing breach rather than plant anew, and **several walls can be
-  blown in one round**. Soak a planter and the charge is **DEFUSED!** with them.
-  Your gear: a cartoon **super soaker in hand**, a **reticule** at screen
-  centre, and **holding left click fires a long blue jet** — beads sampled
-  along a real ballistic arc that droops at the end of its reach, with a
-  splashdown at the tip. The **tank bar** under the reticule holds ~3.5 s of
-  water and only refills (in ~2 s) once you release the trigger. A **big round
-  clock and score** sit top-centre for the whole 60 s. 15 coins a head, +80
-  bonus at ten; all away = job failed. When time's up you're ejected back
-  outside with the gate down, win or lose — and the breaches are repaired
-  between rounds.
+- **YARD SOAKER — SHELVED.** The prison-break minigame (orange-jumpsuit runners
+  planting wall charges, blown breaches, the super soaker with reticule, water
+  jet and depleting tank bar) is fully built but **spiked by design decision**:
+  its giver, Warden Norris, is commented out in the markers block, which makes
+  the mission unreachable while every piece of machinery (`soak` def,
+  `spawnSoaker`/`updateSoak`/`blowWall`, the gun, reticule, tank bar, round
+  lockdown/eject) sits dormant behind it. Un-comment the marker to revive it.
+  The Penitentiary's **portcullis gate stays live** in free roam: F at the
+  button raises the prison bars, the yard is drivable, and the gate lowers
+  itself after a few seconds.
 - **DEMOLITION DERBY** (Crusher, at Victory Stadium) — 3 AI rigs (`t.derby`
   traffic entries, off the graph, no rejoin) chase and ram you on the infield;
   ram them back — damage ∝ impact speed, one full-speed hit wrecks one — until

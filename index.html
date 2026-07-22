@@ -2479,10 +2479,21 @@ const OPENING_DOOR = (() => {
                 ['DON’T EAT BEEF','#9ec96a','#2f3550'], ['CLOWN SHOW!','#7b4fa7','#ffd23b']];
   let bi = 0;
   for (const B of BLOCKS.filter(b => b.zone === 'house').slice(0, 4)) {
-    const u = B.cx, v = B.r.z0 - WALK_HW - 6;
+    const u = B.cx;
     const [txt, bg, fg] = BILL[bi++ % BILL.length];
-    const bx = u, bz = v;
-    if (pointBlocked(bx, bz, 4)) continue;
+    const bx = u, v0 = B.r.z0 - WALK_HW - 6;
+    if (pointBlocked(bx, v0, 4)) continue;      // the original veto, unchanged
+    // The fixed offset lands in the street reserve, and on a jittered street that
+    // can be the carriageway itself — a billboard in the middle of the road. Roads
+    // have no colliders, so pointBlocked never saw it. Test the board and both
+    // posts against onRoad and slide inward onto the block edge until all clear.
+    let bz = null;
+    for (const v of [v0, v0 + 3, B.r.z0 + 1, B.r.z0 + 4]) {
+      if (pointBlocked(bx, v, 4)) continue;
+      if (onRoad(bx, v, 2.5) || onRoad(bx - 8, v, 1.5) || onRoad(bx + 8, v, 1.5)) continue;
+      bz = v; break;
+    }
+    if (bz === null) continue;                  // rather no billboard than one in the road
     // The art faces the street to the south (-z), and the backing board sits *behind* it.
     // It used to be built at bz+0.4 — on the visible side of the plane — so every
     // billboard in town was a blank grey panel from the front and invisible from the back.
@@ -5099,8 +5110,13 @@ const MARKERS = [];
     'NURSE MABEL', 'Those chickens have taken the great hall. Boot them out!', 'feather');
   marker(STADIUM.cx, STADIUM.cz + STADIUM.rz + 9,
     'CRUSHER', 'Three rigs. One arena. Last one rolling wins.', 'derby');
-  if (PRISON.gate) marker(PRISON.gate.x + 6, PRISON.gate.z - 10,
-    'WARDEN NORRIS', "They're going over the walls! Grab the soaker and stop 'em.", 'soak');
+  // The Yard Soaker is SHELVED for now (design didn't land). The giver stays
+  // unspawned, which makes the whole mission unreachable; the machinery — the
+  // 'soak' def, spawnSoaker/updateSoak/blowWall, the soaker gun, reticule and
+  // tank — sits dormant behind it for a future revival. The portcullis gate
+  // stays live for free roam.
+  // if (PRISON.gate) marker(PRISON.gate.x + 6, PRISON.gate.z - 10,
+  //   'WARDEN NORRIS', "They're going over the walls! Grab the soaker and stop 'em.", 'soak');
   marker(SPAWN.x - 32, SPAWN.z - (ROAD_HW + 3.5),
     'AXEL', 'One lap of the ring, through the mountain. Beat the clock.', 'race');
 }
