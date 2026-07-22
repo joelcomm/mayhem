@@ -562,6 +562,17 @@ Crowds, traffic, trees, props, coins and signals are all `InstancedMesh`. Buildi
 are bucketed by colour and merged, so the whole town is a few dozen draw calls.
 
 ## Simulation
+- **Ram a car and it goes flying.** Above about 14 mph of impact the hit stops being a
+  shove and starts lifting a corner: vertical velocity, pitch and roll tumble, one
+  bounce on landing, then the tyres bite and the body rights itself. All of it scales
+  from nothing at that threshold, so a nudge in traffic still just slides the car and
+  only a real ram sends it barrel-rolling. Gravity is the same 26 the player's car falls
+  under, so a launched traffic car and a launched player car read as the same world. A
+  car is never handed back to the road graph while it is still airborne or mid-flip —
+  the knock extends itself until it is down and level — because a car righting itself in
+  mid-air, then snapping to a lane, is worse than no physics at all. Traffic has no
+  wreck state, so a car resting on its roof would block a lane for ever; that is why it
+  levels out rather than staying inverted.
 - **Traffic has a jam breaker.** Gap-following on its own deadlocks: a queue that
   backs through a junction blocks the cross traffic that would have cleared it, and
   anything parked in a lane — a wreck, or your own car — stops that lane for good,
@@ -706,6 +717,15 @@ are bucketed by colour and merged, so the whole town is a few dozen draw calls.
 - Lane-walking townsfolk are **re-placed from the road graph every frame** (`pedPlace`),
   so any push you apply to them must persist as an offset (`p.ox/p.oz`) or it is silently
   wiped next frame. The crowd-separation pass and the player shove both write it.
+- **Traffic has exactly the same problem, and had exactly the same bug.** A car's
+  position *and yaw* are recomputed from `(from, ei, dist)` every frame, so the instant
+  a knock expired, whatever the physics had done was wiped: a car you had just rammed
+  ten metres down the road blinked back into its lane, mid-frame. That reads in-game as
+  "the car disappeared and reappeared somewhere else" — the same illusion the `rejoin`
+  fix was meant to kill, one layer further up. `rejoin` now records the gap between
+  where the physics left the car and where the lane wants it (`rox/roz/royaw`, plus the
+  height and tilt) and the graph path adds that back, smoothstepped to zero over about
+  0.6 s. The car visibly drives itself back into line instead of teleporting.
 - Steering authority falls off with speed (`authority` in `updateCar`). Set too aggressively
   it made the car undriveable in town: at MAX_SPEED the turning circle was ~54 m, wider than
   a junction. It is ~29 m now. Measure it by sampling heading and position over a few frames

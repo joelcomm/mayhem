@@ -3676,7 +3676,8 @@ function spawnTraffic() {
   traffic.push({ type, color, col: new THREE.Color(color), x:0, z:0, yaw:0,
     ei, from: Math.random()<0.5 ? e.a : e.b, dist: Math.random()*e.len,
     baseSpeed: rnd(10, 17), cur: 6, gap: 99, fx:0, fz:1, stopping:false, waitT:0,
-    vx:0, vz:0, spin:0, knock:0, hitCooldown:0 });
+    vx:0, vz:0, spin:0, knock:0, hitCooldown:0,
+    y: 0, vy: 0, pitch: 0, roll: 0, pitchV: 0, rollV: 0, rec: 0, });
 }
 for (let i = 0; i < 165; i++) spawnTraffic();
 
@@ -3746,12 +3747,18 @@ function renderTraffic() {
   for (const t of traffic) {
     const inst = VEH_INST[t.type]; const i = cnt[t.type];
     if (i >= VEH_CAP) continue;
-    dummy.position.set(t.x, 0, t.z); dummy.rotation.set(0, t.yaw, 0); dummy.scale.set(1,1,1);
+    dummy.position.set(t.x, t.y, t.z);
+    // YXZ so pitch and roll are applied in the car's own frame rather than the world's —
+    // with the default XYZ a rolling car also swings its nose around. `dummy` is shared
+    // with the crowd and props, so the order is put back before anyone else uses it.
+    dummy.rotation.set(t.pitch, t.yaw, t.roll, 'YXZ');
+    dummy.scale.set(1,1,1);
     dummy.updateMatrix();
     for (const p of VEH_PARTS) if (inst[p]) inst[p].setMatrixAt(i, dummy.matrix);
     inst.paint.setColorAt(i, t.col);
     cnt[t.type] = i+1;
   }
+  dummy.rotation.order = 'XYZ';
   for (const k in VEH_INST) {
     const inst = VEH_INST[k];
     for (const p of VEH_PARTS) if (inst[p]) { inst[p].count = cnt[k]; inst[p].instanceMatrix.needsUpdate = true; }
@@ -3772,6 +3779,20 @@ function rejoin(t) {
     if (dd < best) { best = dd; bei = ei; bDist = proj; }
   }
   t.ei = bei; t.from = ni; t.dist = bDist; t.cur = 0; t.stopping = false; t.waitT = 0;
+  // Hand the car back to the graph *without teleporting it*. From here on its position
+  // and yaw are recomputed from (from, ei, dist) every frame, so whatever the physics
+  // did is wiped the instant the knock ends — a car you rammed ten metres down the road
+  // blinked back into its lane, which is exactly what read as "it disappeared". Keep the
+  // gap and let it decay: the car visibly drives itself back into line. Same lesson
+  // attachPed learned for townsfolk, and the same fix as their p.ox/p.oz offsets.
+  const e = NET.edges[t.ei], d = edgeDir(e, t.from), A = NET.nodes[t.from];
+  const lx = A.x + d.dx*t.dist - d.dz*LANE, lz = A.z + d.dz*t.dist + d.dx*LANE;
+  let dy = (t.yaw - Math.atan2(d.dx, d.dz)) % (Math.PI*2);
+  if (dy >  Math.PI) dy -= Math.PI*2;
+  if (dy < -Math.PI) dy += Math.PI*2;
+  t.rox = t.x - lx; t.roz = t.z - lz; t.royaw = dy;
+  t.rpitch = t.pitch; t.rroll = t.roll; t.ry = t.y;
+  t.rec = 1;
 }
 function updateTraffic(dt) {
   updateGaps();
@@ -3782,13 +3803,34 @@ function updateTraffic(dt) {
       // knocked cars collide like everything else — they used to sail straight through
       // building walls and "disappear" inside, which is where rammed cars kept going
       const kres = collideCircle(t.x + t.vx*dt, t.z + t.vz*dt, 1.6, colliders);
-      if (kres.hit) { t.vx *= -0.3; t.vz *= -0.3; t.spin *= 0.5; }
+      if (kres.hit) { t.vx *= -0.3; t.vz *= -0.3; t.spin *= 0.5; t.rollV *= 0.6; }
       t.x = THREE.MathUtils.clamp(kres.x, -TOWN-60, TOWN+60);
       t.z = THREE.MathUtils.clamp(kres.z, -TOWN-60, TOWN+60);
-      t.vx *= (1-2*dt); t.vz *= (1-2*dt);
+      // A hard enough hit lifts the car off the road, and once it is in the air it
+      // tumbles. Gravity is the same 26 the player's car falls under, so a launched
+      // traffic car and a launched player car read as the same world.
+      const gy = surfaceY(t.x, t.z);
+      t.vy -= 26*dt; t.y += t.vy*dt;
+      const flying = t.y > gy + 0.06;
+      if (flying) {
+        t.vx *= (1-0.5*dt); t.vz *= (1-0.5*dt);             // barely any drag in the air
+        t.pitch += t.pitchV*dt; t.roll += t.rollV*dt;
+      } else {
+        if (t.y < gy) t.y = gy;
+        if (t.vy < -5) { t.vy *= -0.3; t.spin *= 0.7; crashSfx(-t.vy*1.6); }   // it bounces once
+        else t.vy = 0;
+        t.vx *= (1-3.2*dt); t.vz *= (1-3.2*dt);             // tyres bite
+        t.pitchV *= (1-8*dt); t.rollV *= (1-8*dt);
+        // and it rights itself. A car resting on its roof is a wreck state this game
+        // does not have for traffic — it would sit there blocking a lane for ever.
+        t.pitch += (0 - t.pitch) * Math.min(1, dt*4.5);
+        t.roll  += (0 - t.roll)  * Math.min(1, dt*4.5);
+      }
       t.yaw += t.spin*dt; t.spin *= (1-1.6*dt);
       const s2 = Math.hypot(t.vx, t.vz);
-      if (s2 > 3) hitPeopleAt(t.x, t.z, t.vx, t.vz, s2, 2.2);
+      if (s2 > 3 && !flying) hitPeopleAt(t.x, t.z, t.vx, t.vz, s2, 2.2);
+      // never hand a car back to the lane while it is still in the air, or mid-flip
+      if (t.knock <= 0 && (flying || Math.abs(t.roll) > 0.25 || Math.abs(t.pitch) > 0.25)) t.knock = 0.06;
       if (t.knock <= 0 && !t.derby && !t.racer) rejoin(t);   // derby and race cars live off the graph
       continue;
     }
@@ -3870,6 +3912,12 @@ function updateTraffic(dt) {
     t.z = A.z + dir.dz*t.dist + dir.dx*LANE;
     t.yaw = Math.atan2(dir.dx, dir.dz);
     t.fx = dir.dx; t.fz = dir.dz;
+    if (t.rec > 0) {                       // ease out of wherever the shove left it
+      t.rec = Math.max(0, t.rec - dt*1.7);
+      const k = t.rec*t.rec*(3 - 2*t.rec);  // smoothstep, so it arrives without a kink
+      t.x += t.rox*k; t.z += t.roz*k; t.yaw += t.royaw*k;
+      t.y = t.ry*k; t.pitch = t.rpitch*k; t.roll = t.rroll*k;
+    }
     if (t.cur > 1.5) hitPeopleAt(t.x, t.z, dir.dx, dir.dz, t.cur, 1.8);
   }
   renderTraffic();
@@ -4692,7 +4740,14 @@ function updateCar(dt) {
       other.vx = fx*impact*0.8 + px*side*impact*0.45;
       other.vz = fz*impact*0.8 + pz*side*impact*0.45;
       other.spin = (Math.random()-0.5)*impact*0.12;
-      other.knock = Math.min(2.0, 0.3 + impact*0.05);
+      // Above about 14 mph the hit stops being a shove and starts lifting a corner.
+      // Everything below scales from nothing at that threshold, so a nudge in traffic
+      // still just slides the car and only a real ram sends it barrel-rolling.
+      const lift = Math.max(0, impact - 14) * 0.44;
+      other.vy = lift;
+      other.pitchV = (Math.random()-0.5) * lift * 0.55;
+      other.rollV  = (side >= 0 ? 1 : -1) * lift * 0.6;
+      other.knock = Math.min(2.6, 0.3 + impact*0.06);
       speed *= impact > 26 ? 0.22 : 0.52;
       clangSfx(impact);
       if (other.hitCooldown <= 0) { addCoins(3); other.hitCooldown = 1.2; if (!other.derby) chaosHit(other.cop ? 45 : 25); }
@@ -5249,6 +5304,7 @@ function spawnCop() {
     x: n.x, z: n.z, yaw: 0, ei: n.e[0], from: best, dist: 0,
     baseSpeed: COP_SPEED, cur: 14, gap: 99, fx: 0, fz: 1,
     stopping: false, waitT: 0, vx: 0, vz: 0, spin: 0, knock: 0, hitCooldown: 0,
+    y: 0, vy: 0, pitch: 0, roll: 0, pitchV: 0, rollV: 0, rec: 0, 
     cop: true, chase: false, arrest: false };
   traffic.push(t); cops.push(t);
   return true;
@@ -6054,6 +6110,7 @@ function spawnDerby(m) {
       x: STADIUM.cx + Math.cos(a)*STADIUM.rx*0.45, z: STADIUM.cz + Math.sin(a)*STADIUM.rz*0.45,
       yaw: rnd(0, 6.28), ei: 0, from: 0, dist: 0, baseSpeed: s.sp, cur: 0, gap: 99,
       fx: 0, fz: 1, stopping: false, waitT: 0, vx: 0, vz: 0, spin: 0, knock: 0,
+    y: 0, vy: 0, pitch: 0, roll: 0, pitchV: 0, rollV: 0, rec: 0, 
       hitCooldown: 0, derby: true, dHp: 100, wrecked: false, smk: 0 };
     traffic.push(t); m.data.cars.push(t);
   });
@@ -6442,6 +6499,7 @@ function spawnRacers(m) {
       x: a.x + px*off - hx/hl*4, z: a.z + pz*off - hz/hl*4, yaw: Math.atan2(hx, hz),
       ei: 0, from: 0, dist: 0, baseSpeed: spec[1], cur: 0, gap: 99, fx: 0, fz: 1,
       stopping: false, waitT: 0, vx: 0, vz: 0, spin: 0, knock: 0, hitCooldown: 0,
+    y: 0, vy: 0, pitch: 0, roll: 0, pitchV: 0, rollV: 0, rec: 0, 
       racer: true, name: RACER_NAMES[i], cp: 1, lapDone: false, stuck: 0 };
     traffic.push(t); m.data.racers.push(t);
   });
