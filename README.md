@@ -1,0 +1,476 @@
+# Maplewood Mayhem
+
+A cartoon open-world driving game in the spirit of *The Simpsons: Hit & Run*.
+Open `index.html` — it's one self-contained file (three.js loads from a CDN,
+so the first load needs an internet connection).
+
+## Controls
+| Key | Action |
+|-----|--------|
+| W A S D | drive / walk |
+| Mouse | look around (click for pointer lock, or drag) |
+| Shift | run (on foot) |
+| Space | handbrake / jump |
+| Left click | kick (on foot) — during the Yard Soaker round it fires the water gun instead |
+| F | enter a building at its door · otherwise get in / out of a car — near stopped traffic it borrows theirs |
+| C | cycle camera distance |
+| R | reset (also clears heat) |
+| M | map view — pull back over the whole town |
+
+## The game
+Wreck things. Every pedestrian, car and bit of street furniture you hit feeds a **combo**:
+every third hit raises the multiplier (up to x8), and the run banks into your **chaos
+score** four seconds after you stop.
+
+Chaos also builds **heat**, and heat brings **police** — up to five cars, one per star.
+While you're wanted the combo stops ticking down and is **held**: shake them off and it
+banks at **1.6x**, let them box you in for three seconds and you're **busted** and it's
+gone. Wrecking your own car loses it too. So the loop is: cause trouble, get chased,
+decide how long to keep pushing before you run for it.
+
+The crowd is a real mix: mostly the classic yellow with tan and brown townsfolk
+among them, nine hairstyles (ball caps, afros, mohawks, long hair beside the
+originals), a wide wardrobe, and varied heights and builds. On foot the crowd has
+substance: people shove past each other rather than overlapping,
+and you can't walk through them — you shoulder past. **Barge someone and they square up**
+and chase you for a few seconds, swinging; a punch knocks you down. **Left click kicks**:
+whoever is in front of you goes flying, gets up, and runs away. Kicks feed the combo.
+Townsfolk knocked down by your car get up scared and run too.
+
+Police are ordinary traffic agents with a chase flag. They use the same road graph as
+everyone else, so they route through town properly rather than homing at you through
+walls; inside 36 m they leave the graph and just come at you. They ignore signals, and
+they still run people over. They wear the part: navy paint, a flashing light bar on the
+roof, POLICE on both doors, and a quick **double chirp** when one is close on your tail —
+more insistent the closer they get, rather than a constant wail. Coins chime when
+collected. All audio is short scheduled tones on one shared AudioContext (`tone()`),
+built lazily on the first key/mouse input, since browsers refuse audio before a gesture.
+The one exception is the **engine**: a single persistent sawtooth oscillator whose
+pitch rides the speed and whose gain gates on driving (`updateEngine`). On top of the
+tones: **crash thumps** against buildings, **metal clangs** on car-on-car hits, **dings**
+when street furniture pings off the bumper, **door creaks** on open and close, bomb
+beeps and booms at the prison — and the townsfolk **speak**: kicks, car hits and barges
+trigger a speech-synthesis "Hey!", "Ouch!", "Cut it out!" and friends
+(`sayOuch()`, rate-limited, high pitch, zero assets — degrades to silence where
+`speechSynthesis` is unavailable).
+
+**The arrest is made on foot.** Ramming damages your car but never busts you. When a
+pursuer closes on a slow or stopped target it parks, an officer steps out ("PULL OVER!")
+and walks to your door — reach you and it's BUSTED. Speed away (over ~20 mph) or get 30 m
+clear and the officer gives up and the car chase resumes. So a chase ends one of three
+ways: you outlast the heat, your car dies, or you stop long enough to be arrested.
+
+**Altitude matters.** The river is a real drop. Drive off a bank and the car falls,
+splashes, sinks and the run resets. The countryside hills are drivable — the car and the
+player on foot both ride the surface.
+
+## The town
+**Fixed layout** — the generator is seeded (`__seed` near the top of the module), so it's
+the same Maplewood every load. Change the seed for a different town; everything below
+is derived from it. **There is no grid.** A junction lattice is laid out with
+non-uniform spacing (tight downtown, loose on the outskirts), then every junction is
+nudged off true, so no street runs dead straight and no two blocks match.
+
+- **Varied blocks** — some cells are merged into super-blocks by deleting the street
+  between them, which leaves T-junctions. Stubs left behind by that (and by dropping all
+  but three river crossings) are pruned: every junction has at least two ways out, so no
+  street stops in the middle of nowhere
+- **Diagonal avenues** cut across the grain
+- **A river** winds the full width of the map and genuinely divides the town: only
+  **three bridges** cross it, each with a deck, piers and railings, and the banks
+  slope down to the water. A **white fence runs along both banks** (broken at the
+  bridges) so nobody wanders in — the fence chunks are real colliders
+- **Riverside parks** line both banks — trees, benches, no buildings
+- **A ring highway** loops the whole town on long curves, with four spurs into it (one
+  from each corner of town, so the perimeter is reachable from every quarter) and a
+  **tunnel** bored through a mountain — a real one: an open, lamp-lit vault you can see
+  down from mouth to mouth, with portal facades standing at the rock face. It is a closed loop on purpose — an arc has two
+  ends out in open country, which is the most obvious road-to-nowhere on a map.
+  **Metal guardrails line both sides** of every highway segment, with gaps only where
+  the spurs join, so the ring is the playable world's hard perimeter. Rails — highway
+  guardrails and bridge railings both — stand a metre outside the old line (`st.w+3.1`
+  and `st.w+3`), because with the collider inflation plus the car's probe radius the
+  original offsets pinched the drivable width to less than the carriageway
+- **Rolling countryside** — the ground is a heightfield that stays dead flat across the
+  town and out past the ring highway, then swells into hills, so every carriageway is
+  level while the horizon rolls
+- Houses follow the street they front, so a bent street has a bent row of houses. They
+  are set back **inside** their own block. Setting them back on the outside puts every
+  house across the road in the neighbour's block — mostly invisible, because the block
+  opposite does the same thing back, but where a residential block met the shops you got
+  houses interleaved with the storefronts, facing away from the high street
+
+### Landmarks
+742 Maple Drive (salmon walls, orange roof, house number on the front) and the tidy
+green house next door · the Nuclear Power Plant · Ravenwood Manor · the Penitentiary —
+now with a gated opening in its north wall (the wall is withdrawn in the deferred
+pass and rebuilt gated from existing bucket colours inside `rngNeutral`; its collider
+swaps for the shorter runs only after `cityAudit()`, past the scatter filters, so the
+opening cost zero canary movement — and it freed the coins that used to spawn sealed
+inside the yard). The opening is barred by a **portcullis** of prison bars — a
+runtime Group whose collider (`gateBlock`) toggles like a shop door's, raised and
+lowered with F from the gate button ·
+First Church · Town Hall and the Police Station · Victory Stadium · Golden Brewery ·
+the Retirement Castle — now with a gated, drivable great hall and a flock of
+chickens that scatter from the car and burst into feathers under it · Victory
+Stadium's south gate is open too: drive between the pillars onto the infield ·
+Maplewood Elementary · the eternal tire fire · water tower ·
+MAPLEWOOD on the hillside · the brewery blimp · the giant donut · the Burger Baron
+head.
+
+Landmarks are **placed by direction rather than by fixed coordinates**, so they land on
+sensible blocks whatever the layout comes out as.
+
+The **monorail was removed**: an elevated beam over a street with no way to reach it just
+read as a highway floating above the houses.
+
+**Commerce is scattered, not pooled** — one high-street block stays downtown by the
+plaza, and five more shop quarters are pushed out toward the map's far corners and
+edges (the zoning places them *after* the landmarks so the set pieces keep their
+priority spots). Directional picks alone were not enough: when the far corners are
+already taken by landmarks, two "diagonal" picks fall back to neighbouring edge
+blocks and the businesses pool again — so every shop quarter must also stand at
+least **260 m** from every other one (downtown included). That hard separation is
+what actually spreads commerce to every quarter of the town, out by the spur mouths.
+Jobs therefore send you across the whole map — and often across the river. The names cycle across all four quarters: Speedy Mart,
+The Rusty Mug, Comic Castle, Burger Baron, Strike City Lanes, Bargain Barn, Army
+Surplus, Tony's Pizza, Captain's Catch, Pixel Palace, Grand Theater, Lefty's, City
+Mall, Action News, Starlight Studios, Putt Paradise, Curl Up & Dye, Golden Koi Sushi,
+Town Museum, Order of the Owl, Club Inferno. (Formerly Simpsons parody names — the
+locations and their fit-outs are unchanged, only the branding.) Which name lands in
+which quarter is grid luck, so anything the code must *find* by name (Big Donut's
+giver, The Rusty Mug's bar) resolves its position at runtime.
+
+**Neighbourhood detail** — pitched roofs, porches, chimneys, driveways, hedges, mailboxes
+and lawns out front; sheds, pools, trampolines, swing sets, barbecues and hedgerows out back.
+
+### Keeping the map clean
+`cityAudit()` runs at build time and **must print all zeros**. It checks, over the finished
+town: buildings overlapping each other, scenery inside buildings, coins sealed inside
+buildings, dead-end streets, houses crowding the shop frontages, and — by driving every
+carriageway centreline against the collider list — whether a car's width is ever inside
+something solid. That last one is the blockade test, and it catches things
+`footprintOnRoad` cannot.
+
+Two things make it pass rather than just measure:
+- `placeClear()` requires a footprint to clear **both** the road and everything already
+  standing. If the whole frontage is taken the caller gets `null` and doesn't build. A gap
+  in a terrace reads as a gap; a shop with a house through it reads as broken.
+- `addBox` takes a `group`, because a landmark is many abutting boxes — a stadium ring, a
+  prison perimeter — and those touching each other is the design. Same-group pairs are
+  ignored. Without it the audit drowns in false positives and hides the real ones.
+
+### Going inside
+**Every storefront in town is enterable** (35 rooms across the six scattered
+quarters — a few candidates whose interiors can't be cleared stay solid), plus
+**742 Evergreen Terrace**. Walk up to the door on foot,
+press **F** to swing it open, and **walk in**. There is no transition: no fade, no
+teleport, no separate mode. You can see the lit interior through the open doorway from
+the street, and the room is simply part of the town. **F** again closes the door behind
+you (a shut door is a real collider). **Every room is furnished for what it is**: aisles
+and a slushie machine in the Speedy Mart, the Rusty Mug's bar with taps and bottle
+shelves, donut cases at Big Donut, bowling lanes and pins at Strike City, arcade
+cabinets back-to-back at Pixel Palace, seat rows facing a screen in the Grand Theater,
+a checkerboard dance floor and mirror ball at Club Inferno, the couch and TV at 742 — twenty-two briefs, dispatched on the
+shop's name (`furnishRoom`), with the old counter-and-crates as the fallback. Both
+copies of a repeated name get the same treatment, adapted to each room's trimmed size.
+Big furniture is solid (colliders registered in the room's `walls`, so the interiors
+audit knows it belongs); small props are visual only; the walk from the door stays open
+(`inLane`).
+
+**Rooms have people in them** — a cashier behind the Speedy Mart counter, a barman
+behind the Rusty Mug's bar, seated diners, dancers at the disco. They are *staff*: static figures with a fixed
+spot, a fixed yaw and an idle sway (seated ones fold at the hip), drawn through the same
+instanced crowd meshes as the street crowd (`renderCrowd` iterates `staff` after `peds`),
+so a hundred of them cost no extra draw calls. They never join `peds`, so the kick,
+anger and separation systems ignore them. Their bodies are built after the ped spawn
+(pickLook's palettes don't exist when the interiors pass runs), inside `rngNeutral`.
+
+Doors are **three InstancedMeshes** (leaf, ink shell, knob), not a hinge Group each —
+at forty-plus doors that's the difference between 3 draw calls and ~130. A swinging door
+is just its instance matrix recomputed. And since `SHOP_NAMES` cycles, shop names repeat:
+a door must hold a **direct reference to its room** — looking the room up by name binds
+every duplicate to the first copy.
+
+### Jobs
+Six townsfolk stand under a red **"!"** on a **gold** glow disc (blue-glow folk are
+just flavor chat): walk into the glow and the job starts. One at a time; the giver
+re-arms a few seconds after the job ends, so everything is replayable. All job
+plumbing is shared: a **guide arrow** floating over your head, a **pillar-of-light
+beacon** ringed at its trigger radius on the destination, a gold blip **clamped to
+the radar rim** as a compass, a countdown **measured over the road graph**
+(Dijkstra — crow-flies pars would make cross-river jobs impossible), and a center
+banner for start/win/fail. **Rewards scale ×(1 + stars/2) with the heat you carry
+when you deliver** — causing trouble en route is the optimal strategy, and it is
+the thing that welds the job loop onto the chaos loop instead of competing with it.
+
+- **DONUT RUN** (Glazed Dan, outside Big Donut) — timed delivery to the Power
+  Plant; leftover seconds pay out.
+- **FARE GAME** (Rita, on the plaza) — taxi her to a random far-off storefront,
+  in the car, and *stop* to drop her; she heckles en route.
+- **COLD ONE** (Thirsty Lou, by Town Hall) — on foot: walk into The Rusty Mug,
+  grab a pint at the bar, walk it back. Makes the interiors matter.
+- **FEATHER FRENZY** (Nurse Mabel, at the Retirement Castle) — on foot only:
+  walk into the great hall and **kick** 7 chickens in 60 s. Kicks now connect
+  with chickens (feather burst, respawn timer, chaos) and the round counts the
+  dedicated `chickenKicked` counter, so running birds over with the car doesn't
+  score — the boot is the whole game.
+- **YARD SOAKER** (Warden Norris, at the Penitentiary gate) — the full arena
+  ritual: raise the **portcullis** with F from the button outside, and *stepping
+  into the yard on foot* starts the round — the bars slam down behind you
+  (lockdown: F just says no mid-round). Prisoners in orange spawn on a ring
+  around the cell block and run radially out to the walls (never through the
+  gate span), where each one kneels and **plants a beeping wall charge** —
+  4.5 s of blinking red bulb and accelerating beeps, a stationary and very
+  soakable target. If a charge detonates the wall gets a **breach**: a dark
+  hole with rubble, an instant open exit — later runners mostly sprint straight
+  for an existing breach rather than plant anew, and **several walls can be
+  blown in one round**. Soak a planter and the charge is **DEFUSED!** with them.
+  Your gear: a cartoon **super soaker in hand**, a **reticule** at screen
+  centre, and **holding left click fires a long blue jet** — beads sampled
+  along a real ballistic arc that droops at the end of its reach, with a
+  splashdown at the tip. The **tank bar** under the reticule holds ~3.5 s of
+  water and only refills (in ~2 s) once you release the trigger. A **big round
+  clock and score** sit top-centre for the whole 60 s. 15 coins a head, +80
+  bonus at ten; all away = job failed. When time's up you're ejected back
+  outside with the gate down, win or lose — and the breaches are repaired
+  between rounds.
+- **DEMOLITION DERBY** (Crusher, at Victory Stadium) — 3 AI rigs (`t.derby`
+  traffic entries, off the graph, no rejoin) chase and ram you on the infield;
+  ram them back — damage ∝ impact speed, one full-speed hit wrecks one — until
+  all three are smoking hulks. Derby hits build no heat and your car takes
+  reduced self-damage against rigs, or attrition loses the bout for you.
+- **RING RUSH** (Axel, near the spawn street) — 8 checkpoints around the ring
+  highway (highway nodes filtered to the outer loop, sorted by angle), one lap
+  through the tunnel vs a par from the octagon perimeter; session best tracked.
+
+Failure is wired through `missionEvent()`: wrecking your car, getting busted, or
+R/reset all fail the active job cleanly — and then the **retry guide** takes over:
+the giver re-arms in 2.5 s and the arrow, beacon, objective line ("TRY AGAIN ·
+back to …") and radar blip all lead back to them until you're close or you start
+something else. **Finding jobs on the radar**: available givers are red dots in
+range, and when you're idle the nearest out-of-range giver clamps to the rim as
+a lead; the gold pulsing blip is always the active target (or the retry point).
+All mission code runs **after the tree stage**, so none of it touches the seeded
+stream — the audits are byte-identical.
+
+**The run opens on foot outside a storefront door**, prompt already showing, with the
+car parked on the street behind you — otherwise there is nothing telling you the interiors
+exist. `OPENING_DOOR` picks the enterable door **nearest the plaza** (with commerce
+scattered, a specific shop's copies can land anywhere; this seed opens at Tony's Pizza),
+so the run always starts downtown. The spawn point is then the nearest clear carriageway
+to that door. Point it elsewhere, or delete the `if (OPENING_DOOR)` block just above the
+camera section, to go back to starting in the car.
+
+Interiors are **modelled in place**. `makeShop` and `fillEvergreen` build those buildings
+as shells with a doorway cut in the front wall, instead of the usual solid box. Three
+things make that safe:
+
+- **Walls you can't run through.** `collideCircle` has no swept test and `RUN * dt` is
+  0.6 m in a single frame. The wall colliders are `WALL_T` thick which, with the 0.75 m
+  probe radius, gives a 2.3 m overlap band — a run can't step over it. All four walls of
+  every room are tested at run speed; each stops the player exactly one radius short.
+- **Rooms trimmed to the clear part of the footprint.** Buildings in this town overlap.
+  Harmless while both are solid, *fatal* once one is hollow: the neighbour's collider ends
+  up inside the room, and `collideCircle` resolves to its nearest face — which shoves you
+  out through your own wall. That is exactly how the first version leaked. So the deferred
+  pass trims each room back off anything already standing inside it (never off the door
+  wall) and puts a partition there. The far side of that partition is dead space nobody
+  can reach.
+- **A doorway chosen last.** Some of these facades have a neighbour's wall a metre off
+  them. The doorway slides along the frontage until it has open ground outside, dodging
+  windows on the way. If no spot works, or the trimmed room would be under 5 m, the
+  building just stays solid — nothing half-built ships.
+
+Both of those need to know what the rest of the town built, so shells are constructed
+**after** the block loop, wrapped in `rngNeutral` (see the gotcha below).
+
+The chase camera inside a room walks the **sight line** from the player toward where it
+wants to be and stops at the room boundary — an axis-by-axis clamp would slide it sideways
+behind a partition. A doorway is treated as a hole, not a wall, so standing just inside a
+shallow shop the camera sits out in the street and looks in through the door, which is
+what it should do. `roomT` ramps the camera distance in across the threshold.
+
+**To do** — spend coins somewhere (a dealership storefront: car types, engine/armor,
+a horn that scatters chickens); hidden tokens in the 42 furnished rooms; street
+races vs AI cars on the road graph.
+
+## How it's drawn
+Everything is `MeshToonMaterial` on a 3-step ramp, with black back-face shells for
+ink outlines. Outline meshes **share the `instanceMatrix`** of the mesh they wrap, so
+an outlined crowd costs no extra matrix maths.
+
+Crowds, traffic, trees, props, coins and signals are all `InstancedMesh`. Buildings
+are bucketed by colour and merged, so the whole town is a few dozen draw calls.
+
+## Simulation
+- Traffic drives a road graph built from the grid, obeys the signals, queues, and
+  **yields to pedestrians** (judged by lateral offset, not an angular cone)
+- Pedestrians walk sidewalk lanes, round corners, and cross at the painted zebras
+  when the signal holds the traffic they'd step in front of. **Nobody walks single
+  file**: each person owns a lateral lane across the pavement width (`p.lat`, derived
+  from their walk phase so it costs no seeded randoms), and crossings start and end
+  at that same offset. **Some head for the park**: a once-a-frame lottery peels a
+  pedestrian near a park, riverside green or the plaza off the pavement into a
+  *stroll* — free movement toward a clear patch of grass, a couple of legs, then
+  `attachPed` back onto the nearest lane (capped at ~130 strolling at once).
+  Kicks, cars and scares interrupt a stroll exactly like lane walking; `attachPed`
+  clears the state. Strollers may jaywalk, but cars yield to anyone in their lane, so
+  one ambling *along* a carriageway is a rolling roadblock — a stroller on tarmac for
+  more than ~4.5 s gives up and rejoins the pavement
+- Spatial grids for pedestrians and props keep collision checks local
+
+## Gotchas for future work
+- **three.js calls `Math.random()` behind your back.** Every geometry, material and
+  Object3D gets a UUID from `MathUtils.generateUUID()`, which burns four draws. Since
+  `Math.random` is seeded to fix the town, *creating or deleting any THREE object before
+  the trees are planted shifts the whole stream and reshuffles the town.* Deleting one
+  `put(BOX(...))` moved the tree audit from `1765/48` to `1767/51`. If you must change a
+  building part in the generator, change it in place — keep the object count and the set
+  of bucket colours identical — and check the three build logs still read
+  `spawn 68,33`, `trees: 1655 planted, 155 removed` (planted+removed = **1810** — that
+  total moving is the true stream-shift alarm; planted/removed alone redistribute when
+  colliders or road layout legitimately change), `structures overlapping roads: {}`.
+  (Baseline re-recorded 2026-07-21, twice: first for scattering the shop quarters,
+  then again for the min-separation zoning rule — both intentional relayouts that
+  shift the stream on purpose. Earlier baselines for reference: `spawn -229,43` /
+  `1716+144 = 1860` / 42 rooms (original), then `68,33` / `1680+145 = 1825` /
+  33 rooms (first scatter). The city audit's known accepted deviation is still
+  `housesCrowdingShops: 1`, now at gap 2.7.)
+  Anything built after the tree stage (doors, room fit-out) is free of this.
+  Two tools make this workable when you *must* change generator geometry:
+  `rngNeutral(fn)` snapshots and restores `__seed` around anything you build, and
+  `lastPut`/`withdraw` let you build a solid part exactly as before — paying its RNG cost —
+  then quietly withdraw it from its colour bucket. That pair is how the walk-in shells
+  replaced five solid buildings without moving a single tree.
+- **The BUCKETS flush itself burns randoms, and it runs before the trees.** Each
+  non-empty colour costs a merged geometry, a mesh and (for a colour never seen by
+  `toon()`) a cached material — so introducing a *new colour* via `put()`, or emptying
+  a bucket, shifts the stream even from inside `rngNeutral`. This is why the room
+  furnishings have their own `FURN` buckets, flushed at the very end of the build
+  inside `rngNeutral`, where any colour and any object count is free. If you add
+  furniture, use `fput()`, not `put()`.
+- `mergeGeometries` returns **null** unless every input agrees on indexing *and*
+  attribute set. `put()` and `merge()` normalise for this — a non-indexed roof prism
+  without UVs silently broke the whole build once.
+- Ground quads must be wound counter-clockwise seen from above or
+  `computeVertexNormals` points them down and they vanish.
+- The river is cut **below** ground and bridge decks stay at y=0, so crossings work
+  without the car ever leaving the ground plane. The same trick inverted makes the
+  tunnel: a hill raised over a flat road. **Nothing organic may cross the tunnel's
+  bore corridor**: an ellipsoid lobe that straddles the road inevitably dips its
+  tapering tail inside the tube near the mouths, which reads as a green wall while
+  driving through — so the mass over the road is angular (a prism cap whose base sits
+  above the vault crown, on flank walls that stop outside the tube) and the soft
+  lobes are outboard shoulders only. The bore itself is two overlapping open-ended
+  half-cylinder vaults (DoubleSide, one per road segment, following the ring's bend)
+  with lamps down the crown, and the woodland belt is filtered out of the tunnel zone
+  (`nearTunnel` in the tree filter) — the mountain has no colliders, so trees
+  otherwise grow through it and dangle canopies inside the bore. The tunnel block is
+  deterministic (no rnd), so reworking it never reshuffles the town. Bridge piers
+  keep their tops at y=0, just under the deck: centred higher they poke through the
+  tarmac, which the meander-clip decks made obvious as grey bumps on dry streets. Because of this the ground is built as
+  strips with a gap along the channel — a single ground plane just covers the water.
+- Junction pads are **discs**, not squares: streets meet at arbitrary angles now.
+- **Traffic braked for signals at every node**, but signals only exist at junctions with
+  three or more ways out. On the town grid that was masked; on the ring highway every
+  node is a plain deg-2 joint, so cars on wrong-axis segments parked for up to 26 s at
+  each one and the highway looked frozen. Stopping now requires `!edge.hw` and
+  `node.e.length >= 3`. Town queues still form; the highway never stops.
+- **A bridge is any stretch of carriageway with water beneath it** — not "a street
+  whose ends are on opposite banks". The endpoint-sign test missed every segment that
+  clips a river meander and comes back out on the same side: the ring highway did it
+  twice, two town streets did it near junctions, and two junction *pads* stood partly
+  over open water. Now: classic crossings (ends on opposite banks) are built exactly
+  as before — that code precedes the trees, so its RNG burns are load-bearing — while
+  meander clips get their decks inside `rngNeutral`, with the rails/piers normalised
+  to non-indexed at creation (otherwise `merge()`'s per-entry `toNonIndexed()` burns
+  randoms *outside* the snapshot at flush time — that one cost two trees). Wet
+  junctions get a zero-length BRIDGES capsule (`onBridge` clamps `t`, so it reads as
+  a disc) wide enough to cover the junction's 16.5 m walk disc. New capsules carry
+  `soft: true` so the bank-fence gap pattern — whose colliders the tree filter feels —
+  stays byte-identical. Rails are built in short runs that skip road crossings (and,
+  on clip decks, building footprints), and **railings are real colliders** — they used
+  to be decoration, and walking through one off the deck was a genuine way to drown.
+  Rail colliders are collected during the river pass but pushed only after
+  `cityAudit()`, past every scatter filter, for the same baseline reasons. They are
+  ~0.9 m sub-chunks inflated only to the rail's own half-width (0.25): the collider
+  list is axis-aligned AABBs and every street is slightly diagonal, so longer chunks
+  bulge past the rail and you hit an invisible wall a metre before the leaf.
+- **The ragdoll get-up was unreachable for the game's whole life.** `updateRag`'s ground
+  clamp sets `y = 0.35` on contact every frame, while the recovery lerp pulls `y` toward 0
+  — the clamp always won, so the `y < 0.06` get-up condition never fired and nobody
+  knocked down ever stood up again. Invisible for months because you drive away from your
+  victims. Found the moment "they get up and run away" became a feature. The fix: once
+  `settle > 1.6`, recovery owns the body and the physics (gravity, clamp, bounce) stops.
+- `attachPed` rejoins a townsperson to the road graph **at the nearest point on the
+  chosen street**, not at the junction node. Traffic's `rejoin` learned the same
+  lesson: a knocked car used to snap to `dist 0` at the nearest node when its physics
+  settled, teleporting every wreck you'd just rammed to the nearest corner — which
+  read as cars vanishing. The other half of that bug: knocked cars ignored colliders
+  and sailed straight through building walls into the interiors; knock physics now runs
+  `collideCircle` with a small bounce, and the shove is strictly proportional to the
+  impact speed. Snapping to the node teleported anyone who
+  got up after a knockdown — they looked like they vanished. Related: knockdown victims
+  ease to **flat** (`rag.flatX`) once down, face-down or on their back depending on which
+  side the hit came from, instead of wherever their random spin left them.
+- Lane-walking townsfolk are **re-placed from the road graph every frame** (`pedPlace`),
+  so any push you apply to them must persist as an offset (`p.ox/p.oz`) or it is silently
+  wiped next frame. The crowd-separation pass and the player shove both write it.
+- Steering authority falls off with speed (`authority` in `updateCar`). Set too aggressively
+  it made the car undriveable in town: at MAX_SPEED the turning circle was ~54 m, wider than
+  a junction. It is ~29 m now. Measure it by sampling heading and position over a few frames
+  rather than guessing — `radius = arcLength / deltaHeading`.
+- The river fence must skip **building footprints (`mapBoxes`), not colliders** — a
+  hollow shop has no collider in its middle, so `pointBlocked` happily let the fence run
+  straight through the room. And the *whole chunk* has to clear the footprint, not just
+  its midpoint: a 5 m chunk can straddle a corner. The `interiors` audit caught both.
+- Barrier colliders are **short chunks (3.5–5 m)**, because the collider list is
+  axis-aligned AABBs: a long box on a diagonal highway segment would have a bounding box
+  bulging metres onto the carriageway. Short chunks hug the rail; the
+  `carriagewayBlocked` audit is the proof it worked. They are pushed to `colliders`
+  directly, not through `addBox`, so the radar and the overlap audit ignore them.
+- Two **visible coplanar faces** z-fight into a dithered mess. The church door's front face
+  sat at exactly the steeple base's front face (`cz-20.5`); the fix is to stand one proud.
+  Note it is only a problem when *both* faces are visible — a door's back face flush with a
+  wall is fine, because it is culled.
+- Vehicle collision is an **oriented** box sized to each car type. It used to be a fixed
+  4.2 m axis-aligned square regardless of heading, which is what made cars feel like they
+  had an invisible wall around them.
+- Bridges keep the road at y=0 while the channel is cut below, so `surfaceY()` returns 0
+  over a deck and the riverbed elsewhere. `onBridge()` is what stops a crossing counting
+  as water.
+- The ground heightfield must be subdivided in **both** axes. Strips spanning the full
+  depth with one pair of triangles turn the terrain into a giant ramp from the distant
+  hills down to the river, which silently buries the town under grass — the roads are
+  still there, just underground.
+- The two riverbanks need opposite winding. Emit them with the same vertex order and
+  one faces down, which shows up as a black stripe the length of the river.
+- **Nothing sits on a carriageway.** Every scattered item (trees, hedges, furniture) is
+  filtered against `onRoad()`, and every structure goes through `footprintOnRoad()`:
+  houses and shops slide back off the kerb and along the frontage via `placeClear()`,
+  landmarks scale to their block via `fitScale()`, and each block's buildable rect is
+  shrunk until its whole perimeter is clear. A build-time audit logs
+  `structures overlapping roads:` — **it should always print `{}`.** Trees were landing on the country highway because the woodland belt
+  was drawn at a radius the highway loops through.
+- A module-level throw prints on the loading screen (see the inline `error` handler).
+  The dev console does not surface module errors in every preview environment.
+- **Map view needs its own near plane.** At 1180 m up, the default 0.4 near plane
+  leaves no depth precision for surfaces 6–20 mm apart (road paint over tarmac,
+  pads over lawns) and the whole town z-fights into scribbles. `updateCamera`
+  sets `camera.near = 250` while the map is up and restores 0.4 on the way out.
+- Buildings no longer overlap, but any building you hollow out is still trimmed back off
+  its neighbours — see "Going inside". Don't assume a clear room *centre* means a clear room.
+- **A rotated footprint is not its bounding box.** Houses on a jittered block frontage face
+  any angle. `addBox` takes the axis-aligned box for collision (so a diagonal house is
+  actually solid) and separately the true `{w, d, yaw}` footprint for the road audit —
+  auditing the bounding box flags corners that never touch the tarmac, and using the naive
+  `|fx|>0.5 ? d : w` swap gives a diagonal house a collider that doesn't contain it.
+- Scenery is filtered against **buildings as well as roads**. Trees and hedges used to be
+  tested only with `onRoad`, which is why they grew through people's front rooms.
+- `sun.position` tracks the subject in **y** as well as x/z. Shadows degrade on the hills
+  and in the river channel without it.
+
+## Previous direction
+`backup/v1-realistic-dallas/` holds the earlier build on real OpenStreetMap geometry
+for downtown Dallas. See its README to revert.
