@@ -519,10 +519,26 @@ built well after the tree stage so it costs nothing seeded.
 
 ### The fair
 Three rides on a real fairground — striped-canopy **carousel** with eight bobbing
-horses, **THE MAPLE MOUSE**, a closed-loop coaster whose cart is paced by gravity
-(quick through the dips, laboured over the crests, with a floor under the speed so it
-can never stall on a hill), and a walled **bumper car** arena with six cars that drive
-themselves — under a MAPLEWOOD FAIR board. Walk up to any of them and **F** puts you
+horses (clockwise; and note the group-rotation trap below), **THE MAPLE MOUSE** — a
+closed-loop coaster, 64×44 m with crests at ~13 m, paced by gravity (quick through the
+dips, laboured over the crests, a floor under the speed so it can never stall on a
+hill) — and a walled **bumper car** arena with six cars that drive themselves — under a
+MAPLEWOOD FAIR board.
+
+**The coaster runs a schedule.** A platform with a canopy stands beside the track at
+t=0 — both hill terms are zero there on purpose, so the train arrives at platform
+level — and the cart starts docked, waits ten seconds, runs its lap (~20 s), and pulls
+in again. **You can only board in the station**: the ride point sits on the platform,
+`tryRide` refuses while the cart is out, and the prompt says "The MAPLE MOUSE is out on
+the track…" instead of offering an F that would do nothing. The clock runs whether
+anyone is aboard or not — it is a fairground ride on a schedule, not a taxi. Riding, you
+stay in the seat through the dwell, so staying on for another lap is just not pressing F.
+
+**The group-rotation trap** (this bit ate the first carousel): a Group's `rotation.y`
+of θ carries a child at local angle *a* to **world angle a − θ, not a + θ**. The seat
+camera added, so it orbited against the platform and the horses paraded around the
+rider instead of carrying him. If you ever attach a camera to something on a spinning
+Group, derive the world angle by *subtracting* the group's rotation. Walk up to any of them and **F** puts you
 **in the seat, first person**: the camera rides the horse, the cart or the car, the
 mouse still looks around on top of wherever the ride is pointing, and F gets you off.
 (The brief said click, but left click is the punch and right click is the kick — F is

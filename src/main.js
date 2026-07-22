@@ -6466,13 +6466,14 @@ function findGreen(w, d) {
 const FAIR = [];
 let riding = null, rideExitCd = 0;
 {
-  const FW = 78, FD = 52;
+  const FW = 136, FD = 58;
   const site = findGreen(FW, FD);
   console.log('stunt park ramps:', RAMPS.length);
   if (site) {
     const cx = site.x, cz = site.z;
-    const alongX = true, off = 24;
-    const at = k => [cx + k*off, cz - 6];
+    // carousel and bumper cars stacked on the west side, the doubled coaster loop
+    // taking the whole east two-thirds
+    const at = k => k < 0 ? [cx - 51, cz - 13] : [cx + 22, cz];
     const mesh = (geo, col, x, y, z) => {
       const m = new THREE.Mesh(geo, typeof col === 'number' ? toon(col) : col);
       m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true;
@@ -6527,13 +6528,14 @@ let riding = null, rideExitCd = 0;
     // ---- the coaster --------------------------------------------------
     {
       const [ox, oz] = at(1);
-      const RX = 15, RZ = 11, BASE = 2.2;
-      // one closed lap, so the cart never has to be re-railed: two hills and a dip,
-      // all periodic in 2*PI or the track would not meet itself
+      // Twice the loop it was: 64x44 m footprint, crests up to ~13 m. Both hill terms
+      // are zero at t=0 on purpose — that is where the station platform stands, and a
+      // train should arrive at platform level, not a metre above it.
+      const RX = 32, RZ = 22, BASE = 2.6;
       const P = t => [ ox + Math.cos(t)*RX,
-                       BASE + 3.6*(0.5 - 0.5*Math.cos(2*t)) + 1.7*(0.5 - 0.5*Math.cos(3*t + 1)),
+                       BASE + 7.2*(0.5 - 0.5*Math.cos(2*t)) + 3.4*(0.5 - 0.5*Math.cos(3*t)),
                        oz + Math.sin(t)*RZ ];
-      const N = 120, rails = [], ties = [], posts = [];
+      const N = 160, rails = [], ties = [], posts = [];
       const v0 = new THREE.Vector3(), v1 = new THREE.Vector3(), up = new THREE.Vector3(0,1,0);
       for (let i = 0; i < N; i++) {
         const t0 = i/N*Math.PI*2, t1 = (i+1)/N*Math.PI*2;
@@ -6548,7 +6550,7 @@ let riding = null, rideExitCd = 0;
         }
         if (i % 2 === 0) ties.push(baked(BOX(1.5, 0.09, 0.28), mid.x, mid.y + 0.05, mid.z, pitch, yaw, 0));
         if (i % 8 === 0 && mid.y > 0.6)
-          posts.push(baked(BOX(0.26, mid.y, 0.26), mid.x, mid.y/2, mid.z));
+          posts.push(baked(BOX(0.34, mid.y, 0.34), mid.x, mid.y/2, mid.z));
       }
       mesh(merge(rails), 0xd0392b, 0, 0, 0);
       mesh(merge(ties), 0x8c6a44, 0, 0, 0);
@@ -6563,16 +6565,28 @@ let riding = null, rideExitCd = 0;
         w.position.set(sx*0.6, 0.22, sz*0.7); cart.add(w);
       }
       scene.add(cart);
-      FAIR.push({ kind: 'coaster', label: 'COASTER', x: ox, z: oz, r: 26, P, cart, t: 0, cx: ox, cz: oz });
+      // The station: a platform beside the track at t=0, on the loop's east side. The
+      // cart starts here, waits ten seconds, does a lap, and pulls in again — and the
+      // ride point sits ON the platform, so boarding only ever happens here.
+      const stx = ox + RX, stz = oz;
+      const deckH = BASE - 0.3;
+      mesh(BOX(5.4, deckH, 8.5), 0x8c6a44, stx + 3.4, deckH/2, stz);           // platform
+      mesh(BOX(5.8, 0.22, 8.9), 0xa8845c, stx + 3.4, deckH + 0.11, stz);       // boards
+      for (const sz of [-3.6, 3.6])                                            // canopy posts
+        mesh(BOX(0.3, 3.4, 0.3), 0x6b6f76, stx + 3.4, deckH + 1.7, stz + sz);
+      mesh(BOX(6.4, 0.26, 9.6), 0xd0392b, stx + 3.4, deckH + 3.5, stz);        // canopy
+      colliders.push({ minX: stx + 0.7, maxX: stx + 6.1, minZ: stz - 4.25, maxZ: stz + 4.25 });
+      FAIR.push({ kind: 'coaster', label: 'MAPLE MOUSE', x: stx + 3.4, z: stz, r: 7,
+                  P, cart, t: 0, wait: 10, cx: ox, cz: oz });
       const sign = new THREE.Mesh(new THREE.PlaneGeometry(11, 2.8),
         new THREE.MeshBasicMaterial({ map: signTexture('THE MAPLE MOUSE', '#2f3550', '#ffd23b', 512, 128),
                                       transparent: true, side: THREE.DoubleSide }));
-      sign.position.set(ox, 5.4, oz - RZ - 2.5); sign.rotation.y = Math.PI; scene.add(sign);
+      sign.position.set(stx + 3.4, 6.6, stz - 5.6); sign.rotation.y = Math.PI; scene.add(sign);
     }
 
     // ---- the bumper cars ----------------------------------------------
     {
-      const [bx, bz] = [cx, cz + 15];
+      const [bx, bz] = [cx - 51, cz + 16];
       const HW = 11, HD = 8;
       mesh(BOX(HW*2, 0.16, HD*2), 0x4a4f58, bx, 0.08, bz);            // the steel floor
       // A low wall all the way round with one gap to walk in by. The wall segments are
@@ -6609,14 +6623,14 @@ let riding = null, rideExitCd = 0;
     }
 
     // one board on the way in
-    const [sx0, sz0] = [cx, cz - FD/2 + 2];
+    const [sx0, sz0] = [cx - 20, cz - FD/2 + 2];
     const brd = new THREE.Mesh(new THREE.PlaneGeometry(16, 4),
       new THREE.MeshBasicMaterial({ map: signTexture('MAPLEWOOD FAIR', '#7b4fa7', '#ffd23b', 512, 128),
                                     transparent: true, side: THREE.DoubleSide }));
     brd.position.set(sx0, 7, sz0); brd.rotation.y = Math.PI; scene.add(brd);   // faces the way in
     for (const dxp of [-7.4, 7.4]) {
       const p = new THREE.Mesh(BOX(0.6, 7, 0.6), toon(0x6b6f76));
-      p.position.set(sx0 + (alongX ? dxp : 0), 3.5, sz0 + (alongX ? 0 : dxp)); scene.add(p);
+      p.position.set(sx0 + dxp, 3.5, sz0); scene.add(p);
     }
     console.log(`fair: ${FAIR.length} rides at ${cx|0},${cz|0}`);
   }
@@ -6627,10 +6641,14 @@ let riding = null, rideExitCd = 0;
 // has to move its own geometry and the view follows for free.
 const rideSeat = (R) => {
   if (R.kind === 'carousel') {
-    const h = R.horses[R.seat], a = h.a + R.spin.rotation.y;
-    const bob = Math.sin(R.t*3 + R.seat)*0.28;
-    return { x: R.cx + Math.cos(a)*4.9, y: 2.5 + bob, z: R.cz + Math.sin(a)*4.9,
-             yaw: -a + Math.PI/2 };                       // facing the way round you go
+    // A group's rotation.y of θ carries a horse at local angle a to WORLD angle a − θ,
+    // not a + θ. The first version added, so the camera orbited against the platform
+    // and the horses paraded round the rider instead of carrying him. The bob phase
+    // has to be the horse's own (h.a*2, matching updateRides) for the same reason.
+    const h = R.horses[R.seat], a = h.a - R.spin.rotation.y;
+    const bob = Math.sin(R.t*3 + h.a*2)*0.28;
+    return { x: R.cx + Math.cos(a)*4.9, y: 2.6 + bob, z: R.cz + Math.sin(a)*4.9,
+             yaw: -a };                                   // tangent: the way round you go
   }
   if (R.kind === 'coaster') {
     const [x, y, z] = R.P(R.t), [x2, , z2] = R.P(R.t + 0.05);
@@ -6649,14 +6667,23 @@ function updateRides(dt) {
   if (rideExitCd > 0) rideExitCd -= dt;
   for (const R of FAIR) {
     if (R.kind === 'carousel') {
-      R.t += dt; R.spin.rotation.y += dt*0.45;
+      R.t += dt; R.spin.rotation.y -= dt*0.45;        // negative: clockwise from above
       for (const h of R.horses) h.g.position.y = 0.35 + Math.sin(R.t*3 + h.a*2)*0.28;
     } else if (R.kind === 'coaster') {
-      // gravity does the pacing: quick through the dips, laboured over the crests,
-      // with a floor under it so it can never stall on top of a hill
-      const y = R.P(R.t)[1];
-      const v = Math.sqrt(Math.max(1.6, 2*9.8*(8.2 - y))) * 0.055;
-      R.t = (R.t + v*dt*6) % (Math.PI*2);
+      if (R.wait > 0) {
+        // in the station. The clock runs whether anyone is aboard or not — it is a
+        // fairground ride on a schedule, not a taxi waiting for you.
+        R.wait -= dt; R.t = 0;
+      } else {
+        // gravity does the pacing: quick through the dips, laboured over the crests,
+        // with a floor under the speed so it can never stall on top of a hill. Linear
+        // speed over the mean radius gives the angular rate — sized for a ~20 s lap.
+        const y = R.P(R.t)[1];
+        const v = Math.sqrt(Math.max(12, 2*9.8*(13.2 - y)));
+        const t2 = R.t + (v/27)*dt;
+        if (t2 >= Math.PI*2) { R.t = 0; R.wait = 10; }   // pulls into the station
+        else R.t = t2;
+      }
       const [x, cy, z] = R.P(R.t), [x2, y2, z2] = R.P(R.t + 0.04);
       R.cart.position.set(x, cy + 0.32, z);
       R.cart.rotation.set(-Math.asin(THREE.MathUtils.clamp((y2 - cy)/Math.max(0.001, Math.hypot(x2-x, y2-cy, z2-z)), -1, 1)),
@@ -6712,6 +6739,7 @@ function tryRide() {
   for (const R of FAIR) {
     const dx = R.x - player.position.x, dz = R.z - player.position.z;
     if (dx*dx + dz*dz > R.r*R.r) continue;
+    if (R.kind === 'coaster' && R.wait <= 0) continue;   // the cart is out on the track
     if (R.kind === 'bumper') R.seat = (R.seat + 1) % R.cars.length;
     else if (R.kind === 'carousel') R.seat = (R.seat + 1) % R.horses.length;
     riding = R; player.visible = false; camYaw = 0; camPitch = 0;   // look starts dead ahead
@@ -6724,7 +6752,8 @@ function nearRide() {
   if (mode !== 'foot' || playerRag.active) return null;
   for (const R of FAIR) {
     const dx = R.x - player.position.x, dz = R.z - player.position.z;
-    if (dx*dx + dz*dz <= R.r*R.r) return R;
+    if (dx*dx + dz*dz <= R.r*R.r)
+      return (R.kind === 'coaster' && R.wait <= 0) ? { waitFor: R } : R;
   }
   return null;
 }
@@ -8068,8 +8097,10 @@ function updateHUD(dt) {
       promptEl.innerHTML = door.swing > 0.5 ? 'Press <b>F</b> to close the door'
                                             : `Press <b>F</b> to open ${door.name}`; }
     else if (riding) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to get off'; }
-    else if (nearRide()) { promptEl.style.display='block';
-      promptEl.innerHTML = 'Press <b>F</b> to ride the <b>' + nearRide().label + '</b>'; }
+    else if (nearRide()) { const nr = nearRide(); promptEl.style.display='block';
+      promptEl.innerHTML = nr.waitFor
+        ? 'The <b>MAPLE MOUSE</b> is out on the track\u2026'
+        : 'Press <b>F</b> to ride the <b>' + nr.label + '</b>'; }
     else if (nearestJackable()) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to borrow this car'; }
     else if (car.position.distanceTo(player.position) < 7) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to get in'; }
     else promptEl.style.display = 'none';
