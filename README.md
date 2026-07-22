@@ -78,6 +78,11 @@ nudged off true, so no street runs dead straight and no two blocks match.
   but three river crossings) are pruned: every junction has at least two ways out, so no
   street stops in the middle of nowhere
 - **Diagonal avenues** cut across the grain
+- Job givers are placed by `clearSpot`, which rings outward to 30 m looking for
+  ground that is clear of buildings, clear of the carriageway **and dry**. All
+  three matter: an 11 m ceiling silently dropped anyone anchored near a big
+  junction, and without the water test a giver anchored by a bridge stands in
+  the river — walking up to them drowned you before they could say hello
 - **A river** winds the full width of the map and genuinely divides the town: only
   **three bridges** cross it, each with a deck, piers and railings, and the banks
   slope down to the water. A **white fence runs along both banks** (broken at the
@@ -232,6 +237,18 @@ the thing that welds the job loop onto the chaos loop instead of competing with 
   ram them back — damage ∝ impact speed, one full-speed hit wrecks one — until
   all three are smoking hulks. Derby hits build no heat and your car takes
   reduced self-damage against rigs, or attrition loses the bout for you.
+- **BACK ALLEY DASH** (Tire-Iron Tess, beside the grid) — a ten-checkpoint lap
+  of the town streets against **three named AI rivals** (Duke, Mavis, Spanner),
+  who line up alongside you on the grid and drive the same course. The circuit
+  is stitched out of the road graph itself: checkpoints are graph *nodes* and
+  every leg is a real edge between two of them, so an AI that simply steers at
+  its next checkpoint is driving down a street rather than through the front
+  rooms. A greedy walk picks long legs heading away from the start, then curls
+  back to close the loop. Rivals scrape walls (losing speed, and nudging their
+  aim past the corner if they hang there), run people over, and can be rammed
+  like any traffic. Your **place is live in the HUD** — 1st through 4th, counted
+  from how many rivals are further round the lap. Win 400, podium 140/100;
+  leaving the car or letting all three finish first fails it.
 - **RING RUSH** (Axel, near the spawn street) — 8 checkpoints around the ring
   highway (highway nodes filtered to the outer loop, sorted by angle), one lap
   through the tunnel vs a par from the octagon perimeter; session best tracked.
@@ -304,8 +321,9 @@ past — and pay 40 coins each, with a 1000-coin bonus for clearing all thirty-f
 The HUD keeps a 🏆 count under the chaos score. One InstancedMesh, like the coins,
 built well after the tree stage so it costs nothing seeded.
 
-**To do** — street races vs AI cars on the road graph; day/night; stunt scoring
-and ramps; reviving the shelved prison minigame in some better form.
+**To do** — day/night (headlights, lit windows, Club Inferno after dark); stunt
+scoring for air time; wanted escalation (roadblocks, spike strips); reviving the
+shelved prison minigame in some better form.
 
 ## How it's drawn
 Everything is `MeshToonMaterial` on a 3-step ramp, with black back-face shells for

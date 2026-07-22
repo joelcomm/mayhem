@@ -3605,10 +3605,11 @@ function updateTraffic(dt) {
       t.yaw += t.spin*dt; t.spin *= (1-1.6*dt);
       const s2 = Math.hypot(t.vx, t.vz);
       if (s2 > 3) hitPeopleAt(t.x, t.z, t.vx, t.vz, s2, 2.2);
-      if (t.knock <= 0 && !t.derby) rejoin(t);   // derby cars live off the graph
+      if (t.knock <= 0 && !t.derby && !t.racer) rejoin(t);   // derby and race cars live off the graph
       continue;
     }
     if (t.derby) { updateDerbyCar(t, dt); continue; }
+    if (t.racer) { updateRacerCar(t, dt); continue; }
     if (t.cop) {
       const sub = mode === 'car' ? car.position : player.position;
       const dx = sub.x - t.x, dz = sub.z - t.z, d = Math.hypot(dx, dz) || 1;
@@ -5076,6 +5077,8 @@ function updateChickens(dt) {
 //  into the glow and they'll chat.
 // =================================================================
 const GARAGE = { x: 0, z: 0, open: false, ride: 0 };
+let TOWN_CPS = null;              // hoisted for the same reason: the markers block
+                                  // calls townCircuit() to stand Tess on the grid
 const MARKERS = [];
 {
   const c = document.createElement('canvas'); c.width = 128; c.height = 160;
@@ -5096,11 +5099,18 @@ const MARKERS = [];
     ['COMIC GUY', 'Nice parking. Truly.'],
   ];
   // A job giver must land somewhere: try the anchor, then a widening ring around it.
+  // Clear means clear of buildings, clear of the carriageway *and* on dry land:
+  // an anchor near a bridge or a riverside junction otherwise stands its giver in
+  // the water, and walking up to them drowns you before they can say hello.
+  const spotOK = (x, z) => !pointBlocked(x, z, 2) && !onRoad(x, z, 1.5) && !overRiver(x, z, 8);
   function clearSpot(x, z) {
-    if (!pointBlocked(x, z, 2) && !onRoad(x, z, 1.5)) return { x, z };
-    for (let r = 3; r <= 11; r += 2) for (let a = 0.3; a < 6.4; a += Math.PI/4) {
+    if (spotOK(x, z)) return { x, z };
+    // Ring search out to 30 m: a junction pad is ~16 m across and a wide street's
+    // reserve can reach past 25, so an 11 m ceiling silently dropped any giver
+    // anchored near a big intersection.
+    for (let r = 3; r <= 30; r += 2.5) for (let a = 0.3; a < 6.4; a += Math.PI/6) {
       const nx = x + Math.cos(a)*r, nz = z + Math.sin(a)*r;
-      if (!pointBlocked(nx, nz, 2) && !onRoad(nx, nz, 1.5)) return { x: nx, z: nz };
+      if (spotOK(nx, nz)) return { x: nx, z: nz };
     }
     return null;
   }
@@ -5148,6 +5158,13 @@ const MARKERS = [];
   //   'WARDEN NORRIS', "They're going over the walls! Grab the soaker and stop 'em.", 'soak');
   marker(SPAWN.x - 32, SPAWN.z - (ROAD_HW + 3.5),
     'AXEL', 'One lap of the ring, through the mountain. Beat the clock.', 'race');
+  // Tess stands beside the grid, not on it: a junction pad is ~16 m across, so an
+  // offset small enough to read as "at the start line" lands in the road. Push out
+  // along the first leg and then sideways off the carriageway.
+  { const c = townCircuit(), a = c[0], b = c[1];
+    const hx = b.x - a.x, hz = b.z - a.z, hl = Math.hypot(hx, hz) || 1;
+    marker(a.x + hx/hl*18, a.z + hz/hl*18,
+      'TIRE-IRON TESS', 'Three of us race these streets. Care to make it four?', 'street'); }
 
   // ---- Gus, on his forecourt: not a job giver, a shop ----
   {
@@ -5829,6 +5846,77 @@ function updateRoundHUD() {
 
 // ---- the ring-road circuit ----
 let RING_CPS = null;
+// ---- the street circuit: a lap stitched from real streets ----
+// Checkpoints are graph nodes and every leg is an actual edge between two of them,
+// so an AI that just steers at its next checkpoint is driving down a street rather
+// than through the houses. Walk the graph greedily away from where we came, then
+// close the loop back to the start.
+function townCircuit() {
+  if (TOWN_CPS) return TOWN_CPS;
+  const ok = i => NET.nodes[i].e.some(ei => !NET.edges[ei].hw);
+  let start = -1;
+  for (let k = 0; k < 400 && start < 0; k++) {         // a well-connected downtown node
+    const i = (Math.random()*NET.nodes.length)|0;
+    if (NET.nodes[i].e.length >= 3 && ok(i) && Math.hypot(NET.nodes[i].x, NET.nodes[i].z) < TOWN*0.62) start = i;
+  }
+  if (start < 0) start = 0;
+  const path = [start], seen = new Set([start]);
+  let cur = start, prev = -1;
+  for (let step = 0; step < 9; step++) {
+    let best = -1, bs = -1e9;
+    for (const ei of NET.nodes[cur].e) {
+      const e = NET.edges[ei];
+      if (e.hw) continue;                              // town streets only, no highway
+      const to = e.a === cur ? e.b : e.a;
+      if (to === prev || seen.has(to)) continue;
+      const n = NET.nodes[to];
+      // prefer long legs that keep turning the same way, so the lap is a loop not a line
+      let s = e.len * 0.5 + Math.hypot(n.x - NET.nodes[start].x, n.z - NET.nodes[start].z) * (step < 5 ? 0.7 : -1.1);
+      if (s > bs) { bs = s; best = to; }
+    }
+    if (best < 0) break;
+    path.push(best); seen.add(best); prev = cur; cur = best;
+  }
+  TOWN_CPS = path.map(i => NET.nodes[i]);
+  return TOWN_CPS;
+}
+const RACER_NAMES = ['DUKE', 'MAVIS', 'SPANNER'];
+function spawnRacers(m) {
+  const cps = townCircuit(), a = cps[0], b = cps[1 % cps.length];
+  const hx = b.x - a.x, hz = b.z - a.z, hl = Math.hypot(hx, hz) || 1;
+  const px = -hz/hl, pz = hx/hl;                       // across the start line
+  m.data.racers = [];
+  [[0xd0392b, 25.5], [0x7b4fa7, 24.5], [0x2f8f4f, 26]].forEach((spec, i) => {
+    const off = (i - 1) * 3.4;
+    const t = { type: TRAFFIC_TYPES[i+1], color: spec[0], col: new THREE.Color(spec[0]),
+      x: a.x + px*off - hx/hl*4, z: a.z + pz*off - hz/hl*4, yaw: Math.atan2(hx, hz),
+      ei: 0, from: 0, dist: 0, baseSpeed: spec[1], cur: 0, gap: 99, fx: 0, fz: 1,
+      stopping: false, waitT: 0, vx: 0, vz: 0, spin: 0, knock: 0, hitCooldown: 0,
+      racer: true, name: RACER_NAMES[i], cp: 1, lapDone: false, stuck: 0 };
+    traffic.push(t); m.data.racers.push(t);
+  });
+}
+function updateRacerCar(t, dt) {
+  const cps = townCircuit();
+  if (t.lapDone) { t.cur *= (1 - dt); return; }
+  const tgt = cps[t.cp % cps.length];
+  const dx = tgt.x - t.x, dz = tgt.z - t.z, d = Math.hypot(dx, dz) || 1;
+  t.yaw = lerpAngle(t.yaw, Math.atan2(dx, dz), 1 - Math.exp(-dt*3.4));
+  t.cur += (t.baseSpeed - t.cur) * Math.min(1, dt*2.2);
+  const nx = t.x + Math.sin(t.yaw)*t.cur*dt, nz = t.z + Math.cos(t.yaw)*t.cur*dt;
+  const res = collideCircle(nx, nz, 1.9, colliders);
+  // scraping a wall bleeds speed and, if it lasts, nudges the aim past the corner
+  if (res.hit) { t.cur *= 0.86; t.stuck += dt; if (t.stuck > 0.8) { t.yaw += 0.9*dt; } }
+  else t.stuck = 0;
+  t.x = res.x; t.z = res.z;
+  t.fx = Math.sin(t.yaw); t.fz = Math.cos(t.yaw);
+  if (t.cur > 1.5) hitPeopleAt(t.x, t.z, t.fx, t.fz, t.cur, 1.9);
+  if (d < 16) {                                        // checkpoint reached
+    t.cp++;
+    if (t.cp > cps.length) t.lapDone = true;
+  }
+}
+
 function ringCheckpoints() {
   if (RING_CPS) return RING_CPS;
   const ids = new Set();
@@ -5985,6 +6073,59 @@ const MISSION_DEFS = {
         player.position.set(g.x, 0, g.z - 7);
         player.rotation.y = Math.PI; camYaw = Math.PI;
         gateOpenTgt = 0; gateHold = 0; setGate(0);
+      }
+    },
+  },
+  street: {
+    title: 'BACK ALLEY DASH', late: 'the grid left without you',
+    start(m) {
+      const cps = townCircuit();
+      m.timed = true; m.t = driveTime(m.giver.x, m.giver.z, cps[0].x, cps[0].z, 13) + 20;
+      m.data.cp = 0; m.data.place = 1;
+      setTarget(cps[0].x, cps[0].z, 15, 'get to the start line');
+    },
+    update(m, dt, sub) {
+      const cps = townCircuit();
+      if (m.stage === 0) {
+        if (mode === 'car' && atTarget(sub, m.target)) {
+          m.stage = 1; m.timed = false;
+          m.data.cp = 1;
+          spawnRacers(m);
+          setTarget(cps[1 % cps.length].x, cps[1 % cps.length].z, 15, null);
+          banner('GREEN LIGHT!', 'three rivals · ' + cps.length + ' checkpoints · first one home wins');
+        }
+        return;
+      }
+      if (mode !== 'car') { failMission('you left the car'); return; }
+      // your place is however many rivals are further round the lap than you
+      let ahead = 0;
+      for (const r of m.data.racers) if (r.lapDone || r.cp > m.data.cp) ahead++;
+      m.data.place = ahead + 1;
+      if (atTarget(sub, m.target)) {
+        m.data.cp++;
+        coinSfx();
+        if (m.data.cp > cps.length) {
+          const p = m.data.place;
+          if (p === 1) winMission(400, 'FIRST — you beat the lot of them');
+          else winMission(140 - (p-1)*40, p === 2 ? 'second by a nose' : 'third · at least you finished');
+          return;
+        }
+        const n = cps[m.data.cp % cps.length];
+        setTarget(n.x, n.z, 15, null);
+      }
+      // everyone home before you and the race is over
+      if (m.data.racers.every(r => r.lapDone)) { failMission('all three beat you home'); return; }
+    },
+    hud(m) {
+      if (!m.stage) return null;
+      const cps = townCircuit(), sub = car.position, tg = m.target;
+      const ord = ['1st', '2nd', '3rd', '4th'][m.data.place - 1] || '4th';
+      return '<b>' + ord + '</b> · checkpoint <b>' + Math.min(m.data.cp, cps.length) + '/' + cps.length +
+        '</b> · ' + Math.round(Math.hypot(tg.x - sub.x, tg.z - sub.z)) + 'm';
+    },
+    cleanup(m) {
+      if (m.data.racers) for (const t of m.data.racers) {
+        const i = traffic.indexOf(t); if (i >= 0) traffic.splice(i, 1);
       }
     },
   },
