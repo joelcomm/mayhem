@@ -4674,8 +4674,14 @@ let camYaw = 0, camPitch = -0.22, dragging = false, lastMX = 0, lastMY = 0, last
 const canvas = renderer.domElement;
 canvas.addEventListener('mousedown', e => { dragging = true; lastMX = e.clientX; lastMY = e.clientY;
   sirenInit();
-  if (e.button === 0 && !soakArm()) kick();     // the soaker round claims the click
+  // Left is the fast one and right is the heavy one, which is the convention everywhere
+  // else and happens to map straight onto hand-is-light, boot-is-heavy.
+  if (e.button === 0 && !soakArm()) punch();    // the soaker round claims the left click
+  if (e.button === 2) kick();
   if (document.pointerLockElement !== canvas) canvas.requestPointerLock?.(); });
+// Right-drag to look already popped the browser menu over the game; now that right is
+// also the kick, suppressing it is not optional.
+canvas.addEventListener('contextmenu', e => e.preventDefault());
 addEventListener('mouseup', () => { dragging = false; spraying = false; });
 addEventListener('mousemove', e => {
   let dx = 0, dy = 0;
@@ -4894,10 +4900,17 @@ function updatePlayer(dt) {
   const sw = Math.sin(u.phase)*(moving?0.62:0);
   u.legL.rotation.x = sw; u.legR.rotation.x = -sw; u.armL.rotation.x = -sw; u.armR.rotation.x = sw;
   if (kickCd > 0) kickCd -= dt;
-  if (kickT > 0) {                                   // boot swings through and back
+  if (punchCd > 0) punchCd -= dt;
+  if (kickT > 0) {                                   // left boot swings through and back
     kickT -= dt;
     const k = Math.sin(Math.max(0, Math.min(1, (0.3 - kickT)/0.3)) * Math.PI);
-    u.legR.rotation.x = -1.6*k; u.armL.rotation.x = -0.9*k;
+    u.legL.rotation.x = -1.7*k; u.legR.rotation.x = 0.35*k;   // plant the other foot
+    u.armR.rotation.x = -0.7*k; u.armL.rotation.x = 0.5*k;    // arms counter the swing
+  }
+  if (punchT > 0) {                                  // right hand jabs out and back
+    punchT -= dt;
+    const k = Math.sin(Math.max(0, Math.min(1, (0.22 - punchT)/0.22)) * Math.PI);
+    u.armR.rotation.x = -2.05*k; u.armL.rotation.x = 0.75*k;
   }
   playerShadow.position.set(player.position.x, surfaceY(player.position.x, player.position.z) + 0.09, player.position.z);
   if (drive !== 0) hitPropsAt(player.position.x, player.position.z, fx*drive, fz*drive, spd*0.6, 1.0, 2.5);
@@ -5073,11 +5086,63 @@ function playerVsPeds(dt) {
   }
 }
 
-// ---- the kick ----
+// ---- the punch: right hand ----
+// Fast, short, aimed at one person, and it does not put them down — it staggers them
+// and starts a fight. That is the whole point of having two attacks: the light one
+// opens an exchange (they square up and swing back), the heavy one ends it. Two on the
+// chin inside two and a half seconds does drop them, so a flurry still pays off.
+let punchCd = 0, punchT = 0;
+const PUNCH_REACH = 1.75;
+function punch() {
+  if (mode !== 'foot' || playerRag.active || punchCd > 0) return;
+  punchCd = 0.34; punchT = 0.22;
+  const fx = Math.sin(player.rotation.y), fz = Math.cos(player.rotation.y);
+  const px = player.position.x, pz = player.position.z;
+  const gx = Math.floor(px/GAP_Q), gz = Math.floor(pz/GAP_Q);
+  // one target, the nearest in front — a punch is aimed, where the boot is a sweep
+  let best = null, bd = 1e9, bnx = 0, bnz = 0;
+  for (let cx = -1; cx <= 1; cx++) for (let cz = -1; cz <= 1; cz++) {
+    const b = pedGrid.get((gx+cx)+','+(gz+cz)); if (!b) continue;
+    for (const p of b) {
+      if (p.rag.active) continue;
+      const dx = p.g.position.x - px, dz = p.g.position.z - pz, d = Math.hypot(dx, dz);
+      if (d > PUNCH_REACH || d < 1e-4 || d >= bd) continue;
+      if ((dx/d)*fx + (dz/d)*fz < 0.4) continue;       // and squarely in front
+      best = p; bd = d; bnx = dx/d; bnz = dz/d;
+    }
+  }
+  if (!best) return;
+  const now = performance.now();
+  best.combo = (now - (best.hitAt || 0) < 2500) ? (best.combo || 0) + 1 : 1;
+  best.hitAt = now;
+  burst(px + fx*1.1, 1.45, pz + fz*1.1, 0xffe27a, 6);
+  chaosHit(8);
+  if (best.combo >= 2) {                               // the second one lands clean
+    applyRagdoll(best.g, best.rag, bnx, bnz, 9);
+    best.angry = 0;
+    best.spooked = { x: px, z: pz };                   // gets up and wants no more of it
+    shake = Math.min(1.0, shake + 0.2);
+    toast('KO!');
+  } else {
+    // shoved back on their heels. The offset is what survives pedPlace, same as a barge.
+    best.g.position.x += bnx*0.55; best.g.position.z += bnz*0.55;
+    best.ox = THREE.MathUtils.clamp((best.ox||0) + bnx*0.55, -1.1, 1.1);
+    best.oz = THREE.MathUtils.clamp((best.oz||0) + bnz*0.55, -1.1, 1.1);
+    best.swing = 0.45;                                 // rocked: their own swing resets
+    angerPed(best);                                    // and now it is a fight
+    shake = Math.min(1.0, shake + 0.1);
+  }
+  sayOuch('punch');
+}
+
+// ---- the kick: left leg ----
+// Slower and more committed than the punch, but it reaches further, sweeps everyone in
+// front of you rather than one target, and actually launches them. It is also the only
+// thing chickens care about — Feather Frenzy runs on this counter.
 let kickCd = 0, kickT = 0;
 function kick() {
   if (mode !== 'foot' || playerRag.active || kickCd > 0) return;
-  kickCd = 0.5; kickT = 0.3;
+  kickCd = 0.55; kickT = 0.3;
   const fx = Math.sin(player.rotation.y), fz = Math.cos(player.rotation.y);
   const ox = player.position.x + fx*1.0, oz = player.position.z + fz*1.0;
   const gx = Math.floor(ox/GAP_Q), gz = Math.floor(oz/GAP_Q);
@@ -5334,6 +5399,11 @@ const OUCH = {
     'Ohh, that smarts!', 'I just had these pressed!', 'Somebody hold my bag!',
     'Not the shins, anything but the shins!', "That's coming out of someone's wages!",
     'My knee does not bend that way!', 'Rude and painful!'],
+  punch: ['My nose!', 'Ow, my eye!', 'Right in the face!', 'That was my jaw!', 'Hey!',
+    'You punched me!', 'Oh, it is ON!', 'That is a lawsuit!', 'My glasses!',
+    'I felt that one!', 'Right, hold my coat.', 'You want some?', 'Big mistake!',
+    'I box, you know!', 'Ouch! Rude and painful!', 'My good side!', 'Say that again!',
+    'I have a very good dentist!'],
   // they walked into you, not the other way round
   bump: ['Sorry!', 'Oh — sorry!', 'My fault!', 'Beg your pardon.', 'Whoops!',
     'Excuse me!', "Didn't see you there!", 'Pardon me!', 'Oh! Hello.', 'Sorry about that!',

@@ -37,7 +37,8 @@ that cost the most round trips.
 | Mouse | look around (click for pointer lock, or drag) |
 | Shift | run (on foot) |
 | Space | handbrake / jump |
-| Left click | kick (on foot) |
+| Left click | punch — right hand (on foot) |
+| Right click | kick — left leg (on foot) |
 | F | enter a building at its door · otherwise get in / out of a car — near stopped traffic it borrows theirs |
 | C | cycle camera distance |
 | R | reset (also clears heat) |
@@ -70,8 +71,20 @@ day; anger used to fire on any overlap, so a townsperson could walk into you, ta
 offence, and put you on the floor for the crime of standing still. The contact is now
 judged by whether *you* were closing — your own movement that frame projected onto the
 line between you, over 1.2 m/s against a walking pace of about 4. Shove someone and they
-fight. Get shoved and they apologise. **Left click kicks**:
-whoever is in front of you goes flying, gets up, and runs away. Kicks feed the combo.
+fight. Get shoved and they apologise. **There are two attacks, and they do different jobs.**
+**Left click throws a right hand**: fast, short, aimed at one person, and it does *not*
+put them down — it rocks them back and **starts a fight**, because they square up and
+swing back. **Right click swings the left boot**: slower and more committed, but it
+reaches further, sweeps everyone in front of you rather than one target, and actually
+launches them — they get up and run away. So the light attack opens an exchange and the
+heavy one ends it. Two punches on the same person inside two and a half seconds also
+drops them (`KO!`), so a flurry still pays. Both feed the combo; only the boot counts
+for chickens, which is what keeps Feather Frenzy about the boot.
+
+Left-for-fast and right-for-heavy is the convention everywhere else, and it happens to
+map straight onto hand-is-light, boot-is-heavy. Right-drag to look already popped the
+browser context menu over the game; now that right click is the kick, that is
+suppressed.
 Townsfolk knocked down by your car get up scared and run too.
 
 Police are ordinary traffic agents with a chase flag. They use the same road graph as
