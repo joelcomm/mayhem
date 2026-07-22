@@ -3258,7 +3258,7 @@ function writeProp(p) {
       m.count = list.length; scene.add(m); meshes.push(m); propMeshes.push(m);
     }
     list.forEach((s, i) => {
-      const p = { meshes, i, x:s.x, y:0, z:s.z, rx:0, ry:prng()*6.28, rz:0,
+      const p = { meshes, i, kind, x:s.x, y:0, z:s.z, rx:0, ry:prng()*6.28, rz:0,
         vx:0, vy:0, vz:0, spin:new THREE.Vector3(), static:true,
         mass:def.mass, radius:def.radius, rest:0.3 };
       writeProp(p); propGridAdd(p); props.push(p);
@@ -3300,6 +3300,8 @@ function hitPropsAt(x, z, dx, dz, speed, radius, maxMass) {
       p.spin.set(rnd(-4,4), rnd(-4,4), rnd(-4,4));
       burst(p.x, 0.8, p.z, 0xffe27a, 5);
       addCoins(1); shake = Math.min(1.2, shake + 0.2); chaosHit(4);
+      // a knocked bin spills its change — the small reason to clip every one you pass
+      if (p.kind === 'bin') burstCoins(p.x, p.z, 2 + ((Math.random()*3)|0));
       dingSfx();
     }
   }
@@ -3349,16 +3351,36 @@ function hitPropsAt(x, z, dx, dz, speed, radius, maxMass) {
 }
 
 // spinning collectible coins
-const coins = [];
+const coins = [], LOOSE_MAX = 90;
+let PLACED = 0, looseNext = 0;
 {
   const reachable = coinsSpots.filter(c => !pointBlocked(c.x, c.z, 0.8));
   coinsSpots.length = 0; coinsSpots.push(...reachable);
   const geo = new THREE.CylinderGeometry(0.62, 0.62, 0.14, 20).rotateX(Math.PI/2);
-  const mesh = instanced(geo, toon(0xffd23b), coinsSpots.length, false);
+  // Placed coins first, then a fixed pool of loose ones on the end. Loose coins are the
+  // ones that burst out of a crate or a bin: same mesh, same collect loop, but they
+  // arrive with a velocity and land. The pool is fixed and recycled round-robin so the
+  // instance count never changes — the alternative is growing the buffer mid-game.
+  const mesh = instanced(geo, toon(0xffd23b), coinsSpots.length + LOOSE_MAX, false);
   coinsSpots.forEach((c, i) => coins.push({ x:c.x, z:c.z, got:false, i }));
+  PLACED = coins.length;
+  for (let k = 0; k < LOOSE_MAX; k++)
+    coins.push({ x:0, y:0, z:0, got:true, loose:true, vx:0, vy:0, vz:0, life:0, i: coins.length });
   mesh.count = coins.length;
   scene.add(mesh);
   var coinMesh = mesh;
+}
+// Pop a coin out of something, with a bit of upward and a bit of sideways.
+function spawnCoin(x, y, z, vx, vy, vz) {
+  const c = coins[PLACED + (looseNext++ % LOOSE_MAX)];
+  c.x = x; c.y = y; c.z = z; c.vx = vx; c.vy = vy; c.vz = vz;
+  c.life = 14; c.got = false;
+}
+function burstCoins(x, z, n) {
+  for (let k = 0; k < n; k++) {
+    const a = Math.random()*6.28, sp = 1.6 + Math.random()*2.6;
+    spawnCoin(x, 1.0, z, Math.cos(a)*sp, 5.5 + Math.random()*3.2, Math.sin(a)*sp);
+  }
 }
 let coinSpin = 0;
 function updateCoins(dt, sub) {
@@ -3366,7 +3388,21 @@ function updateCoins(dt, sub) {
   for (const c of coins) {
     if (c.got) { dummy.scale.setScalar(0); dummy.position.set(c.x, -20, c.z); dummy.rotation.set(0,0,0); }
     else {
-      dummy.position.set(c.x, 1.15 + Math.sin(coinSpin + c.i)*0.18, c.z);
+      let y;
+      if (c.loose) {
+        c.life -= dt;
+        if (c.life <= 0) { c.got = true; continue; }
+        const g = surfaceY(c.x, c.z);
+        c.vy -= 20*dt; c.y += c.vy*dt; c.x += c.vx*dt; c.z += c.vz*dt;
+        if (c.y <= g + 1.0) {                       // settle at the same height as a placed one
+          c.y = g + 1.0;
+          if (c.vy < -1.4) c.vy *= -0.42; else { c.vy = 0; c.vx *= 0.82; c.vz *= 0.82; }
+        }
+        y = c.y;
+      } else {
+        y = 1.15 + Math.sin(coinSpin + c.i)*0.18;
+      }
+      dummy.position.set(c.x, y, c.z);
       dummy.rotation.set(0, coinSpin*1.6, 0); dummy.scale.setScalar(1);
       const dx = c.x - sub.x, dz = c.z - sub.z;
       if (dx*dx + dz*dz < 9) { c.got = true; addCoins(5); coinSfx(); burst(c.x, 1.2, c.z, 0xffe27a, 8); }
@@ -4839,6 +4875,7 @@ function updateCar(dt) {
     if (Math.abs(speed) > 11) { damageCar(Math.abs(speed)*0.32); shake = Math.min(1.2, shake+0.25); }
     speed *= 0.34;
   }
+  if (Math.abs(speed) > 5) hitCratesAt(res.x, res.z, 2.4);    // and a car goes straight through
   const rt = collideTraffic(res.x, res.z, 1.7);
   if (rt.hit && rt.who >= 0) {
     const other = traffic[rt.who], impact = Math.abs(speed);
@@ -5175,6 +5212,7 @@ function punch() {
       best = p; bd = d; bnx = dx/d; bnz = dz/d;
     }
   }
+  hitCratesAt(px + fx*1.3, pz + fz*1.3, 1.5);        // a fist opens one too
   if (!best) return;
   const now = performance.now();
   best.combo = (now - (best.hitAt || 0) < 2500) ? (best.combo || 0) + 1 : 1;
@@ -5225,6 +5263,7 @@ function kick() {
       got++;
     }
   }
+  hitCratesAt(ox, oz, 2.0);                          // the boot busts a crate open
   // chickens are fair game for the boot — Feather Frenzy runs on this counter
   for (const c of chickens) {
     if (c.dead > 0) continue;
@@ -5733,6 +5772,209 @@ function updateChickens(dt) {
   }
   chickens.mesh.count = chickens.trim.count = i;
   chickens.mesh.instanceMatrix.needsUpdate = true;
+}
+
+// =================================================================
+//  ? CRATES
+//  A crate in a yard with a question mark on every side. Boot it (or drive into
+//  it) and it bursts, and what comes out is the point: mostly coins, often a
+//  bomb, and once in a long while an animal that changes what the next minute of
+//  the game is about. The odds are 60 coins / 10 jackpot / 25 bomb / 2.5 cat /
+//  2.5 dog — the brief left ten points unspoken, and a jackpot is the most
+//  useful thing to do with them, because "sometimes a *lot* of coins" is what
+//  makes opening the next one worth doing.
+//
+//  Placement is the same post-tree pass the coin rings use, so it is free of the
+//  seeded stream: house footprints, a few metres off the back of the building,
+//  filtered against roads and anything already standing.
+// =================================================================
+const crates = [];
+{
+  const qTex = surfCanvas(128, (g, P) => {
+    g.fillStyle = '#e8dcc0'; g.fillRect(0, 0, P, P);
+    g.fillStyle = '#b98d55'; g.fillRect(0, 0, P, 9); g.fillRect(0, P-9, P, 9);
+    g.fillRect(0, 0, 9, P); g.fillRect(P-9, 0, 9, P);
+    g.fillStyle = '#6b4a24';
+    g.font = 'bold 82px "Trebuchet MS", sans-serif';
+    g.textAlign = 'center'; g.textBaseline = 'middle';
+    g.fillText('?', P/2, P/2 + 4);
+  });
+  qTex.wrapS = qTex.wrapT = THREE.ClampToEdgeWrapping;
+  const CR = 1.25;
+  const mesh = instanced(BOX(CR, CR, CR).translate(0, CR/2, 0),
+    new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP, map: qTex }), 90, true);
+  for (const b of mapBoxes) {
+    if (crates.length >= 90 || b.kind !== 'house') continue;
+    if (vary(b.x, b.z, 100) >= 46) continue;              // roughly half the houses
+    // out the back: the house faces its street, so the far side is the garden
+    const a = vary(b.z, b.x, 4) * Math.PI/2;
+    const x = b.x + Math.cos(a)*(b.w/2 + 3.4), z = b.z + Math.sin(a)*(b.d/2 + 3.4);
+    if (onRoad(x, z, 2.2) || pointBlocked(x, z, 1.4) || overRiver(x, z, 4)) continue;
+    crates.push({ x, z, y: groundH(x, z), gone: false, i: crates.length });
+  }
+  crates.forEach(c => {
+    dummy.position.set(c.x, c.y, c.z);
+    dummy.rotation.set(0, vary(c.x, c.z, 8)*0.19, 0);
+    dummy.scale.setScalar(1); dummy.updateMatrix();
+    mesh.setMatrixAt(c.i, dummy.matrix);
+    // solid until it is broken, so you can't walk through one
+    c.box = { minX: c.x-0.7, maxX: c.x+0.7, minZ: c.z-0.7, maxZ: c.z+0.7 };
+    colliders.push(c.box);
+  });
+  mesh.count = crates.length;
+  mesh.instanceMatrix.needsUpdate = true;
+  scene.add(mesh);
+  var crateMesh = mesh;
+  console.log(`crates: ${crates.length} in yards`);
+}
+const crateGrid = new Map();
+for (const c of crates) {
+  const k = Math.floor(c.x/GAP_Q)+','+Math.floor(c.z/GAP_Q);
+  let b = crateGrid.get(k); if (!b) crateGrid.set(k, b=[]); b.push(c);
+}
+
+// --- bombs -------------------------------------------------------
+// A short fuse, a flash, then a shove. On foot it puts you down; in the car it
+// damages you and kicks the back out. It hurts whoever is standing nearby too,
+// which is the reason to lure someone next to one.
+const bombs = [];
+function spawnBomb(x, z) {
+  const g = new THREE.Group();
+  g.add(new THREE.Mesh(new THREE.SphereGeometry(0.42, 16, 12), toon(0x23262e)));
+  const fuse = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 0.34, 8).translate(0, 0.17, 0), toon(0xb9a06a));
+  fuse.position.set(0, 0.38, 0); fuse.rotation.z = -0.4; g.add(fuse);
+  const spark = new THREE.Mesh(new THREE.SphereGeometry(0.13, 10, 8),
+    new THREE.MeshBasicMaterial({ color: 0xffd23b }));
+  spark.position.set(-0.14, 0.7, 0); g.add(spark);
+  g.position.set(x, surfaceY(x, z) + 0.42, z);
+  scene.add(g);
+  bombs.push({ g, spark, t: 1.5, x, z });
+  toast('UH OH');
+}
+function updateBombs(dt) {
+  for (let i = bombs.length - 1; i >= 0; i--) {
+    const b = bombs[i];
+    b.t -= dt;
+    const fast = b.t < 0.6;
+    b.spark.visible = Math.sin(performance.now() * (fast ? 0.05 : 0.02)) > 0;
+    b.g.scale.setScalar(1 + Math.max(0, 0.35 - b.t) * 0.8);      // swells just before it goes
+    if (b.t > 0) { if (b.t < 1.48 && b.t > 1.42) tone(760, sirenCtx ? sirenCtx.currentTime : 0, 0.05, 0.05); continue; }
+    scene.remove(b.g); bombs.splice(i, 1);
+    boomSfx();
+    burst(b.x, 1.0, b.z, 0xffb347, 22);
+    burst(b.x, 1.6, b.z, 0x8a8a8a, 14);
+    shake = Math.min(1.8, shake + 0.9);
+    chaosHit(30);
+    const sub = mode === 'car' ? car.position : player.position;
+    const dx = sub.x - b.x, dz = sub.z - b.z, d = Math.hypot(dx, dz) || 1;
+    if (d < 9) {
+      const nx = dx/d, nz = dz/d, force = (1 - d/9);
+      if (mode === 'car') { damageCar(26*force); speed *= 0.4; }
+      else if (!playerRag.active) applyRagdoll(player, playerRag, nx, nz, 8 + 9*force);
+    }
+    hitPeopleAt(b.x, b.z, 1, 0, 16, 6.5, false);                 // everyone nearby goes over
+  }
+}
+
+// --- the cat and the dog ------------------------------------------
+// Two very rare crate drops, and the only things in town that are neither traffic
+// nor townsfolk. The cat wants nothing to do with you and leaves; the dog decides
+// you are its person and will not be talked out of it.
+const pets = [];
+function petGeo(cat) {
+  const fur = cat ? 0x6b6f78 : 0xc9863f, pale = cat ? 0xe8e3d3 : 0xe8d06a;
+  const g = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.SphereGeometry(0.34, 16, 12).scale(1, 0.82, 1.6), toon(fur));
+  body.position.y = cat ? 0.42 : 0.46; body.castShadow = true; g.add(body);
+  const head = new THREE.Mesh(new THREE.SphereGeometry(cat ? 0.21 : 0.25, 16, 12), toon(fur));
+  head.position.set(0, cat ? 0.58 : 0.62, cat ? 0.46 : 0.5); g.add(head);
+  const muz = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 9).scale(1, 0.8, 1.3), toon(pale));
+  muz.position.set(0, cat ? 0.53 : 0.56, cat ? 0.62 : 0.72); g.add(muz);
+  for (const sx of [-1, 1]) {
+    const ear = cat
+      ? new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.2, 4), toon(fur))            // pricked
+      : new THREE.Mesh(BOX(0.11, 0.24, 0.07), toon(fur));                          // floppy
+    ear.position.set(sx*0.13, cat ? 0.74 : 0.66, cat ? 0.44 : 0.46);
+    if (!cat) ear.rotation.z = sx*0.25;
+    g.add(ear);
+  }
+  const tail = new THREE.Mesh(BOX(0.08, 0.08, cat ? 0.7 : 0.36).translate(0, 0, cat ? -0.35 : -0.18), toon(fur));
+  tail.position.set(0, cat ? 0.52 : 0.5, cat ? -0.42 : -0.46);
+  tail.rotation.x = cat ? -0.9 : -0.5; g.add(tail);
+  const legs = [];
+  for (const sx of [-1, 1]) for (const sz of [1, -1]) {
+    const l = new THREE.Mesh(BOX(0.1, 0.42, 0.1).translate(0, -0.21, 0), toon(fur));
+    l.position.set(sx*0.17, 0.42, sz*0.3); g.add(l); legs.push(l);
+  }
+  return { g, tail, legs };
+}
+function spawnPet(x, z, cat) {
+  if (pets.length >= 6) { const old = pets.shift(); scene.remove(old.g); }
+  const p = petGeo(cat);
+  p.g.position.set(x, surfaceY(x, z), z);
+  scene.add(p.g);
+  pets.push({ ...p, cat, x, z, yaw: Math.random()*6.28, phase: Math.random()*6.28, life: cat ? 22 : 999 });
+  toast(cat ? 'A CAT!' : 'A DOG!');
+}
+function updatePets(dt) {
+  const sub = mode === 'car' ? car.position : player.position;
+  for (let i = pets.length - 1; i >= 0; i--) {
+    const p = pets[i];
+    p.life -= dt;
+    if (p.life <= 0) { scene.remove(p.g); pets.splice(i, 1); continue; }
+    const dx = sub.x - p.x, dz = sub.z - p.z, d = Math.hypot(dx, dz) || 1;
+    let tx, tz, spd;
+    if (p.cat) { tx = -dx/d; tz = -dz/d; spd = d < 16 ? 7.5 : 0; }      // straight off
+    else {
+      // the dog holds a couple of metres back so it isn't inside you, and gives up
+      // trying to keep pace with a car — it just watches you go
+      const want = 2.4;
+      spd = d > want ? Math.min(6.5, 1.6 + (d - want)*1.4) : 0;
+      tx = dx/d; tz = dz/d;
+      if (d > 60) { p.x = sub.x - dx/d*8; p.z = sub.z - dz/d*8; }       // teleport back in
+    }
+    if (spd > 0) {
+      const r = collideCircle(p.x + tx*spd*dt, p.z + tz*spd*dt, 0.45, colliders);
+      p.x = r.x; p.z = r.z;
+      p.yaw = Math.atan2(tx, tz);
+      p.phase += dt * spd * 2.2;
+    } else p.phase += dt*1.5;
+    p.g.position.set(p.x, surfaceY(p.x, p.z) + Math.abs(Math.sin(p.phase))*0.06, p.z);
+    p.g.rotation.y = p.yaw;
+    const sw = Math.sin(p.phase) * (spd > 0 ? 0.75 : 0.05);
+    p.legs[0].rotation.x = sw;  p.legs[1].rotation.x = -sw;
+    p.legs[2].rotation.x = -sw; p.legs[3].rotation.x = sw;
+    // the dog wags when it has caught up with you; the cat's tail just sways
+    p.tail.rotation.y = Math.sin(p.phase * (p.cat ? 0.8 : 2.4)) * (p.cat ? 0.25 : 0.7);
+  }
+}
+
+// --- breaking one open --------------------------------------------
+function breakCrate(c, fromX, fromZ) {
+  if (c.gone) return;
+  c.gone = true;
+  c.box.minX = c.box.maxX = 1e9; c.box.minZ = c.box.maxZ = 1e9;   // parked, like a shut door
+  dummy.position.set(c.x, -50, c.z); dummy.scale.setScalar(0); dummy.updateMatrix();
+  crateMesh.setMatrixAt(c.i, dummy.matrix); crateMesh.instanceMatrix.needsUpdate = true;
+  burst(c.x, 0.9, c.z, 0xd8bd8a, 16);
+  crashSfx(14); shake = Math.min(1.2, shake + 0.25);
+  const roll = Math.random();
+  if (roll < 0.60)      { burstCoins(c.x, c.z, 6); chaosHit(10); }
+  else if (roll < 0.70) { burstCoins(c.x, c.z, 16); chaosHit(20); toast('JACKPOT!'); }
+  else if (roll < 0.95) spawnBomb(c.x, c.z);
+  else if (roll < 0.975) spawnPet(c.x, c.z, true);
+  else                  spawnPet(c.x, c.z, false);
+}
+function hitCratesAt(x, z, r) {
+  const gx = Math.floor(x/GAP_Q), gz = Math.floor(z/GAP_Q);
+  for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
+    const b = crateGrid.get((gx+ox)+','+(gz+oz)); if (!b) continue;
+    for (const c of b) {
+      if (c.gone) continue;
+      const dx = c.x - x, dz = c.z - z;
+      if (dx*dx + dz*dz < r*r) breakCrate(c, x, z);
+    }
+  }
 }
 
 // =================================================================
@@ -7687,6 +7929,8 @@ function animate() {
   updateTraffic(dt);
   updatePeds(dt);
   updateChickens(dt);
+  updateBombs(dt);
+  updatePets(dt);
   updateProps(dt);
   updateCoins(dt, sub);
   updateTrophies(dt, sub);

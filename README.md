@@ -415,6 +415,35 @@ structured pass runs after the tree stage — so `treeSpots` is already filtered
 the trees that actually exist — and after every canary is computed, which is why it can
 draw from the seeded stream freely.
 
+### ? crates
+A wooden crate with a question mark on every side sits in the back garden of about
+half the houses — 66 of them. Boot it, punch it or drive through it and it bursts, and
+what comes out is the point:
+
+| | | |
+|---|---|---|
+| **60%** | coins | six, popped out on an arc |
+| **10%** | jackpot | sixteen, and a banner |
+| **25%** | bomb | a short fuse, then it puts you on the floor |
+| **2.5%** | a cat | wants nothing to do with you and leaves |
+| **2.5%** | a dog | decides you are its person and will not be talked out of it |
+
+The brief specified 60 / 25 / 2.5 / 2.5, which leaves ten points unspoken; a jackpot is
+the most useful thing to do with them, because *sometimes a lot* is what makes opening
+the next one worth doing.
+
+The bomb hurts whoever is standing nearby as well as you, which is the reason to lure
+someone next to one. The dog holds a couple of metres back so it isn't inside you, and
+gives up trying to keep pace with a car — it just watches you go. Both animals are
+Groups rather than instances: at 2.5% you will meet a handful in a playthrough, and a
+draw call each is the right price for that.
+
+**Loose coins** are the same mesh and the same collect loop as the placed ones, but they
+arrive with a velocity and land. The pool is a fixed ninety on the end of the coin array,
+recycled round-robin, so the instance count never changes — the alternative is growing a
+buffer mid-game. Knocking over a **bin** spills two or three of them too, which is the
+small reason to clip every one you pass.
+
 ### Coins are for spending
 **Gus's Garage** is a real building just up the street from the spawn: a
 **pull-through service bay** — a 22 m canopy on four posts with an office and
