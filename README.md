@@ -280,6 +280,26 @@ audit knows it belongs); small props are visual only; the walk from the door sta
 checkerboard shop floor and a boarded one next door is most of what makes two rooms of
 the same size read as two different places.
 
+**Every room gets dressed as well as furnished.** The briefs above say what a shop
+*is*; a second pass, run for all 43 rooms including the plain fit-out, adds what every
+shop *has*: ceiling strip lights down the long axis, a clock high on the back wall,
+framed pictures at eye height on both side walls, a stocked shelf above head height, a
+doormat where you come in, a plant in the far corner and a bin by the counter. A room
+with good furniture and bare walls still reads as a diorama — it is the lights and the
+junk in the corners that make it read as somewhere people work. All of it is either
+wall- or ceiling-mounted, so it cannot land on top of anything a brief placed, or goes
+through the same `ok()`/`solid()` overlap test as the rest.
+
+**Every room gets dressed as well as furnished.** The briefs above say what a shop
+*is*; a second pass, run for all 43 rooms including the plain fit-out, adds what every
+shop *has*: ceiling strip lights down the long axis, a clock high on the back wall,
+framed pictures at eye height on both side walls, a stocked shelf above head height, a
+doormat where you come in, a plant in the far corner and a bin by the door side. A room
+with good furniture and bare walls still reads as a diorama — it is the lights and the
+junk in the corners that make it read as somewhere people work. All of it is either
+wall- or ceiling-mounted, so it cannot land on top of anything a brief placed, or goes
+through the same `ok()`/`solid()` overlap test as the rest.
+
 **Rooms have people in them** — a cashier behind the Speedy Mart counter, a barman
 behind the Rusty Mug's bar, seated diners, dancers at the disco. They are *staff*: static figures with a fixed
 spot, a fixed yaw and an idle sway (seated ones fold at the hip), drawn through the same
@@ -353,7 +373,34 @@ the thing that welds the job loop onto the chaos loop instead of competing with 
 
 Jobs that are about driving carry `needsCar` and **refuse to start while you are on
 foot** ("YOU NEED TO BE IN A CAR") rather than handing you a timed delivery you have
-no way of making. Failure is wired through `missionEvent()`: wrecking your car, getting busted, or
+no way of making. **Which means their giver has to stand somewhere a car can get to.**
+`clearSpot` on its own only promises the giver is standing somewhere *legal* — and the
+middle of a back garden, walled in by houses, is legal. For a job that will not start
+unless you are behind a wheel that is a dead end: you can walk up and talk to them, and
+never once arrive in the thing they are asking for. Car jobs now also require
+`drivable()` — a town street within 26 m, and a clear straight run from the kerb to the
+spot, sampled every 1.5 m against the collider list. **Axel (RING RUSH) was the one this
+caught**: he stood at 112,-207 with a house between him and the road, and now stands
+10.5 m away with a clean approach. If nowhere drivable exists at all the search falls
+back to the plain one, because a giver standing slightly oddly beats a mission nobody
+can reach.
+
+`CAR_JOB` duplicates the `needsCar` flags because markers are placed long before
+`MISSION_DEFS` exists; a startup assertion cross-checks the two, so a drift shows up in
+the console rather than as a giver you can never get to. **Which means their giver has to be somewhere a car can get to.**
+`clearSpot` on its own only promises the giver is standing somewhere *legal* — and the
+middle of a back garden, walled in by houses, is legal. For a job that will not start
+unless you are behind a wheel that is a dead end: you can walk up and talk to them and
+never once arrive in the thing they are asking for. Car jobs now also require
+`drivable()` — a town street within 26 m, and a clear straight run from the kerb to the
+spot, sampled every 1.5 m against the collider list. Axel (RING RUSH) was the one this
+caught: he stood at 112,-207 with a house between him and the road, and now stands 10.5 m
+away with a clean approach. If nothing drivable exists at all the search falls back to
+the plain one, because a giver standing slightly oddly beats a mission you cannot reach.
+
+`CAR_JOB` duplicates the `needsCar` flags because markers are placed long before
+`MISSION_DEFS` exists; a startup assertion cross-checks the two, so a drift shows up in
+the console rather than as a giver nobody can get to. Failure is wired through `missionEvent()`: wrecking your car, getting busted, or
 R/reset all fail the active job cleanly — and then the **retry guide** takes over:
 the giver re-arms in 2.5 s and the arrow, beacon, objective line ("TRY AGAIN ·
 back to …") and radar blip all lead back to them until you're close or you start

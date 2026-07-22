@@ -2399,6 +2399,58 @@ function furnishRoom(R, b, r, dx, dz, walls) {
       crates(s*(hu - 1.45), -hv + 1.45);
     }
   }
+
+  // ---- house dressing ------------------------------------------------
+  // Every brief above furnishes what a shop *is*. This is what every shop *has*, and it
+  // runs for all of them including the plain fit-out. A room with good furniture and
+  // bare walls still reads as a diorama: it is the ceiling lights, the clock, the
+  // pictures and the junk in the corners that make it read as somewhere people work.
+  // Everything here is wall- or ceiling-mounted (so it cannot land on top of anything a
+  // brief placed) or goes through ok()/solid() like the rest.
+  {
+    const nL = clamp(Math.round(hu / 2.2), 1, 4);      // strip lights down the long axis
+    for (let i = 0; i < nL; i++) {
+      const u = nL === 1 ? 0 : -hu*0.62 + (hu*1.24)*(i/(nL - 1));
+      vis(0xc9ccd2, u, 0, 1.9, 0.62, 0.07, CEIL_H - 0.1);
+      vis(0xfff6e2, u, 0, 1.6, 0.44, 0.05, CEIL_H - 0.15);
+    }
+    const uc = -s*hu*0.45;                             // a clock, high on the back wall
+    backPanel(0xf6f3ea, uc, 0.62, 0.62, 3.35);
+    torus(0x2f3550, uc, hv - 0.36, 0.33, 0.045, 3.35, true);
+    backPanel(0x2f3550, uc, 0.05, 0.3, 3.44, 0.1);
+    backPanel(0x2f3550, uc + 0.11, 0.22, 0.05, 3.35, 0.1);
+    const FRAME = [0x8c5a34, 0x4a4f58, 0xc9a24b];      // framed pictures at eye height
+    const ART   = [0x59c9a5, 0xe8952f, 0x7b4fa7, 0x3fa9d8, 0xd0392b];
+    for (const s2 of [-1, 1]) {
+      const n = clamp(Math.round(hv / 2.6), 1, 3);
+      for (let i = 0; i < n; i++) {
+        const v = n === 1 ? 0 : -hv*0.5 + hv*(i/(n - 1));
+        sidePanel(FRAME[i % 3], s2, v, 1.15, 0.85, 2.5);
+        sidePanel(ART[(i + (s2 > 0 ? 2 : 0)) % 5], s2, v, 0.95, 0.65, 2.5, 0.1);
+      }
+    }
+    for (let i = 0; i < 4; i++) {                      // stock, above head height
+      const v = -hv*0.55 + (hv*1.1)*(i/3);
+      sidePanel(0x8c6a44, -s, v, 0.9, 0.08, 1.95, 0.22);
+      sidePanel([0xd0392b, 0x2f6fc4, 0xf0b429, 0x2f8f4f][i], -s, v, 0.5, 0.34, 2.16, 0.24);
+    }
+    vis(0x6b5b45, ud, -hv + 1.05, 1.7, 1.0, 0.035, 0.02);   // a doormat, flat enough to
+    vis(0x8c6a44, ud, -hv + 1.05, 1.4, 0.75, 0.03, 0.055);  // never be in the way
+    const up = s*(hu - 0.95), vp = hv - 0.95;          // a plant in the far corner
+    if (ok(up, vp, 1.0, 1.0)) {
+      cyl(0xa8543f, up, vp, 0.34, 0.5, 0, 0.28);
+      cyl(0x5a4632, up, vp, 0.07, 0.5, 0.5);
+      for (const [du, dv, h] of [[0, 0, 1.0], [0.22, 0.1, 0.78], [-0.2, -0.12, 0.72]])
+        sph(0x3f8f4a, up + du, vp + dv, 0.38, h + 0.28, 0.85);
+      solid(up, vp, 0.9, 0.9);
+    }
+    const ub = -s*(hu - 0.7), vb = -hv + 0.85;         // and a bin by the door side
+    if (ok(ub, vb, 0.7, 0.7)) {
+      cyl(0x4a4f58, ub, vb, 0.28, 0.62, 0, 0.24);
+      torus(0x2b2f38, ub, vb, 0.27, 0.045, 0.62);
+      solid(ub, vb, 0.6, 0.6);
+    }
+  }
 }
 
 // Now that every block is built, each walk-in building can work out where its doorway
@@ -5774,6 +5826,12 @@ function updateChickens(dt) {
   chickens.mesh.instanceMatrix.needsUpdate = true;
 }
 
+// Which jobs will not start unless you are behind a wheel. This duplicates the
+// `needsCar` flags in MISSION_DEFS because the markers are placed long before that
+// object exists — so the two are cross-checked at startup and a drift shows up in the
+// console rather than as a giver you can never reach.
+const CAR_JOB = { donut: 1, taxi: 1, derby: 1, race: 1, street: 1 };
+
 // =================================================================
 //  ? CRATES
 //  A crate in a yard with a question mark on every side. Boot it (or drive into
@@ -6012,19 +6070,47 @@ const MARKERS = [];
   // an anchor near a bridge or a riverside junction otherwise stands its giver in
   // the water, and walking up to them drowns you before they can say hello.
   const spotOK = (x, z) => !pointBlocked(x, z, 2) && !onRoad(x, z, 1.5) && !overRiver(x, z, 8);
-  function clearSpot(x, z) {
-    if (spotOK(x, z)) return { x, z };
+  // Can you get a CAR to this spot? clearSpot on its own only promises the giver is
+  // standing somewhere legal — and the middle of a back garden, walled in by houses, is
+  // legal. For a job that refuses to start unless you are in a car that is a dead end:
+  // you can walk up and talk to them, and never once arrive in the thing they are asking
+  // for. So a car job's giver also needs a street nearby with a clear run to it.
+  function drivable(x, z) {
+    let bx = 0, bz = 0, bd = 1e9;
+    for (const st of STREETS) {
+      if (st.kind === 'highway') continue;              // you cannot stop on the ring
+      const dx = st.bx - st.ax, dz = st.bz - st.az, L2 = dx*dx + dz*dz || 1;
+      const t = THREE.MathUtils.clamp(((x - st.ax)*dx + (z - st.az)*dz) / L2, 0, 1);
+      const px = st.ax + dx*t, pz = st.az + dz*t;
+      const d2 = (px-x)*(px-x) + (pz-z)*(pz-z);
+      if (d2 < bd) { bd = d2; bx = px; bz = pz; }
+    }
+    const d = Math.sqrt(bd);
+    if (d > 26) return false;                           // nothing to drive up from
+    const steps = Math.max(1, Math.ceil(d / 1.5));      // and nothing solid on the way in
+    for (let i = 1; i <= steps; i++) {
+      const t = i/steps;
+      if (pointBlocked(x + (bx-x)*t, z + (bz-z)*t, 1.7)) return false;
+    }
+    return true;
+  }
+  function clearSpot(x, z, needsCar) {
+    const good = (px, pz) => spotOK(px, pz) && (!needsCar || drivable(px, pz));
+    if (good(x, z)) return { x, z };
     // Ring search out to 30 m: a junction pad is ~16 m across and a wide street's
     // reserve can reach past 25, so an 11 m ceiling silently dropped any giver
     // anchored near a big intersection.
     for (let r = 3; r <= 30; r += 2.5) for (let a = 0.3; a < 6.4; a += Math.PI/6) {
       const nx = x + Math.cos(a)*r, nz = z + Math.sin(a)*r;
-      if (spotOK(nx, nz)) return { x: nx, z: nz };
+      if (good(nx, nz)) return { x: nx, z: nz };
     }
-    return null;
+    // A giver standing slightly oddly beats a mission nobody can reach, so if there is
+    // nowhere drivable at all, fall back to the plain search.
+    return needsCar ? clearSpot(x, z, false) : null;
   }
   function marker(x, z, name, line, mission) {
-    const s = mission ? clearSpot(x, z) : (pointBlocked(x, z, 2) ? null : { x, z });
+    const s = mission ? clearSpot(x, z, !!CAR_JOB[mission])
+                      : (pointBlocked(x, z, 2) ? null : { x, z });
     if (!s) return;
     x = s.x; z = s.z;
     const lk = pickLook();
@@ -7910,6 +7996,13 @@ rngNeutral(() => {
 // depth buffer the ink pass reads.
 tagNoInk(scene);
 
+
+// CAR_JOB is a hand-kept copy of the needsCar flags (the markers are placed before
+// MISSION_DEFS exists). Catch a drift here, not as a giver stuck in a back garden.
+{
+  const drift = Object.keys(MISSION_DEFS).filter(k => !!MISSION_DEFS[k].needsCar !== !!CAR_JOB[k]);
+  if (drift.length) console.warn('CAR_JOB out of step with MISSION_DEFS:', drift);
+}
 
 const clock = new THREE.Clock();
 function animate() {
