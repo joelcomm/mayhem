@@ -404,7 +404,21 @@ minigame in some better form.
 
 ## How it's drawn
 Everything is `MeshToonMaterial` on a 3-step ramp, with black back-face shells for
-ink outlines. Outline meshes **share the `instanceMatrix`** of the mesh they wrap, so
+ink outlines.
+
+**The detail pass.** Every primitive that was meant to be round now is: cylinders and
+spheres swept up to 16-28 segments, cones to 16 — *except* cones with four or fewer
+sides, which are deliberate pyramids (the church steeple, the prison gate caps, the
+guide arrow) and were left alone. On top of that, the things the camera spends its
+time on got real geometry: car wheels have 28-segment tyres, rims, three spokes and
+an arch lip so the body no longer hovers over them; trees went from three lobes to
+five plus a flared root and a branch stub; the crowd gained hands, rounded shoe toes
+and a 22x16 head. Roughly 70 primitives rounded out, at a measured ~57 fps.
+
+This pass is only cheap because of the private-PRNG work: geometry no longer draws
+from the town's stream, so poly counts can change freely and the build stays
+byte-identical (`spawn 145,-197`, `trees 1641/176`, 43 rooms — verified before and
+after). Under the old scheme every one of these edits would have re-rolled the town. Outline meshes **share the `instanceMatrix`** of the mesh they wrap, so
 an outlined crowd costs no extra matrix maths.
 
 Crowds, traffic, trees, props, coins and signals are all `InstancedMesh`. Buildings

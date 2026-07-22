@@ -1083,13 +1083,13 @@ function fillBackyards(r) {
         break;
       }
       case 'pool': {
-        put(0xd8dde4, baked(new THREE.CylinderGeometry(4.2, 4.2, 1.5, 14), x, 0.75, z));
-        put(0x3fb8e0, baked(new THREE.CylinderGeometry(3.9, 3.9, 0.2, 14), x, 1.5, z));
+        put(0xd8dde4, baked(new THREE.CylinderGeometry(4.2, 4.2, 1.5, 20), x, 0.75, z));
+        put(0x3fb8e0, baked(new THREE.CylinderGeometry(3.9, 3.9, 0.2, 20), x, 1.5, z));
         addBox(x, z, 8, 8, 'pool');
         break;
       }
       case 'tramp': {
-        put(0x2f3550, baked(new THREE.CylinderGeometry(3.2, 3.2, 0.3, 14), x, 1.3, z));
+        put(0x2f3550, baked(new THREE.CylinderGeometry(3.2, 3.2, 0.3, 20), x, 1.3, z));
         for (let q = 0; q < 6; q++) {
           const a = q/6*Math.PI*2;
           put(0x8b929a, baked(BOX(0.22, 1.3, 0.22), x + Math.cos(a)*2.9, 0.65, z + Math.sin(a)*2.9));
@@ -1106,7 +1106,7 @@ function fillBackyards(r) {
         break;
       }
       case 'bbq': {
-        put(0x2b2f38, baked(new THREE.CylinderGeometry(0.9, 0.7, 0.9, 10), x, 1.3, z));
+        put(0x2b2f38, baked(new THREE.CylinderGeometry(0.9, 0.7, 0.9, 20), x, 1.3, z));
         put(0x8b929a, baked(BOX(0.16, 1.0, 0.16), x, 0.5, z));
         break;
       }
@@ -1159,10 +1159,10 @@ function fillPark(B, statue) {
   for (const [ox, oz] of [[-14,-14],[14,-14],[-14,14],[14,14]])
     propSpots.push({ x: cx+ox, z: cz+oz, kind:'bench' });
   if (statue && !footprintOnRoad(cx, cz, 9, 9, 0, 0)) {
-    put(0x8f9aa6, baked(new THREE.CylinderGeometry(3.2,3.8,1.6,10), cx, 0.8, cz));
+    put(0x8f9aa6, baked(new THREE.CylinderGeometry(3.2, 3.8, 1.6, 20), cx, 0.8, cz));
     put(0x8f9aa6, baked(BOX(2.6, 3.4, 2.6), cx, 3.3, cz));
     put(0xc9b458, baked(BOX(1.5, 3.0, 0.9), cx, 6.5, cz));            // torso
-    put(0xc9b458, baked(new THREE.SphereGeometry(0.85, 10, 8), cx, 8.6, cz));
+    put(0xc9b458, baked(new THREE.SphereGeometry(0.85, 16, 12), cx, 8.6, cz));
     put(0xc9b458, baked(BOX(0.45, 2.2, 0.45), cx-1.1, 6.7, cz, 0,0, 0.5));
     addBox(cx, cz, 7, 7, 'statue');
   }
@@ -1312,8 +1312,8 @@ function fillBurns(B) {
   put(DARK, baked(BOX(56*F, 16, 22*F), cx, 8, cz+4));
   put(ROOFC, baked(roofPrism(58*F, 5.5, 24*F), cx, 16, cz+4));
   for (const ox of [-22*F, 22*F]) {                                       // corner towers
-    put(DARK, baked(new THREE.CylinderGeometry(5, 5, 26, 10), cx+ox, 13, cz-6));
-    put(ROOFC, baked(new THREE.ConeGeometry(6.2, 8, 10), cx+ox, 30, cz-6));
+    put(DARK, baked(new THREE.CylinderGeometry(5, 5, 26, 20), cx+ox, 13, cz-6));
+    put(ROOFC, baked(new THREE.ConeGeometry(6.2, 8, 16), cx+ox, 30, cz-6));
     addBox(cx+ox, cz-6, 10, 10, 'burns', 'burns');
   }
   for (let k = -4; k <= 4; k++) {
@@ -1353,8 +1353,8 @@ function fillPrison(B) {
   PRISON.block = { w: 34*F, d: 18*F };
   for (const [ox, oz] of [[-1,-1],[1,-1],[-1,1],[1,1]]) {             // guard towers
     const tx = cx + ox*(r.x1-r.x0)/2*0.92, tz = cz + oz*(r.z1-r.z0)/2*0.92;
-    put(W, baked(new THREE.CylinderGeometry(3, 3.4, 15, 8), tx, 7.5, tz));
-    put(0x3c4048, baked(new THREE.ConeGeometry(4.4, 4, 8), tx, 17, tz));
+    put(W, baked(new THREE.CylinderGeometry(3, 3.4, 15, 16), tx, 7.5, tz));
+    put(0x3c4048, baked(new THREE.ConeGeometry(4.4, 4, 16), tx, 17, tz));
     addBox(tx, tz, 6, 6, 'prison', 'prison');
   }
   put(0x8b929a, baked(BOX(34*F, 12, 18*F), cx, 6, cz));
@@ -1400,10 +1400,10 @@ function fillCivic(B) {
   put(0x6f6a58, baked(BOX(46*F, 1.2, 24*F), cx, 15.6, hz));
   put(STONE, baked(BOX(26, 1.4, 5), cx, 15.4, hz-13));
   for (let k = -3; k <= 3; k++) {
-    put(STONE, baked(new THREE.CylinderGeometry(1.1, 1.1, 14, 10), cx + k*4, 7, hz-13));
+    put(STONE, baked(new THREE.CylinderGeometry(1.1, 1.1, 14, 20), cx + k*4, 7, hz-13));
   }
-  put(0xd8d3c2, baked(new THREE.SphereGeometry(9, 16, 10, 0, Math.PI*2, 0, Math.PI/2), cx, 16.2, hz));
-  put(0xc9b458, baked(new THREE.ConeGeometry(1.4, 4, 8), cx, 26.5, hz));
+  put(0xd8d3c2, baked(new THREE.SphereGeometry(9, 16, 12, 0, Math.PI*2, 0, Math.PI/2), cx, 16.2, hz));
+  put(0xc9b458, baked(new THREE.ConeGeometry(1.4, 4, 16), cx, 26.5, hz));
   put(0x8c4a2f, baked(BOX(4.5, 7, 0.4), cx, 3.5, hz-11.2));
   addBox(cx, hz, 44*F, 22*F, 'civic', 'civic');
   nameBoard(cx, hz-15.8, 12.5, Math.PI, 16, 'TOWN HALL', '#e6e0cf', '#2f3550');
@@ -1482,7 +1482,7 @@ function fillRetire(B) {
   CASTLE.drop.push(lastPut(BEIGE));               // hollowed out in the deferred pass
   put(0x8c3f5e, baked(roofPrism(47.5*F, 4.2, 21.5*F), cx, 13, cz+2));
   for (const s of [-1, 1]) {                                          // crenellated turrets
-    put(BEIGE, baked(new THREE.CylinderGeometry(4.2, 4.2, 17, 10), cx + s*20*F, 8.5, cz-9));
+    put(BEIGE, baked(new THREE.CylinderGeometry(4.2, 4.2, 17, 20), cx + s*20*F, 8.5, cz-9));
     for (let k = 0; k < 8; k++) {
       const a = k/8*Math.PI*2;
       put(BEIGE, baked(BOX(1.4, 1.8, 1.4), cx + s*20 + Math.cos(a)*3.6, 17.6, cz-9 + Math.sin(a)*3.6));
@@ -1542,11 +1542,11 @@ function fillDuff(B) {
   for (let k = -2; k <= 2; k++) {                       // fermentation tanks out front
     const tx = cx + k*11*F;
     if (footprintOnRoad(tx, tankZ, 9, 9, 0, 0.5)) continue;
-    put(0xd8dde4, baked(new THREE.CylinderGeometry(4.6, 4.6, 18, 14), tx, 9, tankZ));
-    put(0xb9bfc7, baked(new THREE.SphereGeometry(4.6, 14, 8, 0, Math.PI*2, 0, Math.PI/2), tx, 18, tankZ));
+    put(0xd8dde4, baked(new THREE.CylinderGeometry(4.6, 4.6, 18, 20), tx, 9, tankZ));
+    put(0xb9bfc7, baked(new THREE.SphereGeometry(4.6, 16, 12, 0, Math.PI*2, 0, Math.PI/2), tx, 18, tankZ));
     addBox(tx, tankZ, 9, 9, 'duff', 'duff');
   }
-  put(0x8b929a, baked(new THREE.CylinderGeometry(2.2, 2.6, 26, 10), cx + 20, 13, cz + 20));
+  put(0x8b929a, baked(new THREE.CylinderGeometry(2.2, 2.6, 26, 20), cx + 20, 13, cz + 20));
   smokeStacks.push({ x: cx + 20, y: 26, z: cz + 20 });
   nameBoard(cx, cz-4.2, 21, Math.PI, 24, 'GOLDEN BREWERY', '#e8b53f', '#c0392b');
   for (let k = 0; k < 5; k++) coinsSpots.push({ x: rnd(r.x0+6, r.x1-6), z: rnd(r.z0+6, r.z1-6) });
@@ -1627,11 +1627,11 @@ function furnishRoom(R, b, r, dx, dz, walls) {
   };
   const cyl = (color, u, v, rad, h, y, rTop) => {       // y is the base; rTop 0 makes a cone
     const [x, z] = P(u, v);
-    fput(color, baked(new THREE.CylinderGeometry(rTop === undefined ? rad : rTop, rad, h, 10), x, (y || 0) + h/2, z));
+    fput(color, baked(new THREE.CylinderGeometry(rTop === undefined ? rad : rTop, rad, h, 20), x, (y || 0) + h/2, z));
   };
   const sph = (color, u, v, rad, y, sy) => {            // y is the centre
     const [x, z] = P(u, v);
-    fput(color, baked(new THREE.SphereGeometry(rad, 10, 8).scale(1, sy || 1, 1), x, y, z));
+    fput(color, baked(new THREE.SphereGeometry(rad, 16, 12).scale(1, sy || 1, 1), x, y, z));
   };
   const torus = (color, u, v, RR, rr, y, upright) => {  // flat like a donut, or upright on a wall
     const [x, z] = P(u, v);
@@ -2697,9 +2697,9 @@ const TUNNEL = { x: 0, z: 0, ux: 1, uz: 0, len: 120 };
   hill.push(baked(roofPrism(92, 12, 78), mid.x, 14, mid.z, 0, yawR));        // wide brim
   for (const sd of [-1, 1]) {                                                // flank walls
     hill.push(baked(BOX(30, 14.6, 88), mid.x + lat.x*sd*35, 7.2, mid.z + lat.z*sd*35, 0, yawR));
-    hill.push(baked(new THREE.SphereGeometry(24, 12, 8).scale(1, 0.62, 1),   // soft shoulders
+    hill.push(baked(new THREE.SphereGeometry(24, 16, 12).scale(1, 0.62, 1),   // soft shoulders
       mid.x + TUNNEL.ux*sd*10 + lat.x*sd*48, -2, mid.z + TUNNEL.uz*sd*10 + lat.z*sd*48));
-    hill.push(baked(new THREE.SphereGeometry(19, 12, 8).scale(1, 0.55, 1),
+    hill.push(baked(new THREE.SphereGeometry(19, 16, 12).scale(1, 0.55, 1),
       mid.x - TUNNEL.ux*sd*34 + lat.x*sd*42, -2, mid.z - TUNNEL.uz*sd*34 + lat.z*sd*42));
   }
   const hm = new THREE.Mesh(merge(hill),
@@ -2794,8 +2794,8 @@ const blimps = [];
     put(0x6b6f76, baked(BOX(1.4, 16, 1.4), px, 8, pz));
     put(0xf7f1e0, baked(new THREE.SphereGeometry(4.6, 16, 12), px, 20, pz));            // white face
     for (const s2 of [-1, 1])                                                            // green hair
-      put(0x3fbf6f, baked(new THREE.SphereGeometry(2.6, 12, 10), px + s2*4.2, 22.4, pz));
-    put(0xe8402f, baked(new THREE.SphereGeometry(1.5, 12, 10), px, 19.4, pz + krusty.fz*4.2 + krusty.fx*4.2));
+      put(0x3fbf6f, baked(new THREE.SphereGeometry(2.6, 16, 12), px + s2*4.2, 22.4, pz));
+    put(0xe8402f, baked(new THREE.SphereGeometry(1.5, 16, 12), px, 19.4, pz + krusty.fz*4.2 + krusty.fx*4.2));
     addBox(px, pz, 3, 3, 'sign');
     }
   }
@@ -2884,16 +2884,27 @@ for (let i = 0; i < 1600; i++) {
   for (let i = 0; i < 30; i++) {
     const a = prng()*Math.PI*2, r = rnd(TOWN+1450, TOWN+2050), rad = rnd(140, 290);
     const hx = Math.cos(a)*r, hz = Math.sin(a)*r;
-    hills.push(baked(new THREE.SphereGeometry(rad, 9, 6), hx, groundH(hx,hz) - rad*0.42, hz));
+    hills.push(baked(new THREE.SphereGeometry(rad, 16, 12), hx, groundH(hx,hz) - rad*0.42, hz));
   }
   const m = new THREE.Mesh(merge(hills), toon(0x69a955)); m.receiveShadow = true; scene.add(m);
 }
 {
-  const trunk = new THREE.CylinderGeometry(0.34, 0.5, 3.2, 6).translate(0, 1.6, 0);
+  // ~1,650 of these, and they cover more screen than anything else in the game, so
+  // this is where detail pays best — but also where it costs most, and the canopy is
+  // ink-outlined, which doubles it. Five lobes at 14x10 reads as a full crown from the
+  // car without the vertex bill of a sphere-per-branch. A couple of roots flare the
+  // trunk so it grows out of the ground rather than being stuck into it.
+  const trunk = merge([
+    baked(new THREE.CylinderGeometry(0.3, 0.46, 3.2, 14), 0, 1.6, 0),
+    baked(new THREE.CylinderGeometry(0.5, 0.72, 0.5, 14), 0, 0.2, 0),
+    baked(new THREE.CylinderGeometry(0.2, 0.3, 1.5, 8), 0.5, 3.0, 0.2, 0, 0, -0.5),
+  ]);
   const leaf = merge([
-    baked(new THREE.SphereGeometry(2.6, 9, 7), 0, 5.2, 0),
-    baked(new THREE.SphereGeometry(1.9, 8, 6), 1.7, 4.2, 0.6),
-    baked(new THREE.SphereGeometry(1.7, 8, 6), -1.5, 4.4, -0.8),
+    baked(new THREE.SphereGeometry(2.65, 14, 10), 0, 5.3, 0),
+    baked(new THREE.SphereGeometry(1.95, 14, 10), 1.75, 4.3, 0.6),
+    baked(new THREE.SphereGeometry(1.75, 14, 10), -1.55, 4.45, -0.85),
+    baked(new THREE.SphereGeometry(1.5, 12, 9), 0.35, 6.5, -1.15),
+    baked(new THREE.SphereGeometry(1.35, 12, 9), -0.9, 5.6, 1.4),
   ]);
   const LEAFC = [0x3f8f3a, 0x4aa044, 0x357f33, 0x56aa4a];
   // nothing scattered may sit on a carriageway, whatever placed it
@@ -2929,7 +2940,7 @@ for (let i = 0; i < 1600; i++) {
   hedges.length = 0; hedges.push(...hk);
 }
 if (hedges.length) {
-  const hg = instanced(new THREE.SphereGeometry(1, 8, 6).translate(0, 0.6, 0), toon(0x3f8f4a), hedges.length);
+  const hg = instanced(new THREE.SphereGeometry(1, 16, 12).translate(0, 0.6, 0), toon(0x3f8f4a), hedges.length);
   hedges.forEach((h, i) => {
     dummy.position.set(h.x, 0, h.z); dummy.rotation.set(0, prng()*6.28, 0);
     dummy.scale.set(h.r*1.5, h.r, h.r*1.5); dummy.updateMatrix();
@@ -2956,13 +2967,13 @@ for (const st of STREETS) {
 const PROP_DEFS = {
   lamp:    { parts:[[0x6b6f76, BOX(0.35,7,0.35), 0,3.5,0], [0x6b6f76, BOX(2.4,0.3,0.3), 1.0,6.9,0],
                     [0xfff0b8, BOX(1.1,0.4,0.6), 1.9,6.6,0]], mass:6, radius:0.4 },
-  hydrant: { parts:[[0xd0392b, new THREE.CylinderGeometry(0.34,0.42,1.15,8), 0,0.58,0],
-                    [0xd0392b, new THREE.SphereGeometry(0.36,8,6), 0,1.2,0],
-                    [0xd0392b, new THREE.CylinderGeometry(0.16,0.16,1.0,6), 0,0.75,0, 0,0,Math.PI/2]], mass:2.4, radius:0.5 },
-  bin:     { parts:[[0x3f6b4a, new THREE.CylinderGeometry(0.55,0.48,1.5,10), 0,0.75,0],
-                    [0x2f5238, new THREE.CylinderGeometry(0.62,0.62,0.18,10), 0,1.6,0]], mass:1.5, radius:0.6 },
+  hydrant: { parts:[[0xd0392b, new THREE.CylinderGeometry(0.34, 0.42, 1.15, 16), 0,0.58,0],
+                    [0xd0392b, new THREE.SphereGeometry(0.36, 16, 12), 0,1.2,0],
+                    [0xd0392b, new THREE.CylinderGeometry(0.16, 0.16, 1.0, 16), 0,0.75,0, 0,0,Math.PI/2]], mass:2.4, radius:0.5 },
+  bin:     { parts:[[0x3f6b4a, new THREE.CylinderGeometry(0.55, 0.48, 1.5, 20), 0,0.75,0],
+                    [0x2f5238, new THREE.CylinderGeometry(0.62, 0.62, 0.18, 20), 0,1.6,0]], mass:1.5, radius:0.6 },
   mailbox: { parts:[[0x2f6fc4, BOX(0.8,0.75,1.1), 0,1.6,0],
-                    [0x2f6fc4, new THREE.CylinderGeometry(0.4,0.4,1.1,10,1,false,0,Math.PI), 0,1.98,0, 0,0,Math.PI/2],
+                    [0x2f6fc4, new THREE.CylinderGeometry(0.4, 0.4, 1.1, 20, 1, false, 0, Math.PI), 0,1.98,0, 0,0,Math.PI/2],
                     [0x4a4f58, BOX(0.18,1.3,0.18), 0,0.65,0]], mass:2, radius:0.6 },
   bench:   { parts:[[0x8c5a34, BOX(3.0,0.22,0.9), 0,0.85,0], [0x8c5a34, BOX(3.0,0.9,0.2), 0,1.4,-0.35],
                     [0x4a4f58, BOX(0.2,0.85,0.8), -1.3,0.42,0], [0x4a4f58, BOX(0.2,0.85,0.8), 1.3,0.42,0]], mass:4, radius:1.2 },
@@ -3047,7 +3058,7 @@ const coins = [];
 {
   const reachable = coinsSpots.filter(c => !pointBlocked(c.x, c.z, 0.8));
   coinsSpots.length = 0; coinsSpots.push(...reachable);
-  const geo = new THREE.CylinderGeometry(0.62, 0.62, 0.14, 14).rotateX(Math.PI/2);
+  const geo = new THREE.CylinderGeometry(0.62, 0.62, 0.14, 20).rotateX(Math.PI/2);
   const mesh = instanced(geo, toon(0xffd23b), coinsSpots.length, false);
   coinsSpots.forEach((c, i) => coins.push({ x:c.x, z:c.z, got:false, i }));
   mesh.count = coins.length;
@@ -3290,12 +3301,12 @@ const ewLens = new THREE.MeshBasicMaterial({ color: 0xe8402f });
     if (c.deg >= 3) spots.push([c.x, c.z]);
   }
   const rig = merge([
-    baked(new THREE.CylinderGeometry(0.28, 0.36, 8, 8), 0, 4, 0),
+    baked(new THREE.CylinderGeometry(0.28, 0.36, 8, 16), 0, 4, 0),
     baked(BOX(0.28, 0.28, ROAD_HW), 0, 7.6, ROAD_HW/2),
   ]);
   const post = instanced(rig, toon(0x3c4048), spots.length);
   const hsg  = instanced(BOX(0.9, 2.1, 0.9), toon(0x22262f), spots.length);
-  const lensGeo = new THREE.SphereGeometry(0.34, 10, 8);
+  const lensGeo = new THREE.SphereGeometry(0.34, 16, 12);
   const ns = instanced(lensGeo, nsLens, spots.length, false);
   const ew = instanced(lensGeo, ewLens, spots.length, false);
   spots.forEach(([cx, cz], i) => {
@@ -3386,12 +3397,12 @@ function carGeo(type) {
   const bodyY = s.clr + s.bodyH/2;
   paint.push(baked(BOX(s.W, s.bodyH, s.L), 0, bodyY, 0));
   // rounded nose and tail
-  paint.push(baked(new THREE.CylinderGeometry(s.bodyH/2, s.bodyH/2, s.W, 12, 1, false, 0, Math.PI), 0, bodyY, s.L/2, 0, 0, Math.PI/2));
-  paint.push(baked(new THREE.CylinderGeometry(s.bodyH/2, s.bodyH/2, s.W, 12, 1, false, 0, Math.PI), 0, bodyY, -s.L/2, 0, Math.PI, Math.PI/2));
+  paint.push(baked(new THREE.CylinderGeometry(s.bodyH/2, s.bodyH/2, s.W, 20, 1, false, 0, Math.PI), 0, bodyY, s.L/2, 0, 0, Math.PI/2));
+  paint.push(baked(new THREE.CylinderGeometry(s.bodyH/2, s.bodyH/2, s.W, 20, 1, false, 0, Math.PI), 0, bodyY, -s.L/2, 0, Math.PI, Math.PI/2));
   if (s.roofH > 0) {
     const cy = s.clr + s.bodyH + s.roofH/2;
     paint.push(baked(BOX(s.roofW, s.roofH, s.roofL), 0, cy, s.roofZ));
-    paint.push(baked(new THREE.CylinderGeometry(s.roofH/2, s.roofH/2, s.roofW, 10, 1, false, 0, Math.PI), 0, cy, s.roofZ + s.roofL/2, 0, 0, Math.PI/2));
+    paint.push(baked(new THREE.CylinderGeometry(s.roofH/2, s.roofH/2, s.roofW, 20, 1, false, 0, Math.PI), 0, cy, s.roofZ + s.roofL/2, 0, 0, Math.PI/2));
     glass.push(baked(BOX(s.roofW*1.02, s.roofH*0.62, s.roofL*0.92), 0, cy+0.06, s.roofZ));
   } else {
     dark.push(baked(BOX(s.roofW*0.9, 0.5, s.roofL*0.9), 0, s.clr + s.bodyH - 0.15, s.roofZ));   // seats well
@@ -3403,13 +3414,26 @@ function carGeo(type) {
   }
   chrome.push(baked(BOX(s.W*1.04, 0.34, 0.5), 0, s.clr + 0.3, s.L/2 + 0.1));
   chrome.push(baked(BOX(s.W*1.04, 0.34, 0.5), 0, s.clr + 0.3, -s.L/2 - 0.1));
-  for (const hx of [-1,1]) lamp.push(baked(new THREE.CylinderGeometry(0.26,0.26,0.16,10), hx*s.W*0.32, s.clr+s.bodyH*0.75, s.L/2+0.2, Math.PI/2));
+  for (const hx of [-1,1]) lamp.push(baked(new THREE.CylinderGeometry(0.26, 0.26, 0.16, 20), hx*s.W*0.32, s.clr+s.bodyH*0.75, s.L/2+0.2, Math.PI/2));
   for (const tx of [-1,1]) dark.push(baked(BOX(0.5,0.24,0.14), tx*s.W*0.3, s.clr+s.bodyH*0.7, -s.L/2-0.22));
-  const tyre = new THREE.CylinderGeometry(s.wr, s.wr, s.ww, 14).rotateZ(Math.PI/2);
-  const hub = new THREE.CylinderGeometry(s.wr*0.5, s.wr*0.5, s.ww+0.05, 10).rotateZ(Math.PI/2);
+  // Wheels carry more of the read than anything else on a car: they are round, always
+  // in frame, and a facet count you can count by eye is the first thing that says
+  // "low poly". 28 segments is smooth at any distance the camera actually reaches.
+  const tyre  = new THREE.CylinderGeometry(s.wr, s.wr, s.ww, 28).rotateZ(Math.PI/2);
+  const rim   = new THREE.CylinderGeometry(s.wr*0.62, s.wr*0.62, s.ww + 0.06, 24).rotateZ(Math.PI/2);
+  const cap   = new THREE.CylinderGeometry(s.wr*0.2, s.wr*0.2, s.ww + 0.14, 12).rotateZ(Math.PI/2);
+  const spoke = BOX(s.wr*0.15, s.wr*1.0, s.ww*0.5);
   for (const [wx, wz] of [[-s.track,s.fA],[s.track,s.fA],[-s.track,s.rA],[s.track,s.rA]]) {
-    dark.push(baked(tyre, wx, s.wr, wz)); chrome.push(baked(hub, wx, s.wr, wz));
+    dark.push(baked(tyre, wx, s.wr, wz));
+    chrome.push(baked(rim, wx, s.wr, wz));
+    chrome.push(baked(cap, wx, s.wr, wz));
+    for (let k = 0; k < 3; k++)                     // a suggestion of spokes, not a wire wheel
+      dark.push(baked(spoke, wx, s.wr, wz, 0, 0, k * Math.PI / 3));
   }
+  // wheel arches: without them the body hovers over the wheels
+  for (const [wx, wz] of [[-s.track,s.fA],[s.track,s.fA],[-s.track,s.rA],[s.track,s.rA]])
+    paint.push(baked(new THREE.TorusGeometry(s.wr*1.12, 0.09, 6, 14, Math.PI),
+      wx, s.wr, wz, 0, Math.PI/2));
   return { paint: merge(paint), dark: merge(dark), chrome: merge(chrome), glass: merge(glass), lamp: merge(lamp) };
 }
 const VEH_MATS = {
@@ -3708,31 +3732,31 @@ const CROWD_MAX = 1400, CROWD_FAR = 190;
 // Big overlapping eyeballs that sit proud of the head, and an overbite muzzle —
 // the two features that read as "Simpsons" more than anything else.
 const eyePair = merge([
-  baked(new THREE.SphereGeometry(0.175, 14, 12), -0.125, 0, 0),
-  baked(new THREE.SphereGeometry(0.175, 14, 12),  0.125, 0, 0),
+  baked(new THREE.SphereGeometry(0.175, 16, 12), -0.125, 0, 0),
+  baked(new THREE.SphereGeometry(0.175, 16, 12),  0.125, 0, 0),
 ]);
 const pupilPair = merge([
-  baked(new THREE.SphereGeometry(0.062, 8, 6), -0.125, 0, 0.13),
-  baked(new THREE.SphereGeometry(0.062, 8, 6),  0.125, 0, 0.13),
+  baked(new THREE.SphereGeometry(0.062, 16, 12), -0.125, 0, 0.13),
+  baked(new THREE.SphereGeometry(0.062, 16, 12),  0.125, 0, 0.13),
 ]);
-const muzzleGeo = new THREE.SphereGeometry(0.17, 12, 10).scale(1.45, 0.95, 1.15).translate(0, 1.585, 0.165);
+const muzzleGeo = new THREE.SphereGeometry(0.17, 16, 12).scale(1.45, 0.95, 1.15).translate(0, 1.585, 0.165);
 const mouthGeo  = BOX(0.27, 0.055, 0.06).translate(0, 1.495, 0.315);
 // hairstyles, one instanced mesh each; every townsperson writes to exactly one
 // Hemispheres, not spheres: a full sphere hangs below the crown and reads as a beard.
-const dome = (r, sy, y) => new THREE.SphereGeometry(r, 14, 8, 0, Math.PI*2, 0, Math.PI*0.52)
+const dome = (r, sy, y) => new THREE.SphereGeometry(r, 16, 12, 0, Math.PI*2, 0, Math.PI*0.52)
   .scale(1, sy, 1).translate(0, y, -0.01);
 const hairShort = dome(0.295, 0.95, 1.72);
 const hairTall  = merge([
-  baked(new THREE.SphereGeometry(0.25, 12, 10).scale(1, 2.5, 1), 0, 2.6, -0.02),
+  baked(new THREE.SphereGeometry(0.25, 16, 12).scale(1, 2.5, 1), 0, 2.6, -0.02),
   dome(0.285, 0.5, 1.74),
 ]);
 const hairSpiky = merge(
   [[-0.21,0.08],[-0.08,0.15],[0.08,0.15],[0.21,0.08],[-0.13,-0.11],[0.13,-0.11]].map(([sx, sz]) =>
-    baked(new THREE.ConeGeometry(0.1, 0.34, 6), sx, 2.05, sz, 0.22*sz, 0, -0.5*sx))
+    baked(new THREE.ConeGeometry(0.1, 0.34, 16), sx, 2.05, sz, 0.22*sz, 0, -0.5*sx))
 );
 const hairBun   = merge([
   dome(0.29, 0.85, 1.72),
-  baked(new THREE.SphereGeometry(0.17, 10, 8), 0, 2.06, -0.08),
+  baked(new THREE.SphereGeometry(0.17, 16, 12), 0, 2.06, -0.08),
 ]);
 const hairBald  = merge([                       // just a ring round the sides
   baked(new THREE.TorusGeometry(0.26, 0.05, 6, 14), 0, 1.74, -0.02, Math.PI/2),
@@ -3741,7 +3765,7 @@ const hairCap   = merge([                       // a ball cap: crown plus a brim
   dome(0.295, 0.75, 1.73),
   baked(BOX(0.4, 0.06, 0.3), 0, 1.8, 0.34),
 ]);
-const hairAfro  = baked(new THREE.SphereGeometry(0.4, 10, 8), 0, 1.88, -0.02);
+const hairAfro  = baked(new THREE.SphereGeometry(0.4, 16, 12), 0, 1.88, -0.02);
 const hairLong  = merge([                       // crown with a curtain down the back
   dome(0.295, 0.95, 1.72),
   baked(BOX(0.5, 0.72, 0.16), 0, 1.42, -0.27),
@@ -3750,16 +3774,28 @@ const hairMohawk = merge(
   [[-0.18, 0.22], [-0.06, 0.3], [0.06, 0.3], [0.18, 0.22]].map(([sz, h]) =>
     baked(BOX(0.09, h, 0.15), 0, 1.95 + h/2 - 0.1, sz - 0.02))
 );
-const shoeGeo = BOX(0.25, 0.13, 0.36).translate(0, -0.87, 0.07);
+// a rounded toe on the shoe, and a hand on the arm: two small merges that stop the
+// crowd reading as a pile of rectangles once you are close enough to see them
+const shoeGeo = merge([
+  BOX(0.25, 0.13, 0.36).translate(0, -0.87, 0.07),
+  baked(new THREE.SphereGeometry(0.125, 12, 8).scale(1, 0.62, 1), 0, -0.87, 0.24),
+]);
+const armGeo = merge([
+  BOX(0.16, 0.58, 0.16).translate(0, -0.29, 0),
+  baked(new THREE.SphereGeometry(0.105, 12, 9), 0, -0.61, 0),
+]);
 const CI = {
   legL:  instanced(BOX(0.2, 0.85, 0.2).translate(0,-0.425,0), toon(0xffffff), CROWD_MAX),
   legR:  instanced(BOX(0.2, 0.85, 0.2).translate(0,-0.425,0), toon(0xffffff), CROWD_MAX),
   shoeL: instanced(shoeGeo, toon(0xffffff), CROWD_MAX),
   shoeR: instanced(shoeGeo, toon(0xffffff), CROWD_MAX),
   torso: instanced(BOX(1, 0.62, 0.3).translate(0,1.16,0), toon(0xffffff), CROWD_MAX),
-  armL:  instanced(BOX(0.16, 0.58, 0.16).translate(0,-0.29,0), toon(0xffffff), CROWD_MAX),
-  armR:  instanced(BOX(0.16, 0.58, 0.16).translate(0,-0.29,0), toon(0xffffff), CROWD_MAX),
-  head:  instanced(new THREE.SphereGeometry(0.28, 14, 12).translate(0,1.72,0), toon(0xffffff), CROWD_MAX),
+  // arms get a hand on the end, merged into the arm rather than instanced separately
+  // so it swings with the limb for free and costs no extra draw call
+  armL:  instanced(armGeo, toon(0xffffff), CROWD_MAX),
+  armR:  instanced(armGeo, toon(0xffffff), CROWD_MAX),
+  // the head is the one part every camera angle puts front and centre
+  head:  instanced(new THREE.SphereGeometry(0.28, 22, 16).translate(0,1.72,0), toon(0xffffff), CROWD_MAX),
   muzzle:instanced(muzzleGeo, toon(0xffffff), CROWD_MAX),
   mouth: instanced(mouthGeo, new THREE.MeshBasicMaterial({ color:0x7a3b34 }), CROWD_MAX, false),
   eyes:  instanced(baked(eyePair, 0, 1.85, 0.185), new THREE.MeshToonMaterial({ color:0xffffff, gradientMap:RAMP }), CROWD_MAX),
@@ -4981,14 +5017,14 @@ function updateChaos(dt) {
 const chickens = [];
 {
   const bodyGeo = merge([
-    baked(new THREE.SphereGeometry(0.34, 10, 8).scale(1, 0.85, 1.2), 0, 0.38, 0),
-    baked(new THREE.SphereGeometry(0.17, 8, 6), 0, 0.72, 0.3),
-    baked(new THREE.ConeGeometry(0.12, 0.32, 6), 0, 0.52, -0.38, -1.9),
+    baked(new THREE.SphereGeometry(0.34, 16, 12).scale(1, 0.85, 1.2), 0, 0.38, 0),
+    baked(new THREE.SphereGeometry(0.17, 16, 12), 0, 0.72, 0.3),
+    baked(new THREE.ConeGeometry(0.12, 0.32, 16), 0, 0.52, -0.38, -1.9),
     baked(BOX(0.05, 0.3, 0.05), -0.09, 0.15, 0),
     baked(BOX(0.05, 0.3, 0.05), 0.09, 0.15, 0),
   ]);
   const trimGeo = merge([
-    baked(new THREE.ConeGeometry(0.06, 0.18, 6), 0, 0.71, 0.45, Math.PI/2),
+    baked(new THREE.ConeGeometry(0.06, 0.18, 16), 0, 0.71, 0.45, Math.PI/2),
     baked(BOX(0.07, 0.13, 0.15), 0, 0.87, 0.27),
   ]);
   const N = 12;
@@ -5346,7 +5382,7 @@ const beamMat = new THREE.MeshBasicMaterial({ color: 0xfff3c4, transparent: true
   opacity: 0, depthWrite: false, side: THREE.DoubleSide, fog: false });
 const headBeams = [];
 {
-  const cone = new THREE.ConeGeometry(2.6, 15, 12, 1, true).rotateX(Math.PI/2).translate(0, 0, 7.5);
+  const cone = new THREE.ConeGeometry(2.6, 15, 16, 1, true).rotateX(Math.PI/2).translate(0, 0, 7.5);
   for (const sx of [-0.72, 0.72]) {
     const m = new THREE.Mesh(cone, beamMat);
     m.position.set(sx, 0.72, 2.1); m.renderOrder = 4;
@@ -5375,9 +5411,9 @@ function updateHeadlights() {
 const trophies = [];
 {
   const geo = merge([
-    baked(new THREE.CylinderGeometry(0.30, 0.34, 0.10, 8), 0, 0.05, 0),   // plinth
-    baked(new THREE.CylinderGeometry(0.07, 0.07, 0.22, 6), 0, 0.20, 0),   // stem
-    baked(new THREE.SphereGeometry(0.23, 10, 8).scale(1, 0.85, 1), 0, 0.48, 0),
+    baked(new THREE.CylinderGeometry(0.30, 0.34, 0.10, 16), 0, 0.05, 0),   // plinth
+    baked(new THREE.CylinderGeometry(0.07, 0.07, 0.22, 16), 0, 0.20, 0),   // stem
+    baked(new THREE.SphereGeometry(0.23, 16, 12).scale(1, 0.85, 1), 0, 0.48, 0),
   ]);
   const mesh = instanced(geo, toon(0xffd23b), Math.max(1, ROOMS.length), false);
   for (const R of ROOMS) {
@@ -5759,7 +5795,7 @@ function makeBomb(x, z) {
   const b = new THREE.Group();
   const box = new THREE.Mesh(BOX(0.55, 0.4, 0.3), toon(0x2b2f38));
   box.position.y = 0.2;
-  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 8, 6),
+  const bulb = new THREE.Mesh(new THREE.SphereGeometry(0.09, 16, 12),
     new THREE.MeshBasicMaterial({ color: 0xff2b2b }));
   bulb.position.set(0, 0.48, 0);
   b.add(box, bulb); b.bulb = bulb;
@@ -5860,7 +5896,7 @@ const gateBlock = { minX: 1e9, maxX: 1e9, minZ: 1e9, maxZ: 1e9 };
 if (PRISON.gate) {
   const W = 13;
   const barMat = toon(0x3c4048);
-  const barGeo = new THREE.CylinderGeometry(0.09, 0.09, 8.4, 6);
+  const barGeo = new THREE.CylinderGeometry(0.09, 0.09, 8.4, 16);
   for (let k = 0; k <= 11; k++) {
     const b = new THREE.Mesh(barGeo, barMat);
     b.position.set(-W/2 + (W/11)*k, 4.2, 0);
@@ -5927,9 +5963,9 @@ function tryGate() {
 const soaker = new THREE.Group();
 {
   const body = new THREE.Mesh(BOX(0.16, 0.22, 1.1), toon(0x35b24a));
-  const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.52, 10).rotateX(Math.PI/2), toon(0xe8792b));
+  const tank = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.16, 0.52, 20).rotateX(Math.PI/2), toon(0xe8792b));
   tank.position.set(0, 0.25, -0.12);
-  const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.5, 8).rotateX(Math.PI/2), toon(0xffd23b));
+  const nozzle = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.07, 0.5, 16).rotateX(Math.PI/2), toon(0xffd23b));
   nozzle.position.set(0, 0.02, 0.76);
   const grip = new THREE.Mesh(BOX(0.14, 0.32, 0.16), toon(0x2b2f38));
   grip.position.set(0, -0.25, -0.26);
@@ -6376,7 +6412,7 @@ const doorLeafG = BOX(1, 1, 0.16).translate(0.5, 0.5, 0);
 const doorLeaf = instanced(doorLeafG, DOOR_MAT, ENTERABLE.length);
 const doorInk = new THREE.InstancedMesh(shell(doorLeafG, 0.035), INK, ENTERABLE.length);
 doorInk.frustumCulled = false; doorInk.renderOrder = -1;
-const doorKnob = instanced(new THREE.SphereGeometry(0.1, 8, 6), toon(0xc9a24b), ENTERABLE.length, false);
+const doorKnob = instanced(new THREE.SphereGeometry(0.1, 16, 12), toon(0xc9a24b), ENTERABLE.length, false);
 scene.add(doorLeaf, doorInk, doorKnob);
 const hingeM = new THREE.Matrix4(), knobLocal = new THREE.Matrix4();
 function setDoorMatrix(i) {
