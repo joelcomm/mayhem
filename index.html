@@ -204,19 +204,30 @@ scene.fog = townFog;
 
 const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.4, 4000);
 
-// One town, every load. Seeding Math.random itself catches every generator below
-// without threading an rng through all of them.
+// One town, every load — from a PRIVATE stream.
+//
+// This used to overwrite Math.random itself, which caught every generator for free
+// but shared the stream with three.js: every geometry, material and Object3D pulls a
+// UUID from Math.random, burning four draws. That made object *count* part of the
+// town's seed, so adding a building moved the trees, and the whole codebase grew
+// defences against it — rngNeutral, lastPut/withdraw, build-then-discard.
+//
+// Now the generator draws from prng() and three.js keeps the real Math.random. The
+// two can no longer interfere: create as many objects as you like, wherever you like,
+// and the town does not move. `rnd`/`rpick` and every seeded call site below route
+// through here; anything left on Math.random is deliberate runtime variety (traffic
+// spawns, ped decisions) where a fixed sequence would be worse, not better.
 let __seed = 20260721;
-Math.random = () => {
+function prng() {
   __seed = (__seed + 0x6D2B79F5) | 0;
   let t = Math.imul(__seed ^ (__seed >>> 15), 1 | __seed);
   t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
   return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-};
+}
 
-// Create geometry without disturbing the seeded stream. three.js burns four randoms per
-// object on its UUID, so anything built before the trees are planted would otherwise
-// reshuffle the whole town (see README). Snapshot the PRNG state and put it back.
+// Kept for the few places that deliberately rewind the stream. It is no longer
+// load-bearing for object creation — that problem is gone — but it still lets a
+// block draw randoms without shifting what comes after it.
 function rngNeutral(fn) { const s = __seed; const r = fn(); __seed = s; return r; }
 
 const dummy = new THREE.Object3D();
@@ -240,8 +251,8 @@ const merge = list => {
   if (!out) console.warn('merge failed — mismatched attributes', norm.map(g => Object.keys(g.attributes).join('+')));
   return out;
 };
-const rpick = a => a[(Math.random()*a.length)|0];
-const rnd = (a, b) => a + Math.random()*(b-a);
+const rpick = a => a[(prng()*a.length)|0];
+const rnd = (a, b) => a + prng()*(b-a);
 
 // =================================================================
 //  CARTOON SHADING
@@ -378,9 +389,9 @@ function updateSky(dt) {
   const puff = merge(lobes);
   const clouds = instanced(puff, cloudMat, 26, false);
   for (let i = 0; i < 26; i++) {
-    const a = Math.random()*Math.PI*2, r = rnd(220, 1150);
+    const a = prng()*Math.PI*2, r = rnd(220, 1150);
     dummy.position.set(Math.cos(a)*r, rnd(150, 250), Math.sin(a)*r);
-    dummy.rotation.set(0, Math.random()*6.28, 0);
+    dummy.rotation.set(0, prng()*6.28, 0);
     dummy.scale.setScalar(rnd(0.9, 2.1)); dummy.updateMatrix();
     clouds.setMatrixAt(i, dummy.matrix);
   }
@@ -423,7 +434,7 @@ for (let i = 0; i < GN; i++) {
 // ---- the river: a wandering channel across the middle of the map ----
 // It sits between two junction rows, so the row of cells it runs through becomes
 // parkland and only a few streets get a bridge across.
-const RIVER_ROW = 2 + (Math.random() < 0.5 ? 0 : 3);
+const RIVER_ROW = 2 + (prng() < 0.5 ? 0 : 3);
 const RIVER_MID = (rowZ[RIVER_ROW] + rowZ[RIVER_ROW+1]) / 2;
 const RIVER_HW = 27;
 const riverZ = x => RIVER_MID + Math.sin(x*0.0052)*44 + Math.sin(x*0.0131 + 1.7)*15;
@@ -446,9 +457,9 @@ for (let i = 0; i < GN; i++) VKEEP[i][RIVER_ROW] = BRIDGE_COLS.includes(i);
 // merge a scattering of cells into bigger blocks by deleting the shared street
 const merged = [];
 for (let k = 0; k < 9; k++) {
-  const i = 1 + (Math.random()*(GN-3)|0), j = 1 + (Math.random()*(GN-3)|0);
+  const i = 1 + (prng()*(GN-3)|0), j = 1 + (prng()*(GN-3)|0);
   if (j === RIVER_ROW || j === RIVER_ROW+1) continue;
-  if (Math.random() < 0.5) { if (VKEEP[i+1] && VKEEP[i+1][j]) { VKEEP[i+1][j] = false; merged.push([i, j, 'h']); } }
+  if (prng() < 0.5) { if (VKEEP[i+1] && VKEEP[i+1][j]) { VKEEP[i+1][j] = false; merged.push([i, j, 'h']); } }
   else                     { if (HKEEP[i] && HKEEP[i][j+1])  { HKEEP[i][j+1]  = false; merged.push([i, j, 'v']); } }
 }
 
@@ -570,7 +581,7 @@ let HOME_BLOCK = null;
   shopPick(0.85, 0.85);  shopPick(-0.85, -0.85);
   shopPick(0.05, 0.95);
   for (const b of BLOCKS) if (b.zone === 'house' && b.riverside) b.zone = 'riverpark';
-  for (const b of free) if (b.zone === 'house' && Math.random() < 0.16) b.zone = 'park';
+  for (const b of free) if (b.zone === 'house' && prng() < 0.16) b.zone = 'park';
   HOME_BLOCK = ever || BLOCKS[0];
 
 }
@@ -599,7 +610,7 @@ function noiseCanvas(size, base, amt) {
   const g = c.getContext('2d');
   g.fillStyle = base; g.fillRect(0,0,size,size);
   const img = g.getImageData(0,0,size,size), d = img.data;
-  for (let i = 0; i < d.length; i += 4) { const n = (Math.random()-0.5)*amt; d[i]+=n; d[i+1]+=n; d[i+2]+=n; }
+  for (let i = 0; i < d.length; i += 4) { const n = (prng()-0.5)*amt; d[i]+=n; d[i+1]+=n; d[i+2]+=n; }
   g.putImageData(img,0,0);
   return { c, g };
 }
@@ -614,8 +625,8 @@ function tex(c, rep, aniso) {
 {
   const { c, g } = noiseCanvas(128, '#77c157', 16);
   for (let i = 0; i < 240; i++) {                       // tufts
-    g.fillStyle = Math.random()<0.5 ? 'rgba(112,186,80,.55)' : 'rgba(134,206,98,.55)';
-    g.fillRect(Math.random()*128, Math.random()*128, 3, 6);
+    g.fillStyle = prng()<0.5 ? 'rgba(112,186,80,.55)' : 'rgba(134,206,98,.55)';
+    g.fillRect(prng()*128, prng()*128, 3, 6);
   }
   // Built as strips with a gap where the river runs — a single plane would simply
   // cover the water, since the channel is cut below ground level.
@@ -799,7 +810,7 @@ for (let i = 0; i < GN; i++) for (let j = 0; j < GN; j++) {
 {
   const { c: rc, g: rg } = noiseCanvas(256, '#5b5570', 20);
   rg.strokeStyle = 'rgba(40,36,54,.35)'; rg.lineWidth = 3;
-  for (let i = 0; i < 4; i++) { rg.beginPath(); const y = Math.random()*256; rg.moveTo(0,y); rg.lineTo(256, y+rnd(-18,18)); rg.stroke(); }
+  for (let i = 0; i < 4; i++) { rg.beginPath(); const y = prng()*256; rg.moveTo(0,y); rg.lineTo(256, y+rnd(-18,18)); rg.stroke(); }
   surface(roadPos, roadUV, toonMapped(tex(rc, null, 16)));
 
   const { c: wc, g: wg } = noiseCanvas(256, '#cfd3d8', 12);
@@ -1049,7 +1060,7 @@ function makeHouse(cx, cz, fx, fz, w, d) {
   if (!spot) return null;                        // nowhere clear of the road for it
   cx = spot.x; cz = spot.z;
   const wall = rpick(WALL_COLS), roof = rpick(ROOF_COLS), door = rpick(DOOR_COLS);
-  const storeys = Math.random() < 0.35 ? 2 : 1;
+  const storeys = prng() < 0.35 ? 2 : 1;
   const h = storeys === 2 ? rnd(8.5, 10) : rnd(5.4, 6.4);
   const L = (g) => baked(g, cx, 0, cz, 0, yaw, 0);   // place in the house's own frame
 
@@ -1072,11 +1083,11 @@ function makeHouse(cx, cz, fx, fz, w, d) {
     put(TRIM, L(baked(BOX(0.18, 1.9, 2.1), s*(w/2+0.05), h*0.55, 0)));
     put(GLASS, L(baked(BOX(0.24, 1.4, 1.6), s*(w/2+0.09), h*0.55, 0)));
   }
-  if (Math.random() < 0.55) {                                    // chimney
+  if (prng() < 0.55) {                                    // chimney
     const bx = rnd(-w*0.3, w*0.3);
     put(0x9a5c4a, L(baked(BOX(1.5, 3.4, 1.5), bx, h+1.7, rnd(-d*0.2, d*0.2))));
   }
-  if (Math.random() < 0.4) {                                     // porch roof on posts
+  if (prng() < 0.4) {                                     // porch roof on posts
     put(roof, L(baked(BOX(w*0.62, 0.35, 2.6), 0, 3.5, front+1.2)));
     for (const s of [-1,1]) put(TRIM, L(baked(BOX(0.3, 3.5, 0.3), s*w*0.26, 1.75, front+2.2)));
   }
@@ -1192,7 +1203,7 @@ function fillHouseBlock(B) {
       propSpots.push({ x: hx2 + nx*(d/2+8) + ux*5, z: hz2 + nz*(d/2+8) + uz*5, kind:'mailbox' });
       for (const sd of [-1, 1])
         hedges.push({ x: hx2 + nx*(d/2+1.4) + ux*sd*4.6, z: hz2 + nz*(d/2+1.4) + uz*sd*4.6, r: rnd(1.0,1.6) });
-      if (Math.random() < 0.5)
+      if (prng() < 0.5)
         treeSpots.push({ x: hx2 + nx*(d/2+1.5) + ux*rnd(-8,8), z: hz2 + nz*(d/2+1.5) + uz*rnd(-8,8), s: rnd(1.0,1.5) });
     }
   }
@@ -1235,9 +1246,9 @@ function fillBackyards(r) {
   if (ix1 - ix0 < 16 || iz1 - iz0 < 16) return;
   const spot = () => [rnd(ix0, ix1), rnd(iz0, iz1)];
   const kinds = ['shed','pool','tramp','swing','bbq','hedgerow'];
-  const n = 5 + (Math.random()*4|0);
+  const n = 5 + (prng()*4|0);
   for (let k = 0; k < n; k++) {
-    const [x, z] = spot(), yaw = Math.random()*6.28;
+    const [x, z] = spot(), yaw = prng()*6.28;
     if (footprintOnRoad(x, z, 9, 9, 0, 0)) continue;   // merged blocks can span a street
     if (footprintClash(x, z, 9, 9, 0, 0.5)) continue;  // and gardens back onto houses 
     switch (rpick(kinds)) {
@@ -1277,7 +1288,7 @@ function fillBackyards(r) {
         break;
       }
       case 'hedgerow': {
-        const len = 4 + (Math.random()*5|0);
+        const len = 4 + (prng()*5|0);
         for (let q = 0; q < len; q++)
           hedges.push({ x: x + Math.sin(yaw)*q*2.4, z: z + Math.cos(yaw)*q*2.4, r: rnd(1.1, 1.5) });
         break;
@@ -1677,14 +1688,14 @@ function fillTireFire(B) {
   const cx = (r.x0+r.x1)/2, cz = (r.z0+r.z1)/2;
   rect(lotPos, r.x0, r.z0, r.x1, r.z1, 0.014, lotUV, 9);
   for (let k = 0; k < 90; k++) {                                      // heaped tyres
-    const a = Math.random()*Math.PI*2, rad = Math.random()*22;
-    const h = Math.max(0, 9 - rad*0.34) * Math.random();
+    const a = prng()*Math.PI*2, rad = prng()*22;
+    const h = Math.max(0, 9 - rad*0.34) * prng();
     put(0x2b2f38, baked(new THREE.TorusGeometry(1.5, 0.62, 6, 10),
-      cx + Math.cos(a)*rad, 0.6 + h, cz + Math.sin(a)*rad, Math.PI/2, 0, Math.random()*3));
+      cx + Math.cos(a)*rad, 0.6 + h, cz + Math.sin(a)*rad, Math.PI/2, 0, prng()*3));
   }
   addBox(cx, cz, 30, 30, 'fire');
   for (let k = 0; k < 5; k++) {
-    const a = Math.random()*Math.PI*2, rad = Math.random()*12;
+    const a = prng()*Math.PI*2, rad = prng()*12;
     fireSpots.push({ x: cx + Math.cos(a)*rad, y: 6, z: cz + Math.sin(a)*rad });
   }
   nameBoard(cx, r.z0 + 6, 6, Math.PI, 15, 'TIRE FIRE', '#3c3550', '#ff7a2b');
@@ -2944,9 +2955,9 @@ const blimps = [];
     put(0xe8c07a, baked(new THREE.TorusGeometry(6.4, 3.0, 12, 22), px, 24, pz, 0, lard.yaw));
     put(0xf07ab0, baked(new THREE.TorusGeometry(6.5, 2.75, 12, 22), px, 24.8, pz, 0, lard.yaw));
     for (let k = 0; k < 26; k++) {                            // sprinkles
-      const a = Math.random()*Math.PI*2, rr = 6.5 + rnd(-1.6, 1.6);
+      const a = prng()*Math.PI*2, rr = 6.5 + rnd(-1.6, 1.6);
       put(rpick([0xffffff, 0x8ad14f, 0x3fa9d8, 0xffd23b]),
-        baked(BOX(0.85, 0.28, 0.28), px + Math.cos(a)*rr, 27.4, pz + Math.sin(a)*rr, 0, Math.random()*3));
+        baked(BOX(0.85, 0.28, 0.28), px + Math.cos(a)*rr, 27.4, pz + Math.sin(a)*rr, 0, prng()*3));
     }
     addBox(px, pz, 3, 3, 'sign');
     }
@@ -2968,8 +2979,22 @@ const blimps = [];
 
   // ---- water tower ----
   {
-    const wtB = BLOCKS.find(b => b.zone === 'park') || BLOCKS[0];
-    const wx = wtB.cx, wz = wtB.cz;
+    // It used to drop on the first park block's centre with no clearance test at all,
+    // which holds up only until a neighbour's footprint reaches into that block — the
+    // Nuclear Plant's cooling towers sit 16 m off its own centre and do exactly that.
+    // Search the greens for a spot that actually clears. No prng() draws and the same
+    // number of put() calls either way, so the seeded stream is untouched.
+    const parks = BLOCKS.filter(b => b.zone === 'park' || b.zone === 'plaza');
+    let wx = 0, wz = 0, placed = false;
+    for (const b of parks.length ? parks : BLOCKS) {
+      for (const [ox, oz] of [[0,0],[-14,0],[14,0],[0,-14],[0,14],[-16,-16],[16,16],[-16,16],[16,-16]]) {
+        const x = b.cx + ox, z = b.cz + oz;
+        if (footprintClash(x, z, 14, 14, 0, 1) || footprintOnRoad(x, z, 14, 14, 0, 1.5)) continue;
+        wx = x; wz = z; placed = true; break;
+      }
+      if (placed) break;
+    }
+    if (!placed) { const b = parks[0] || BLOCKS[0]; wx = b.cx; wz = b.cz; }
     for (const [ox, oz] of [[-5,-5],[5,-5],[-5,5],[5,5]])
       put(0x8b929a, baked(BOX(1.0, 20, 1.0), wx+ox, 10, wz+oz, ox*0.012, 0, -oz*0.012));
     put(0xd8dde4, baked(new THREE.CylinderGeometry(8.5, 8.5, 11, 16), wx, 25, wz));
@@ -3025,7 +3050,7 @@ for (const [color, list] of BUCKETS) {
 // =================================================================
 // perimeter woodland so the town sits in a valley
 for (let i = 0; i < 1600; i++) {
-  const a = Math.random()*Math.PI*2, r = rnd(TOWN + 30, TOWN + 950);
+  const a = prng()*Math.PI*2, r = rnd(TOWN + 30, TOWN + 950);
   const x = Math.cos(a)*r, z = Math.sin(a)*r;
   if (Math.abs(z - riverZ(x)) < RIVER_HW + 14) continue;      // not in the water
   treeSpots.push({ x, z, s: rnd(1.1, 2.2) });
@@ -3034,7 +3059,7 @@ for (let i = 0; i < 1600; i++) {
 {
   const hills = [];
   for (let i = 0; i < 30; i++) {
-    const a = Math.random()*Math.PI*2, r = rnd(TOWN+1450, TOWN+2050), rad = rnd(140, 290);
+    const a = prng()*Math.PI*2, r = rnd(TOWN+1450, TOWN+2050), rad = rnd(140, 290);
     const hx = Math.cos(a)*r, hz = Math.sin(a)*r;
     hills.push(baked(new THREE.SphereGeometry(rad, 9, 6), hx, groundH(hx,hz) - rad*0.42, hz));
   }
@@ -3068,7 +3093,7 @@ for (let i = 0; i < 1600; i++) {
   const lv = instanced(leaf, new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP }), treeSpots.length);
   const col = new THREE.Color();
   treeSpots.forEach((t, i) => {
-    dummy.position.set(t.x, groundH(t.x, t.z), t.z); dummy.rotation.set(0, Math.random()*6.28, 0);
+    dummy.position.set(t.x, groundH(t.x, t.z), t.z); dummy.rotation.set(0, prng()*6.28, 0);
     dummy.scale.setScalar(t.s); dummy.updateMatrix();
     tr.setMatrixAt(i, dummy.matrix); lv.setMatrixAt(i, dummy.matrix);
     lv.setColorAt(i, col.setHex(rpick(LEAFC)));
@@ -3083,7 +3108,7 @@ for (let i = 0; i < 1600; i++) {
 if (hedges.length) {
   const hg = instanced(new THREE.SphereGeometry(1, 8, 6).translate(0, 0.6, 0), toon(0x3f8f4a), hedges.length);
   hedges.forEach((h, i) => {
-    dummy.position.set(h.x, 0, h.z); dummy.rotation.set(0, Math.random()*6.28, 0);
+    dummy.position.set(h.x, 0, h.z); dummy.rotation.set(0, prng()*6.28, 0);
     dummy.scale.set(h.r*1.5, h.r, h.r*1.5); dummy.updateMatrix();
     hg.setMatrixAt(i, dummy.matrix);
   });
@@ -3100,7 +3125,7 @@ for (const st of STREETS) {
       const off = st.w + 2.6;
       propSpots.push({
         x: st.ax + ux*d + nx*side*off, z: st.az + uz*d + nz*side*off,
-        kind: Math.random()<0.4 ? 'lamp' : (Math.random()<0.5 ? 'hydrant' : 'bin'),
+        kind: prng()<0.4 ? 'lamp' : (prng()<0.5 ? 'hydrant' : 'bin'),
       });
     }
   }
@@ -3147,7 +3172,7 @@ function writeProp(p) {
       m.count = list.length; scene.add(m); meshes.push(m); propMeshes.push(m);
     }
     list.forEach((s, i) => {
-      const p = { meshes, i, x:s.x, y:0, z:s.z, rx:0, ry:Math.random()*6.28, rz:0,
+      const p = { meshes, i, x:s.x, y:0, z:s.z, rx:0, ry:prng()*6.28, rz:0,
         vx:0, vy:0, vz:0, spin:new THREE.Vector3(), static:true,
         mass:def.mass, radius:def.radius, rest:0.3 };
       writeProp(p); propGridAdd(p); props.push(p);
@@ -3749,10 +3774,23 @@ function updateTraffic(dt) {
     else if (toEnd > SIG_STOP) t.stopping = true;
     if (t.stopping) {
       t.waitT += dt;
-      if (t.waitT > 26) t.stopping = false;
+      if (t.waitT > 14) t.stopping = false;
       else target = Math.min(target, approach(toEnd - SIG_STOP));
     }
     if (t.gap < 28) target = Math.min(target, approach(t.gap - 7));
+    // ---- jam breaker ----
+    // Gap-following on its own deadlocks. A queue that backs through a junction
+    // blocks the cross traffic that would have cleared it, and anything parked in a
+    // lane — a wreck, or the player's own car — stops that lane for good, because an
+    // AI car is pinned to its edge and cannot steer around. So a car that has been at
+    // a crawl for several seconds gives up on whatever is in front and commits to
+    // pushing through for a few seconds, which unties the knot from the inside.
+    // The commit matters: without it, one frame of movement resets the timer and the
+    // car falls straight back into the queue, stuttering instead of clearing.
+    if (t.cur < 0.6) t.jam = (t.jam || 0) + dt;
+    else t.jam = Math.max(0, (t.jam || 0) - dt*0.5);
+    if (t.jam > 5) { t.push = 3; t.jam = 0; }
+    if (t.push > 0) { t.push -= dt; target = Math.max(target, 7); }
     t.cur += (target - t.cur) * Math.min(1, dt*(target < t.cur ? 4 : 1.7));
     if (t.cur < 0.06) t.cur = 0;
     t.dist += t.cur*dt;
@@ -6164,7 +6202,7 @@ function townCircuit() {
   const ok = i => NET.nodes[i].e.some(ei => !NET.edges[ei].hw);
   let start = -1;
   for (let k = 0; k < 400 && start < 0; k++) {         // a well-connected downtown node
-    const i = (Math.random()*NET.nodes.length)|0;
+    const i = (prng()*NET.nodes.length)|0;
     if (NET.nodes[i].e.length >= 3 && ok(i) && Math.hypot(NET.nodes[i].x, NET.nodes[i].z) < TOWN*0.62) start = i;
   }
   if (start < 0) start = 0;

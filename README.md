@@ -386,6 +386,16 @@ Crowds, traffic, trees, props, coins and signals are all `InstancedMesh`. Buildi
 are bucketed by colour and merged, so the whole town is a few dozen draw calls.
 
 ## Simulation
+- **Traffic has a jam breaker.** Gap-following on its own deadlocks: a queue that
+  backs through a junction blocks the cross traffic that would have cleared it, and
+  anything parked in a lane — a wreck, or your own car — stops that lane for good,
+  because an AI car is pinned to its edge and cannot steer around. So a car at a
+  crawl for 5 s gives up on whatever is in front and *commits* to pushing through
+  for 3 s. The commit is the point: without it one frame of movement resets the
+  timer and the car drops straight back into the queue, stuttering instead of
+  clearing. Signal patience also dropped from 26 s to 14 s. Measured with the
+  player's car parked in a live lane: stopped cars peak around 24 of 165 and then
+  recede, and no cluster within 60 m ever exceeds two cars
 - Traffic drives a road graph built from the grid, obeys the signals, queues, and
   **yields to pedestrians** (judged by lateral offset, not an angular cone) — and
   that includes **you on foot**. The player isn't in `pedGrid`, so for a long time
@@ -410,22 +420,36 @@ are bucketed by colour and merged, so the whole town is a few dozen draw calls.
 - Spatial grids for pedestrians and props keep collision checks local
 
 ## Gotchas for future work
-- **three.js calls `Math.random()` behind your back.** Every geometry, material and
-  Object3D gets a UUID from `MathUtils.generateUUID()`, which burns four draws. Since
-  `Math.random` is seeded to fix the town, *creating or deleting any THREE object before
-  the trees are planted shifts the whole stream and reshuffles the town.* Deleting one
+- **The town seed is a private stream — three.js can no longer touch it.** This used
+  to be the single biggest tax on the project: `Math.random` itself was overwritten and
+  seeded, but three.js draws four randoms from it for every geometry, material and
+  Object3D UUID, so *object count was part of the town's seed* and adding a building
+  moved the trees. Now the generator draws from `prng()` and three.js keeps the real
+  `Math.random`. **Create as many objects as you like, wherever you like — the town does
+  not move.** Verified by building 18 spare geometries/materials/meshes immediately
+  before the tree stage: the build logs came out byte-identical.
+  `rnd`/`rpick` and every generator call site route through `prng()`; anything still on
+  `Math.random` is deliberate runtime variety (traffic spawns, ped decisions, crowd
+  looks) where a fixed sequence would be worse. If you add generator code, use `rnd`,
+  `rpick` or `prng` — a bare `Math.random()` there is a non-deterministic town.
+  `rngNeutral` survives for the few places that deliberately rewind the stream, but it
+  is no longer load-bearing, and the old `lastPut`/`withdraw` and build-then-discard
+  dances are now belt-and-braces rather than necessities.
+
+  *(Historical note, kept because the scars are all over this file: under the old
+  scheme, deleting one `put(BOX(...))` moved the tree audit from `1765/48` to
+  `1767/51`.)* Deleting one
   `put(BOX(...))` moved the tree audit from `1765/48` to `1767/51`. If you must change a
   building part in the generator, change it in place — keep the object count and the set
   of bucket colours identical — and check the three build logs still read
-  `spawn 68,33`, `trees: 1655 planted, 155 removed` (planted+removed = **1810** — that
+  `spawn 145,-197`, `trees: 1641 planted, 176 removed` (planted+removed = **1817** — that
   total moving is the true stream-shift alarm; planted/removed alone redistribute when
   colliders or road layout legitimately change), `structures overlapping roads: {}`.
-  (Baseline re-recorded 2026-07-21, twice: first for scattering the shop quarters,
-  then again for the min-separation zoning rule — both intentional relayouts that
-  shift the stream on purpose. Earlier baselines for reference: `spawn -229,43` /
-  `1716+144 = 1860` / 42 rooms (original), then `68,33` / `1680+145 = 1825` /
-  33 rooms (first scatter). The city audit's known accepted deviation is still
-  `housesCrowdingShops: 1`, now at gap 2.7.)
+  (Baseline re-recorded 2026-07-22 for the private-PRNG switch — the last re-roll
+  this project should ever need, since object creation can no longer move the town.
+  This roll is also the cleanest yet: the city audit prints **all zeros**, including
+  `housesCrowdingShops`, which had been a known accepted deviation for weeks. 43
+  walk-in rooms, up from 35.)
   Anything built after the tree stage (doors, room fit-out) is free of this.
   Two tools make this workable when you *must* change generator geometry:
   `rngNeutral(fn)` snapshots and restores `__seed` around anything you build, and
