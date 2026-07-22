@@ -91,7 +91,12 @@ nudged off true, so no street runs dead straight and no two blocks match.
 - **A ring highway** loops the whole town on long curves, with four spurs into it (one
   from each corner of town, so the perimeter is reachable from every quarter) and a
   **tunnel** bored through a mountain — a real one: an open, lamp-lit vault you can see
-  down from mouth to mouth, with portal facades standing at the rock face. It is a closed loop on purpose — an arc has two
+  down from mouth to mouth, with portal facades standing at the rock face. The hill is
+  built on **one straight axis while the bore follows the ring's bend**, so mass that
+  clears the middle can still lean over a mouth at the ends — which is what left one
+  portal half-buried. Cap, brim, flanks and shoulders are all pulled shorter along the
+  bore and wider across it, carving both mouths open; the object count and colour are
+  unchanged, so the seeded stream is untouched. It is a closed loop on purpose — an arc has two
   ends out in open country, which is the most obvious road-to-nowhere on a map.
   **Metal guardrails line both sides** of every highway segment, with gaps only where
   the spurs join, so the ring is the playable world's hard perimeter. Rails — highway
@@ -229,9 +234,12 @@ the thing that welds the job loop onto the chaos loop instead of competing with 
   the mission unreachable while every piece of machinery (`soak` def,
   `spawnSoaker`/`updateSoak`/`blowWall`, the gun, reticule, tank bar, round
   lockdown/eject) sits dormant behind it. Un-comment the marker to revive it.
-  The Penitentiary's **portcullis gate stays live** in free roam: F at the
-  button raises the prison bars, the yard is drivable, and the gate lowers
-  itself after a few seconds.
+  The Penitentiary's **portcullis gate stays live** in free roam, and it is a
+  one-way door with a joke attached: **F at the button outside** raises the bars
+  for free, but the gate drops behind you, and from *inside* the yard the button
+  does nothing — a **guard** leans on the bars and wants **25 coins** to let you
+  out ("GUARD: THAT'LL BE 25 COINS" if you're short). Easy to get into, costs you
+  to get out of.
 - **DEMOLITION DERBY** (Crusher, at Victory Stadium) — 3 AI rigs (`t.derby`
   traffic entries, off the graph, no rejoin) chase and ram you on the infield;
   ram them back — damage ∝ impact speed, one full-speed hit wrecks one — until
@@ -301,9 +309,14 @@ shallow shop the camera sits out in the street and looks in through the door, wh
 what it should do. `roomT` ramps the camera distance in across the threshold.
 
 ### Coins are for spending
-**Gus's Garage** is a forecourt just up the street from the spawn — a green glow,
-a name board and a man in a cap. It is *not* a mission: walk into the forecourt and
-a keyboard menu opens, number keys buy, walking off closes it, and it never blocks
+**Gus's Garage** is a real building just up the street from the spawn: a
+**pull-through service bay** — a 22 m canopy on four posts with an office and
+windows along the back, a concrete apron and the name on the front fascia. Only
+the posts and the office are solid, so you drive in one side and out the other.
+Its site is found by a footprint search (the whole 22×13 rectangle sampled against
+roads, buildings and the river), not by `clearSpot`'s 2 m probe, which would happily
+drop a building on a carriageway. It is *not* a mission: walk into the bay and a
+keyboard menu opens, number keys buy, walking off closes it, and it never blocks
 or shares state with an active job.
 
 | # | Buy | Effect |
@@ -321,7 +334,18 @@ past — and pay 40 coins each, with a 1000-coin bonus for clearing all thirty-f
 The HUD keeps a 🏆 count under the chaos score. One InstancedMesh, like the coins,
 built well after the tree stage so it costs nothing seeded.
 
-### Day and night
+### The stunt park
+The biggest open green in town has four orange kickers in it. They are **not
+colliders** — a ramp is a wedge that raises `surfaceY` over its footprint (see
+`RAMPS`/`rampY`), so the existing altitude code does all the work: the car rides up
+the slope, and the instant it runs off the lip `surfaceY` drops away, `carVY` takes
+over and it is genuinely airborne, landing on the heightfield like any other drop.
+Making them colliders instead would just give you four walls to crash into.
+
+### Day and night — SHELVED
+**Off by default** (`DAY_CYCLE = false`): the town reads better in permanent
+daylight, so the clock is frozen at its construction-time noon and `nightAmt`
+stays 0, which switches the headlights off with it. Flip the flag to revive it.
 One clock (`updateSky`, five real minutes per day) drives the sun's elevation and
 colour, the hemisphere fill, the fog colour *and* its near plane, and the tint on
 the sky dome — so dusk reads across the whole town at once instead of as a filter

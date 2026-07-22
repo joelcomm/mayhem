@@ -329,6 +329,10 @@ scene.add(sun, sun.target);
 //  filter over it. `dayT` is 0..1 with 0.5 at noon; a full day is DAY_LEN seconds.
 //  Nothing here is seeded — it all runs per frame, long after the town is built.
 // =================================================================
+// Night is SHELVED for now: the cycle is built and works (sun, fog, sky, headlights)
+// but the game reads better in permanent daylight. Flip DAY_CYCLE back on to revive
+// it — everything downstream keys off nightAmt, which stays 0 while this is false.
+const DAY_CYCLE = false;
 const DAY_LEN = 300;                       // five minutes of game world per day
 let dayT = 0.30;                           // open mid-morning
 const NIGHT_KEYS = {                       // sun colour by elevation, warm at the horizon
@@ -343,6 +347,7 @@ const FOG_KEYS = {
 const _c1 = new THREE.Color(), _c2 = new THREE.Color();
 let nightAmt = 0;                          // 0 broad daylight … 1 fully dark
 function updateSky(dt) {
+  if (!DAY_CYCLE) return;                  // frozen at the construction-time daylight
   dayT = (dayT + dt/DAY_LEN) % 1;
   // elevation: a sine that peaks at noon and dips below the horizon overnight
   const elev = Math.sin(dayT * Math.PI * 2 - Math.PI/2);
@@ -2841,14 +2846,19 @@ const TUNNEL = { x: 0, z: 0, ux: 1, uz: 0, len: 120 };
   const yawR = Math.atan2(TUNNEL.ux, TUNNEL.uz);
   const loS = -55, hiS = 55;
   const hill = [];
-  hill.push(baked(roofPrism(58, 24, 112), mid.x, 14, mid.z, 0, yawR));       // summit cap
-  hill.push(baked(roofPrism(84, 12, 96), mid.x, 14, mid.z, 0, yawR));        // wide brim
+  // The hill is built on ONE straight axis while the bore follows the ring's bend,
+  // so the mass that clears the middle can still lean over a mouth at the ends —
+  // which is exactly what left one portal half-buried. Everything is pulled shorter
+  // along the bore and wider across it, carving both mouths open. Object count and
+  // colour are unchanged, so the seeded stream is untouched.
+  hill.push(baked(roofPrism(58, 24, 92), mid.x, 14, mid.z, 0, yawR));        // summit cap
+  hill.push(baked(roofPrism(92, 12, 78), mid.x, 14, mid.z, 0, yawR));        // wide brim
   for (const sd of [-1, 1]) {                                                // flank walls
-    hill.push(baked(BOX(30, 14.6, 110), mid.x + lat.x*sd*29, 7.2, mid.z + lat.z*sd*29, 0, yawR));
+    hill.push(baked(BOX(30, 14.6, 88), mid.x + lat.x*sd*35, 7.2, mid.z + lat.z*sd*35, 0, yawR));
     hill.push(baked(new THREE.SphereGeometry(24, 12, 8).scale(1, 0.62, 1),   // soft shoulders
-      mid.x + TUNNEL.ux*sd*12 + lat.x*sd*40, -2, mid.z + TUNNEL.uz*sd*12 + lat.z*sd*40));
+      mid.x + TUNNEL.ux*sd*10 + lat.x*sd*48, -2, mid.z + TUNNEL.uz*sd*10 + lat.z*sd*48));
     hill.push(baked(new THREE.SphereGeometry(19, 12, 8).scale(1, 0.55, 1),
-      mid.x - TUNNEL.ux*sd*38 + lat.x*sd*34, -2, mid.z - TUNNEL.uz*sd*38 + lat.z*sd*34));
+      mid.x - TUNNEL.ux*sd*34 + lat.x*sd*42, -2, mid.z - TUNNEL.uz*sd*34 + lat.z*sd*42));
   }
   const hm = new THREE.Mesh(merge(hill),
     new THREE.MeshToonMaterial({ color: 0x5f9a4a, gradientMap: RAMP, side: THREE.DoubleSide }));
@@ -3458,6 +3468,24 @@ function onBridge(x, z) {
   return false;
 }
 const WATER_Y = -5.2;
+// Jump ramps are part of the *ground*, not obstacles: they raise surfaceY over their
+// footprint, so the existing altitude code does all the work — the car rides up the
+// wedge, and the instant it runs off the lip surfaceY drops away, carVY takes over and
+// it is genuinely airborne. That also means a ramp must never be a collider, or you
+// would hit it as a wall instead of driving up it.
+const RAMPS = [];
+function rampY(x, z) {
+  let best = 0;
+  for (const r of RAMPS) {
+    const dx = x - r.x, dz = z - r.z;
+    const a = dx*r.ux + dz*r.uz;                  // distance up the ramp
+    if (a < 0 || a > r.len) continue;
+    if (Math.abs(-dx*r.uz + dz*r.ux) > r.w/2) continue;
+    const h = (a / r.len) * r.h;
+    if (h > best) best = h;
+  }
+  return best;
+}
 function surfaceY(x, z) {
   const d = Math.abs(z - riverZ(x));
   if (d < RIVER_HW + 11) {
@@ -3465,7 +3493,7 @@ function surfaceY(x, z) {
     if (d <= RIVER_HW) return -6.4;               // riverbed
     return -6.4 + ((d - RIVER_HW) / 11) * 6.4;    // sloping bank
   }
-  return groundH(x, z);
+  return groundH(x, z) + (RAMPS.length ? rampY(x, z) : 0);
 }
 const inWater = (x, z) => Math.abs(z - riverZ(x)) < RIVER_HW && !onBridge(x, z);
 
@@ -4884,13 +4912,34 @@ function boomSfx() {                               // a wall charge going off
 // the townsfolk have opinions about being kicked and run over
 const OUCH_LINES = ['Hey!', 'Ouch!', 'Stop it!', 'Cut it out!', "That's not nice!",
   'Watch it!', 'Rude!', 'My groceries!', 'Not the face!'];
+// A whole town in one squeaky register sounded like one very unlucky person, so
+// each shout picks a register: gruff, ordinary, or high. Where the browser exposes
+// named voices we pick a matching one; otherwise pitch alone carries it.
+const VOICE_REGISTERS = [
+  { pitch: [0.55, 0.75], rate: 0.95, want: /david|alex|daniel|fred|male|george|james|rishi|thomas/i },
+  { pitch: [0.85, 1.05], rate: 1.05, want: /google uk english male|male|mark|aaron/i },
+  { pitch: [1.55, 1.85], rate: 1.2,  want: /samantha|victoria|karen|zira|female|susan|fiona/i },
+];
+let voiceCache = null;
+function pickVoice(re) {
+  if (!voiceCache) {
+    try { voiceCache = speechSynthesis.getVoices() || []; } catch (e) { voiceCache = []; }
+  }
+  if (!voiceCache.length) return null;
+  const hits = voiceCache.filter(v => re.test(v.name));
+  return hits.length ? rpick(hits) : null;
+}
 function sayOuch() {
   if (sayT > 0) return;
   sayT = 1.4;
   try {
     if (!window.speechSynthesis || speechSynthesis.speaking) return;
     const u = new SpeechSynthesisUtterance(rpick(OUCH_LINES));
-    u.pitch = 1.8 + Math.random() * 0.2; u.rate = 1.2; u.volume = 0.6;
+    const r = rpick(VOICE_REGISTERS);
+    const v = pickVoice(r.want);
+    if (v) u.voice = v;
+    u.pitch = rnd(r.pitch[0], r.pitch[1]);
+    u.rate = r.rate; u.volume = 0.62;
     speechSynthesis.speak(u);
   } catch (e) {}
 }
@@ -5212,7 +5261,22 @@ const MARKERS = [];
 
   // ---- Gus, on his forecourt: not a job giver, a shop ----
   {
-    const s = clearSpot(SPAWN.x + 14, SPAWN.z + (ROAD_HW + 8));
+    // A 22x13 canopy needs far more room than clearSpot's 2 m probe guarantees, so
+    // search outward from the spawn for a whole footprint that clears the road, the
+    // buildings and the river — sampling the perimeter, not just the middle.
+    const footprintFree = (x, z) => {
+      for (let u = -13; u <= 13; u += 4.3) for (let v = -8; v <= 8; v += 4) {
+        if (onRoad(x + u, z + v, 2) || pointBlocked(x + u, z + v, 2) || overRiver(x + u, z + v, 8))
+          return false;
+      }
+      return true;
+    };
+    let s = null;
+    for (let r = 16; r <= 150 && !s; r += 9)
+      for (let a = 0; a < 6.28 && !s; a += Math.PI/9) {
+        const x = SPAWN.x + Math.cos(a)*r, z = SPAWN.z + Math.sin(a)*r;
+        if (footprintFree(x, z)) s = { x, z };
+      }
     if (s) {
       GARAGE.x = s.x; GARAGE.z = s.z;
       const g3 = buildPerson({ skin: 0xffd90f, hair: 0x6b4a2f, shirt: 0x2f5fb0,
@@ -5227,8 +5291,50 @@ const MARKERS = [];
         new THREE.MeshBasicMaterial({ map: bd, transparent: true, side: THREE.DoubleSide }));
       // faces -z, the way the forecourt is approached from the street; without this
       // the DoubleSide plane shows you its back and the name reads mirrored
-      brd.position.set(s.x, 5.2, s.z); brd.rotation.y = Math.PI; scene.add(brd);
+      // on the front fascia, not floating mid-canopy where the roof hides it
+      brd.position.set(s.x, 6.5, s.z - 13/2 - 0.55); brd.rotation.y = Math.PI; scene.add(brd);
       GARAGE.board = brd;
+
+      // ---- the building: a pull-through service bay ----
+      // Open at both ends along x so you can drive in one side and out the other.
+      // Only the four posts and the back office are solid; the deck overhead and the
+      // open ends are not, so the bay is a real thoroughfare rather than a dead end.
+      const GW = 22, GD = 13, GH = 5.6;                 // span, depth, clearance
+      const cxg = s.x, czg = s.z;
+      const gmat = toon(0xe6e0cf), tmat = toon(0x8c3f5e), pmat = toon(0x6b6f76);
+      const addSolid = (m, w, d) => {
+        scene.add(m);
+        colliders.push({ minX: m.position.x - w/2, maxX: m.position.x + w/2,
+                         minZ: m.position.z - d/2, maxZ: m.position.z + d/2 });
+      };
+      { const roof = new THREE.Mesh(BOX(GW, 0.7, GD), gmat);
+        roof.position.set(cxg, GH + 0.35, czg); roof.castShadow = true; scene.add(roof);
+        const fascia = new THREE.Mesh(BOX(GW + 1.2, 1.1, 0.5), tmat);
+        fascia.position.set(cxg, GH + 0.9, czg - GD/2 - 0.2); scene.add(fascia);
+        const fascia2 = new THREE.Mesh(BOX(GW + 1.2, 1.1, 0.5), tmat);
+        fascia2.position.set(cxg, GH + 0.9, czg + GD/2 + 0.2); scene.add(fascia2);
+        for (const px of [-GW/2 + 1.1, GW/2 - 1.1]) for (const pz of [-GD/2 + 1.1, GD/2 - 1.1]) {
+          const p = new THREE.Mesh(BOX(1.1, GH, 1.1), pmat);
+          p.position.set(cxg + px, GH/2, czg + pz); p.castShadow = true;
+          addSolid(p, 1.1, 1.1);
+        }
+        // the office along the back, with Gus's counter under the canopy
+        const off = new THREE.Mesh(BOX(GW - 3, GH - 0.4, 3.4), gmat);
+        off.position.set(cxg, (GH - 0.4)/2, czg + GD/2 - 1.7); off.castShadow = true;
+        addSolid(off, GW - 3, 3.4);
+        for (const wx of [-5.5, 0, 5.5]) {
+          const win = new THREE.Mesh(BOX(3.2, 1.9, 0.2), toon(0x7fb8d8));
+          win.position.set(cxg + wx, 3.1, czg + GD/2 - 3.45); scene.add(win);
+        }
+        // oil-stained apron so the bay reads as a floor, not grass
+        const apron = new THREE.Mesh(new THREE.PlaneGeometry(GW + 3, GD + 2).rotateX(-Math.PI/2),
+          toon(0x6f7178));
+        apron.position.set(cxg, 0.03, czg); apron.receiveShadow = true; scene.add(apron);
+      }
+      // stand Gus clear of the office wall, under his own roof
+      g3.position.set(cxg - 3, 0, czg + 2.2); g3.rotation.y = Math.PI;
+      disc.position.set(cxg, 0.07, czg);
+      GARAGE.x = cxg; GARAGE.z = czg;
     }
   }
 }
@@ -5255,6 +5361,65 @@ function updateMarkers(dt, sub) {
         toast(m.name + ': ' + m.line);
         addCoins(15);
         burst(m.x, 1.6, m.z, 0x9ad8ff, 10);
+      }
+    }
+  }
+}
+
+// =================================================================
+//  THE STUNT PARK
+//  A green with four kickers in it. The ramps are wedges that raise surfaceY (see
+//  RAMPS) rather than colliders, so you drive up and fly off the lip for real, and
+//  land on the heightfield like any other drop. Built here, long after the tree
+//  stage, so the geometry costs nothing seeded.
+// =================================================================
+{
+  const wedge = (w, len, h) => {                  // back-bottom at the origin, rising along +z
+    const A = [-w/2,0,0], B = [w/2,0,0], C = [-w/2,h,len], D = [w/2,h,len],
+          E = [-w/2,0,len], F = [w/2,0,len];
+    const v = [];
+    const tri = (p,q,r) => v.push(...p, ...q, ...r);
+    tri(A,B,D); tri(A,D,C);                       // the run
+    tri(E,F,D); tri(E,D,C);                       // the lip face
+    tri(A,C,E); tri(B,F,D);                       // cheeks
+    const g = new THREE.BufferGeometry();
+    g.setAttribute('position', new THREE.Float32BufferAttribute(v, 3));
+    g.computeVertexNormals();
+    return g;
+  };
+  // the biggest open green that isn't cut by the river
+  const big = BLOCKS.filter(b => (b.zone === 'park' || b.zone === 'plaza') && !b.riverside)
+    .sort((a, b) => (b.r.x1-b.r.x0)*(b.r.z1-b.r.z0) - (a.r.x1-a.r.x0)*(a.r.z1-a.r.z0))[0];
+  if (big && big.r.x1 - big.r.x0 > 46 && big.r.z1 - big.r.z0 > 46) {
+    const cx = (big.r.x0 + big.r.x1)/2, cz = (big.r.z0 + big.r.z1)/2;
+    const mat = new THREE.MeshToonMaterial({ color: 0xe8792b, gradientMap: RAMP, side: THREE.DoubleSide });
+    const specs = [                               // yaw, distance out, width, length, height
+      [0,          20, 9, 14, 3.4], [Math.PI,   20, 9, 14, 3.4],
+      [Math.PI/2,  20, 8, 16, 4.6], [-Math.PI/2, 20, 8, 12, 2.6],
+    ];
+    for (const [yaw, off, w, len, h] of specs) {
+      const ux = Math.sin(yaw), uz = Math.cos(yaw);
+      // start back from centre and aim inward, so every ramp launches over the middle
+      const rx = cx - ux*off, rz = cz - uz*off;
+      if (onRoad(rx, rz, 3) || onRoad(rx + ux*len, rz + uz*len, 3)) continue;
+      const g = wedge(w, len, h);
+      const m = new THREE.Mesh(g, mat);
+      m.position.set(rx, 0.02, rz); m.rotation.y = yaw;
+      m.castShadow = true; m.receiveShadow = true;
+      scene.add(m);
+      const ink = new THREE.Mesh(shell(g, 0.06), INK);   // position/rotation are copied
+      ink.position.copy(m.position); ink.rotation.copy(m.rotation);
+      ink.renderOrder = -1; scene.add(ink);
+      RAMPS.push({ x: rx, z: rz, ux, uz, w, len, h });
+    }
+    if (RAMPS.length) {
+      const t = signTexture('STUNT PARK', '#2f3550', '#ffd23b', 512, 128);
+      const brd = new THREE.Mesh(new THREE.PlaneGeometry(14, 3.5),
+        new THREE.MeshBasicMaterial({ map: t, transparent: true, side: THREE.DoubleSide }));
+      brd.position.set(cx, 6.5, big.r.z0 + 3); brd.rotation.y = Math.PI; scene.add(brd);
+      for (const sx of [-6.4, 6.4]) {
+        const p = new THREE.Mesh(BOX(0.7, 6.5, 0.7), toon(0x6b6f76));
+        p.position.set(cx + sx, 3.25, big.r.z0 + 3); scene.add(p);
       }
     }
   }
@@ -5797,6 +5962,12 @@ if (PRISON.gate) {
   }
   gateGrp.position.set(PRISON.gate.x, 0, PRISON.gate.z);
   scene.add(gateGrp);
+  // the guard who wants paying, posted just inside the bars
+  { const gd = buildPerson({ skin: 0xffd90f, hair: 0x3a3f4a, shirt: 0x2f4a6b,
+      pants: 0x2b3140, shoe: 0x14192e, style: 'cap' });
+    gd.position.set(PRISON.gate.x + 5.5, 0, PRISON.gate.z + 3.2);
+    gd.rotation.y = Math.PI * 0.85;
+    scene.add(gd); PRISON.guard = gd; }
   colliders.push(gateBlock);                           // pushed at runtime — audits already ran
   setGate(0);
 }
@@ -5817,12 +5988,26 @@ function updateGate(dt) {
   if (Math.abs(gateT - gateOpenTgt) > 0.002)
     setGate(gateT + (gateOpenTgt - gateT) * Math.min(1, dt*2.6));
 }
+// Inside the wall, the button does nothing — a guard leans on the bars and wants
+// paying. The button outside still works, so the yard is easy to get into and
+// costs you to get out of, which is the joke.
+const GUARD_FEE = 25;
+const inYard = (x, z) => PRISON.yard && x > PRISON.yard.x0 && x < PRISON.yard.x1 &&
+                         z > PRISON.yard.z0 && z < PRISON.yard.z1;
 function tryGate() {
   if (mode !== 'foot' || !PRISON.gate || playerRag.active) return false;
   const g = PRISON.gate;
   const dx = player.position.x - g.x, dz = player.position.z - g.z;
   if (dx*dx + dz*dz > 64) return false;
   if (MI && MI.id === 'soak' && MI.stage === 1) { toast('LOCKDOWN!'); return true; }
+  if (inYard(player.position.x, player.position.z)) {         // the wrong side of the bars
+    if (gateOpenTgt > 0.5) { gateOpenTgt = 0; gateHold = 0; return true; }
+    if (coinCount < GUARD_FEE) { toast("GUARD: THAT'LL BE " + GUARD_FEE + " COINS"); return true; }
+    addCoins(-GUARD_FEE); coinSfx();
+    gateOpenTgt = 1; gateHold = 14;
+    toast('GUARD: MUCH OBLIGED');
+    return true;
+  }
   if (gateOpenTgt < 0.5) { gateOpenTgt = 1; gateHold = 12; toast('THE GATE RUMBLES UP'); }
   else { gateOpenTgt = 0; gateHold = 0; }
   return true;
@@ -6558,7 +6743,9 @@ function updateHUD(dt) {
     if (nearGate && !(MI && MI.id === 'soak' && MI.stage === 1)) {
       promptEl.style.display = 'block';
       promptEl.innerHTML = gateT > 0.5 ? 'Press <b>F</b> to lower the gate'
-                                       : 'Press <b>F</b> to raise the gate';
+        : inYard(player.position.x, player.position.z)
+          ? `Press <b>F</b> to pay the guard <b>${GUARD_FEE}</b> coins`
+          : 'Press <b>F</b> to raise the gate';
     }
     else if (door) { promptEl.style.display='block';
       promptEl.innerHTML = door.swing > 0.5 ? 'Press <b>F</b> to close the door'
