@@ -758,6 +758,17 @@ are bucketed by colour and merged, so the whole town is a few dozen draw calls.
   clears the state. Strollers may jaywalk, but cars yield to anyone in their lane, so
   one ambling *along* a carriageway is a rolling roadblock — a stroller on tarmac for
   more than ~4.5 s gives up and rejoins the pavement
+- **Nobody walks through a car or a lamp post any more.** The crowd separated from
+  *itself* but never from the *things*: lane walkers are re-placed from the road graph
+  every frame and were never tested against traffic, the parked player car or street
+  furniture, so people strolled clean through a queue of cars. `pedsVsSolids` pushes
+  them out — oriented-box for cars (same frame maths as `collideTraffic`), circles for
+  bins, hydrants and lamps — and writes the push into `p.ox/p.oz` so `pedPlace` doesn't
+  wipe it next frame, the same rule every other shove follows. Scoped to a bubble round
+  the camera (120 m for cars, 90 m for props): an overlap nobody can see costs nothing
+  and fixes nothing, and it resolves the moment you approach. Verified by parking the
+  player's car dead on a walker (pushed out to exactly half-width + shoulder) and a
+  town-wide sweep: 0 car overlaps anywhere, 0 prop overlaps inside the bubble
 - Spatial grids for pedestrians and props keep collision checks local
 
 ## Gotchas for future work

@@ -4619,6 +4619,7 @@ function updatePeds(dt) {
   }
   rebuildPedGrid();
   separatePeds(mode === 'car' ? car.position : player.position);
+  pedsVsSolids(mode === 'car' ? car.position : player.position);
   if (angerToast > 0) angerToast -= dt;
 }
 
@@ -5164,6 +5165,67 @@ function separatePeds(sub) {
     // offsets bleed away so the pavement tidies itself up again
     if (p.ox) p.ox *= 1 - Math.min(1, 1.2*(1/60));
     if (p.oz) p.oz *= 1 - Math.min(1, 1.2*(1/60));
+  }
+}
+
+// The crowd separates from itself, but nothing ever separated it from the *things*:
+// lane walkers are re-placed from the road graph every frame and never tested against
+// cars or street furniture, so people strolled straight through a queue of traffic and
+// out the other side. Same fix as every push on a lane walker — write the offset into
+// p.ox/p.oz so pedPlace doesn't wipe it next frame. Clamps are wider than the crowd
+// separation's ±1.1 because half a car's width plus a shoulder is nearly 2 m.
+function pedsVsSolids(sub) {
+  // an oriented car body, same frame maths as collideTraffic
+  const pushCar = (cx, cz, yaw, type) => {
+    const S = CAR_TYPES[type] || CAR_TYPES.sedan;
+    const hx = S.W/2 + PED_R*0.7, hz = S.L/2 + PED_R*0.7;
+    const c = Math.cos(yaw), sn = Math.sin(yaw);
+    const gx = Math.floor(cx/GAP_Q), gz = Math.floor(cz/GAP_Q);
+    for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
+      const b = pedGrid.get((gx+ox)+','+(gz+oz)); if (!b) continue;
+      for (const p of b) {
+        if (p.rag.active) continue;
+        const dx = p.g.position.x - cx, dz = p.g.position.z - cz;
+        let lx = dx*c - dz*sn, lz = dx*sn + dz*c;
+        const pex = hx - Math.abs(lx), pez = hz - Math.abs(lz);
+        if (pex <= 0 || pez <= 0) continue;
+        if (pex < pez) lx += Math.sign(lx || 1)*pex;      // out the nearest face
+        else           lz += Math.sign(lz || 1)*pez;
+        const nx2 = cx + lx*c + lz*sn, nz2 = cz - lx*sn + lz*c;
+        p.ox = THREE.MathUtils.clamp((p.ox||0) + nx2 - p.g.position.x, -2.6, 2.6);
+        p.oz = THREE.MathUtils.clamp((p.oz||0) + nz2 - p.g.position.z, -2.6, 2.6);
+        p.g.position.x = nx2; p.g.position.z = nz2;
+      }
+    }
+  };
+  // Scoped to the bubble around the camera: an overlap nobody can see costs nothing
+  // and fixes nothing. 120 m for cars (big, readable at range)…
+  for (const t of traffic) {
+    const dx = t.x - sub.x, dz = t.z - sub.z;
+    if (dx*dx + dz*dz > 120*120) continue;
+    pushCar(t.x, t.z, t.yaw, t.type);
+  }
+  if (mode === 'foot') pushCar(car.position.x, car.position.z, heading, carType);
+  // …and 90 m for the bins, hydrants and lamp posts, which are small.
+  for (const pr of props) {
+    if (!pr.static) continue;
+    const ddx = pr.x - sub.x, ddz = pr.z - sub.z;
+    if (ddx*ddx + ddz*ddz > 90*90) continue;
+    const rr = pr.radius + PED_R*0.7, rr2 = rr*rr;
+    const gx = Math.floor(pr.x/GAP_Q), gz = Math.floor(pr.z/GAP_Q);
+    for (let ox = -1; ox <= 1; ox++) for (let oz = -1; oz <= 1; oz++) {
+      const b = pedGrid.get((gx+ox)+','+(gz+oz)); if (!b) continue;
+      for (const p of b) {
+        if (p.rag.active) continue;
+        const dx = p.g.position.x - pr.x, dz = p.g.position.z - pr.z;
+        const d2 = dx*dx + dz*dz;
+        if (d2 >= rr2 || d2 < 1e-5) continue;
+        const d = Math.sqrt(d2), push = rr - d, nx = dx/d, nz = dz/d;
+        p.ox = THREE.MathUtils.clamp((p.ox||0) + nx*push, -1.6, 1.6);
+        p.oz = THREE.MathUtils.clamp((p.oz||0) + nz*push, -1.6, 1.6);
+        p.g.position.x += nx*push; p.g.position.z += nz*push;
+      }
+    }
   }
 }
 
