@@ -6661,7 +6661,7 @@ const rideSeat = (R) => {
     return { x: x + Math.sin(yaw)*0.55, y: y + 1.45, z: z + Math.cos(yaw)*0.55, yaw };
   }
   const c = R.cars[R.seat];
-  return { x: c.x, y: 1.5, z: c.z, yaw: c.yaw };
+  return { x: c.x, y: 1.66, z: c.z, yaw: c.yaw };
 };
 function updateRides(dt) {
   if (rideExitCd > 0) rideExitCd -= dt;
@@ -6694,7 +6694,8 @@ function updateRides(dt) {
         if (ridden) {                                    // you get to steer yours
           const t = (keys.KeyA||keys.ArrowLeft?1:0) - (keys.KeyD||keys.ArrowRight?1:0);
           const g = (keys.KeyW||keys.ArrowUp?1:0) - (keys.KeyS||keys.ArrowDown?1:0);
-          c.yaw += t*2.2*dt; c.spd += (g*6 - c.spd)*Math.min(1, dt*2.2);
+          c.yaw += t*2.6*dt; c.spd += ((g > 0 ? 7 : g*4) - c.spd)*Math.min(1, dt*2.4);
+          if (!g) c.spd *= 1 - Math.min(1, dt*1.8);
         } else {
           c.turn += (Math.random()-0.5)*dt*6;
           c.turn = THREE.MathUtils.clamp(c.turn, -1.6, 1.6);
@@ -6702,11 +6703,21 @@ function updateRides(dt) {
           c.spd += (4.2 - c.spd)*Math.min(1, dt);
         }
         let nx = c.x + Math.sin(c.yaw)*c.spd*dt, nz = c.z + Math.cos(c.yaw)*c.spd*dt;
-        // the wall turns you round rather than stopping you dead
-        if (nx < R.bx - R.HW + 1.2) { nx = R.bx - R.HW + 1.2; c.yaw = -c.yaw + Math.PI; c.bump = 0.2; }
-        if (nx > R.bx + R.HW - 1.2) { nx = R.bx + R.HW - 1.2; c.yaw = -c.yaw + Math.PI; c.bump = 0.2; }
-        if (nz < R.bz - R.HD + 1.2) { nz = R.bz - R.HD + 1.2; c.yaw = Math.PI - c.yaw; c.bump = 0.2; }
-        if (nz > R.bz + R.HD - 1.2) { nz = R.bz + R.HD - 1.2; c.yaw = Math.PI - c.yaw; c.bump = 0.2; }
+        // The wall turns an AI car round rather than stopping it dead — and the two
+        // reflections are NOT the same formula. A side (±x) wall negates the x of the
+        // heading (yaw → −yaw); an end (±z) wall negates the z (yaw → π − yaw). The
+        // first version used π − yaw for both, so a car angling into a side wall kept
+        // its x-motion pinned into the wall and ground along it, jittering, for ever.
+        // The RIDDEN car never gets its yaw flipped at all: in first person a forced
+        // 180° on every wall kiss reads as the camera breaking. It just loses most of
+        // its speed and takes the thump.
+        const wall = (ax) => { c.bump = 0.2;
+          if (ridden) { c.spd *= -0.35; }
+          else c.yaw = ax ? -c.yaw : Math.PI - c.yaw; };
+        if (nx < R.bx - R.HW + 1.2) { nx = R.bx - R.HW + 1.2; wall(true); }
+        if (nx > R.bx + R.HW - 1.2) { nx = R.bx + R.HW - 1.2; wall(true); }
+        if (nz < R.bz - R.HD + 1.2) { nz = R.bz - R.HD + 1.2; wall(false); }
+        if (nz > R.bz + R.HD - 1.2) { nz = R.bz + R.HD - 1.2; wall(false); }
         c.x = nx; c.z = nz;
         for (const o of R.cars) {                        // and each other, which is the point
           if (o === c) continue;
@@ -6714,11 +6725,16 @@ function updateRides(dt) {
           if (d > 2.1 || d < 1e-4) continue;
           const push = (2.1 - d)/2;
           c.x += dx/d*push; c.z += dz/d*push; o.x -= dx/d*push; o.z -= dz/d*push;
-          c.yaw += 0.7; o.yaw -= 0.7; c.bump = o.bump = 0.25;
+          // the spin from a hit stays off the ridden car too — the shove and the
+          // bounce animation carry the impact without wrenching the view round
+          const rid = riding === R && R.cars[R.seat];
+          if (c !== rid) c.yaw += 0.7;
+          if (o !== rid) o.yaw -= 0.7;
+          c.bump = o.bump = 0.25;
           if (!c.hitT || performance.now() - c.hitT > 400) { c.hitT = performance.now(); dingSfx(); }
         }
         c.bump = Math.max(0, c.bump - dt);
-        c.g.position.set(c.x, c.bump*0.12, c.z);
+        c.g.position.set(c.x, 0.16 + c.bump*0.12, c.z);  // ON the steel floor, not in it
         c.g.rotation.set(0, c.yaw, c.bump*0.18, 'YXZ');
       }
     }

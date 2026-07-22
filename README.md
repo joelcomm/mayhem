@@ -534,6 +534,15 @@ the track…" instead of offering an F that would do nothing. The clock runs whe
 anyone is aboard or not — it is a fairground ride on a schedule, not a taxi. Riding, you
 stay in the seat through the dwell, so staying on for another lap is just not pressing F.
 
+**The two wall reflections are not the same formula** (this is what made the bumper
+cars read as broken): a side (±x) wall negates the x of the heading, yaw → −yaw; an end
+(±z) wall negates the z, yaw → π − yaw. The first version used π − yaw for both, so a
+car angling into a side wall kept its x-motion pinned into the wall and ground along
+it, jittering, for ever. And the **ridden car never gets its yaw flipped at all** — in
+first person a forced 180° on every wall kiss or collision reads as the camera
+breaking. Your car just loses most of its speed and takes the thump; the AI cars still
+bounce and spin.
+
 **The group-rotation trap** (this bit ate the first carousel): a Group's `rotation.y`
 of θ carries a child at local angle *a* to **world angle a − θ, not a + θ**. The seat
 camera added, so it orbited against the platform and the horses paraded around the
