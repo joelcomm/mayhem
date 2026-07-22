@@ -4509,7 +4509,7 @@ function hitPeopleAt(x, z, dx, dz, speed, radius, byPlayer) {
       if (ex*ex + ez*ez < r2) {
         applyRagdoll(p.g, p.rag, dx, dz, speed);
         if (byPlayer) { addCoins(2); shake = Math.min(1.4, shake + 0.3); chaosHit(10);
-          p.spooked = { x, z }; sayOuch(); }
+          p.spooked = { x, z }; sayOuch('car'); }
       }
     }
   }
@@ -4951,7 +4951,15 @@ let angerToast = 0;
 function angerPed(p) {
   if (p.rag.active || (p.flee && p.flee.t > 0) || p.angry > 0) return;
   p.angry = 7; p.swing = 0.5;
-  if (angerToast <= 0) { toast(rpick(['HEY!', 'WATCH IT!', 'WHY YOU LITTLE—'])); angerToast = 3; sayOuch(); }
+  // The banner is what they yell as they square up, so it wants the ones with a threat
+  // in them, not just the affronted ones. ('WHY YOU LITTLE—' was a straight lift from
+  // the show; everything else in this game got de-branded, and it was overdue.)
+  if (angerToast <= 0) {
+    toast(mpick(['HEY!', 'WATCH IT!', 'RUDE!', 'EXCUSE YOU!', "I'M WALKING HERE!",
+                 'DO YOU MIND?', 'MANNERS!', 'BACK OFF!', 'NOT TODAY!',
+                 "THAT'S IT!", "OH, IT'S ON!", 'RIGHT, THAT DOES IT!', 'COME HERE!']));
+    angerToast = 3; sayOuch('barge');
+  }
 }
 // Returns true when it has taken charge of this person for the frame.
 function updateAngry(p, dt) {
@@ -5050,7 +5058,7 @@ function kick() {
     chaosHit(12*got);
     burst(ox, 1.1, oz, 0xffe27a, 5 + got*2);
     shake = Math.min(1.0, shake + 0.22);
-    sayOuch();
+    sayOuch('kick');
   }
 }
 
@@ -5252,9 +5260,31 @@ function boomSfx() {                               // a wall charge going off
   tone(64, t + 0.03, 0.26, 0.16, 'square');
   tone(rnd(110, 150), t + 0.01, 0.12, 0.1, 'sawtooth');
 }
-// the townsfolk have opinions about being kicked and run over
-const OUCH_LINES = ['Hey!', 'Ouch!', 'Stop it!', 'Cut it out!', "That's not nice!",
-  'Watch it!', 'Rude!', 'My groceries!', 'Not the face!'];
+// The townsfolk have opinions, and which opinion depends on what you just did to them.
+// One shared list meant a person you had just run over complained about your manners,
+// which is funny once. Three banks: shouldered past, booted, and put on the tarmac.
+// Deliberately long — the rate limiter lets maybe one line every second and a half
+// through, so a short list is audibly a short list within about a minute of play.
+const OUCH = {
+  barge: ['Hey!', 'Watch it!', 'Rude!', 'Excuse you!', 'Do you mind?', "I'm walking here!",
+    'Manners!', 'Personal space!', 'Wait your turn!', 'Unbelievable!', "That's my elbow!",
+    'Some of us are in a hurry!', 'Oh, sure, just barge right through!', 'Hands!',
+    'You got a licence for those elbows?', 'I was in the middle of a thought!',
+    'Well, I never!', 'Somebody raised you wrong.', 'Was that necessary?',
+    "I'll have you know I'm a taxpayer!", 'Careful!', 'Steady on!'],
+  kick: ['Ouch!', 'My shin!', 'Not the face!', 'Cut it out!', 'Stop it!', 'Owww!',
+    'Why?!', 'What did I do?', 'That is assault!', 'My good leg!', 'You kicked me!',
+    'I felt that in my teeth!', 'Right in the dignity!', 'I have a bad ankle!',
+    'Ohh, that smarts!', 'I just had these pressed!', 'Somebody hold my bag!',
+    'Not the shins, anything but the shins!', "That's coming out of someone's wages!",
+    'My knee does not bend that way!', 'Rude and painful!'],
+  car:  ['My groceries!', 'Look out!', 'Whoaaa!', 'Not again!', 'My back!', 'Aaargh!',
+    'Learn to drive!', 'Oh come on!', 'My casserole!', 'I was nearly home!',
+    'I only came out for milk!', "There's a pavement for that!", 'My hip!',
+    'Somebody get the number plate!', 'That was a green light for me!',
+    'This is a residential street!', 'Tell my cat I love her!', 'Slow down!',
+    'I have insurance for this... I think.', 'Every single time!', 'Twenty is plenty!'],
+};
 // A whole town in one squeaky register sounded like one very unlucky person, so
 // each shout picks a register: gruff, ordinary, or high. Where the browser exposes
 // named voices we pick a matching one; otherwise pitch alone carries it.
@@ -5272,13 +5302,19 @@ function pickVoice(re) {
   const hits = voiceCache.filter(v => re.test(v.name));
   return hits.length ? rpick(hits) : null;
 }
-function sayOuch() {
+let lastSaid = '';
+function sayOuch(kind) {
   if (sayT > 0 || muted) return;      // speech is its own pipe — the master gain can't reach it
-
-  sayT = 1.4;
+  sayT = 1.15;
   try {
     if (!window.speechSynthesis || speechSynthesis.speaking) return;
-    const u = new SpeechSynthesisUtterance(rpick(OUCH_LINES));
+    const bank = OUCH[kind] || OUCH.barge;
+    // never the same line twice running: with a rate limit this slow, an immediate
+    // repeat is the one thing that makes a big list sound small
+    let line = mpick(bank);
+    for (let i = 0; i < 3 && line === lastSaid; i++) line = mpick(bank);
+    lastSaid = line;
+    const u = new SpeechSynthesisUtterance(line);
     const r = rpick(VOICE_REGISTERS);
     const v = pickVoice(r.want);
     if (v) u.voice = v;

@@ -80,10 +80,18 @@ The one exception is the **engine**: a single persistent sawtooth oscillator who
 pitch rides the speed and whose gain gates on driving (`updateEngine`). On top of the
 tones: **crash thumps** against buildings, **metal clangs** on car-on-car hits, **dings**
 when street furniture pings off the bumper, **door creaks** on open and close, bomb
-beeps and booms at the prison — and the townsfolk **speak**: kicks, car hits and barges
-trigger a speech-synthesis "Hey!", "Ouch!", "Cut it out!" and friends
-(`sayOuch()`, rate-limited, high pitch, zero assets — degrades to silence where
-`speechSynthesis` is unavailable).
+beeps and booms at the prison — and the townsfolk **speak**: kicks, car
+hits and barges trigger a speech-synthesis line (`sayOuch`, rate-limited, zero
+assets — degrades to silence where `speechSynthesis` is unavailable). **What they
+say depends on what you did to them**: three banks of ~21 lines for being
+shouldered past, booted, and put on the tarmac. One shared list meant someone you
+had just run over complained about your manners, which is funny exactly once. The
+banks are long on purpose — the rate limiter lets maybe one line every second and
+a half through, so a short list is audibly a short list inside a minute of play —
+and a guard stops the same line landing twice in a row, which is the one thing
+that makes a big list sound small. The banner someone yells as they **square up**
+is its own list, weighted to the ones with a threat in them rather than the merely
+affronted ones.
 
 **Mute** is the 🔊 button top right, or **N**. Everything audible routes through one
 master gain rather than straight to the destination, which makes mute a single number
