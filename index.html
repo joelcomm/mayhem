@@ -307,8 +307,10 @@ function addWithOutline(mesh, amt) {
   const dome = new THREE.Mesh(new THREE.SphereGeometry(3400, 24, 12),
     new THREE.MeshBasicMaterial({ map: t, side: THREE.BackSide, fog: false, depthWrite: false }));
   dome.renderOrder = -10; scene.add(dome);
+  var skyDome = dome;                      // tinted through the day by updateSky()
 }
-scene.add(new THREE.HemisphereLight(0xcdeaff, 0x6f8a52, 2.1));
+const hemi = new THREE.HemisphereLight(0xcdeaff, 0x6f8a52, 2.1);
+scene.add(hemi);
 const sunDir = new THREE.Vector3(0.42, 0.78, 0.32).normalize();
 const sun = new THREE.DirectionalLight(0xfff6e2, 2.5);
 sun.castShadow = true;
@@ -319,6 +321,48 @@ sun.shadow.camera.top = SH;   sun.shadow.camera.bottom = -SH;
 sun.shadow.camera.near = 1;   sun.shadow.camera.far = 620;
 sun.shadow.bias = -0.0006; sun.shadow.normalBias = 0.06;
 scene.add(sun, sun.target);
+
+// =================================================================
+//  TIME OF DAY
+//  One clock drives the sun's elevation and colour, the hemisphere fill, the fog
+//  and the sky tint, so dusk reads across the whole town at once rather than as a
+//  filter over it. `dayT` is 0..1 with 0.5 at noon; a full day is DAY_LEN seconds.
+//  Nothing here is seeded — it all runs per frame, long after the town is built.
+// =================================================================
+const DAY_LEN = 300;                       // five minutes of game world per day
+let dayT = 0.30;                           // open mid-morning
+const NIGHT_KEYS = {                       // sun colour by elevation, warm at the horizon
+  day:   new THREE.Color(0xfff6e2), dusk: new THREE.Color(0xff9b4d), night: new THREE.Color(0x3a4c86),
+};
+const SKY_KEYS = {
+  day:   new THREE.Color(0xffffff), dusk: new THREE.Color(0xff9a5c), night: new THREE.Color(0x1b2545),
+};
+const FOG_KEYS = {
+  day:   new THREE.Color(0xbfe6f7), dusk: new THREE.Color(0xe8996b), night: new THREE.Color(0x17203c),
+};
+const _c1 = new THREE.Color(), _c2 = new THREE.Color();
+let nightAmt = 0;                          // 0 broad daylight … 1 fully dark
+function updateSky(dt) {
+  dayT = (dayT + dt/DAY_LEN) % 1;
+  // elevation: a sine that peaks at noon and dips below the horizon overnight
+  const elev = Math.sin(dayT * Math.PI * 2 - Math.PI/2);
+  sunDir.set(Math.cos(dayT * Math.PI * 2) * 0.55, Math.max(0.06, elev * 0.9), 0.32).normalize();
+  const day = THREE.MathUtils.clamp((elev - 0.06) / 0.34, 0, 1);   // 1 well up, 0 at the horizon
+  const dusk = THREE.MathUtils.clamp((elev + 0.28) / 0.34, 0, 1);  // 1 at the horizon, 0 deep night
+  nightAmt = 1 - dusk;
+  const mix = (keys, out) => {                                     // night → dusk → day
+    out.copy(keys.night).lerp(keys.dusk, dusk);
+    return out.lerp(keys.day, day);
+  };
+  sun.color.copy(mix(NIGHT_KEYS, _c1));
+  sun.intensity = 0.25 + day * 2.25;
+  hemi.intensity = 0.34 + day * 1.76;
+  hemi.color.copy(mix(SKY_KEYS, _c2)).lerp(new THREE.Color(0xcdeaff), 0.4);
+  if (skyDome) skyDome.material.color.copy(mix(SKY_KEYS, _c1));
+  townFog.color.copy(mix(FOG_KEYS, _c2));
+  townFog.near = 520 - nightAmt * 240;                              // night closes the world in
+  renderer.setClearColor(townFog.color);
+}
 
 // fat storybook clouds — clusters of flattened spheres
 {
@@ -5217,6 +5261,36 @@ function updateMarkers(dt, sub) {
 }
 
 // =================================================================
+//  HEADLIGHTS
+//  Two soft beam cones and a single spotlight, faded in by nightAmt. One light,
+//  not two: a second shadow-casting spot doubles the cost for a symmetry nobody
+//  looks at. The cones are what actually sell it — they read as light in a world
+//  drawn with flat toon shading.
+// =================================================================
+const beamMat = new THREE.MeshBasicMaterial({ color: 0xfff3c4, transparent: true,
+  opacity: 0, depthWrite: false, side: THREE.DoubleSide, fog: false });
+const headBeams = [];
+{
+  const cone = new THREE.ConeGeometry(2.6, 15, 12, 1, true).rotateX(Math.PI/2).translate(0, 0, 7.5);
+  for (const sx of [-0.72, 0.72]) {
+    const m = new THREE.Mesh(cone, beamMat);
+    m.position.set(sx, 0.72, 2.1); m.renderOrder = 4;
+    car.add(m); headBeams.push(m);
+  }
+}
+const headSpot = new THREE.SpotLight(0xfff3c4, 0, 46, 0.62, 0.55, 1.2);
+headSpot.position.set(0, 1.0, 2.2);
+car.add(headSpot); car.add(headSpot.target);
+headSpot.target.position.set(0, 0.2, 22);
+function updateHeadlights() {
+  const on = nightAmt > 0.12 && mode === 'car' && drowning <= 0;
+  const k = on ? Math.min(1, (nightAmt - 0.12) / 0.4) : 0;
+  beamMat.opacity = k * 0.16;
+  headSpot.intensity = k * 130;
+  for (const b of headBeams) b.visible = k > 0.01;
+}
+
+// =================================================================
 //  LOST PROPERTY
 //  One hidden trophy in every walk-in room. Thirty-five rooms were furnished and
 //  staffed and then had no reason to exist; a trophy each turns the whole high
@@ -6622,6 +6696,8 @@ function animate() {
   const sub = mode === 'car' ? car.position : player.position;
 
   updateLights(dt);
+  updateSky(dt);
+  updateHeadlights();
   updateCar(dt);
   updatePlayer(dt);
   updateRoomState(dt);

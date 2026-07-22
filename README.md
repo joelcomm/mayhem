@@ -321,9 +321,24 @@ past — and pay 40 coins each, with a 1000-coin bonus for clearing all thirty-f
 The HUD keeps a 🏆 count under the chaos score. One InstancedMesh, like the coins,
 built well after the tree stage so it costs nothing seeded.
 
-**To do** — day/night (headlights, lit windows, Club Inferno after dark); stunt
-scoring for air time; wanted escalation (roadblocks, spike strips); reviving the
-shelved prison minigame in some better form.
+### Day and night
+One clock (`updateSky`, five real minutes per day) drives the sun's elevation and
+colour, the hemisphere fill, the fog colour *and* its near plane, and the tint on
+the sky dome — so dusk reads across the whole town at once instead of as a filter
+laid over it. Three colour keys (day / dusk / night) are blended by two ramps taken
+from the sun's elevation, which is what keeps the warm horizon band from appearing
+at midnight. Fog closes in after dark, so the town gets smaller and more claustrophobic
+at night. The interiors were already lit by their own lamp, and they now glow properly
+through open doorways once it's dark — the best free scenery in the game.
+
+**Headlights** come on with `nightAmt`: two soft beam cones plus a single spotlight
+(one, not two — a second shadow-casting spot doubles the cost for a symmetry nobody
+looks at). The cones are what actually sell it; in flat toon shading, volumetric-looking
+light reads better than a brighter patch of ground.
+
+**To do** — lit windows and Club Inferno coming alive after dark; stunt scoring for
+air time; wanted escalation (roadblocks, spike strips); reviving the shelved prison
+minigame in some better form.
 
 ## How it's drawn
 Everything is `MeshToonMaterial` on a 3-step ramp, with black back-face shells for
