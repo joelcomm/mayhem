@@ -4,6 +4,31 @@ A cartoon open-world driving game in the spirit of *The Simpsons: Hit & Run*.
 Open `index.html` — it's one self-contained file (three.js loads from a CDN,
 so the first load needs an internet connection).
 
+## Running it
+
+```bash
+npm install
+npm run dev      # http://localhost:5173 — hot reload
+npm run build    # -> docs/index.html, one self-contained file
+npm run deploy   # build, then push to GitHub Pages *and* the Netlify hub
+```
+
+The source is `src/main.js` (the whole game) plus `index.html` (the DOM shell: HUD
+markup and CSS). three.js comes from npm, pinned to **0.161.0** — the exact version
+the old CDN importmap used, so behaviour is unchanged.
+
+**The build deliberately emits one self-contained file.** three is inlined, which
+costs ~700 KB (200 KB gzipped) but keeps deployment to "copy one file" — the game
+ships to two hosts and also has to run from `file://`. A normal chunked build would
+mean getting asset base paths right in two places for no gain here.
+
+**Press `G` for the tuning panel** (`lil-gui`). Top speed, acceleration, armour, ramp
+height and run-up, traffic density, fog, sun, ambient and interior lamp intensity,
+camera distance, plus coins/heat/repair cheats — all live, while you drive. Almost
+every constant in this game was originally landed by editing a number, reloading,
+waiting for the town to generate and driving back to look at it; these are the dials
+that cost the most round trips.
+
 ## Controls
 | Key | Action |
 |-----|--------|

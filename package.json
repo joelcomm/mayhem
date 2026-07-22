@@ -1,0 +1,21 @@
+{
+  "name": "maplewood-mayhem",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "description": "A cartoon open-world driving game in the spirit of The Simpsons: Hit & Run",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "deploy": "npm run build && node scripts/deploy.mjs"
+  },
+  "dependencies": {
+    "lil-gui": "^0.19.2",
+    "three": "0.161.0"
+  },
+  "devDependencies": {
+    "vite": "^5.4.11",
+    "vite-plugin-singlefile": "^2.0.3"
+  }
+}
