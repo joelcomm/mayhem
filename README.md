@@ -239,7 +239,9 @@ shop's name (`furnishRoom`), with the old counter-and-crates as the fallback. Bo
 copies of a repeated name get the same treatment, adapted to each room's trimmed size.
 Big furniture is solid (colliders registered in the room's `walls`, so the interiors
 audit knows it belongs); small props are visual only; the walk from the door stays open
-(`inLane`).
+(`inLane`). **Floors are tiled or boarded**, picked by the room's own coordinates — a
+checkerboard shop floor and a boarded one next door is most of what makes two rooms of
+the same size read as two different places.
 
 **Rooms have people in them** — a cashier behind the Speedy Mart counter, a barman
 behind the Rusty Mug's bar, seated diners, dancers at the disco. They are *staff*: static figures with a fixed
@@ -465,6 +467,32 @@ one. The whole thing is live under **Ink outlines** in the G panel, including an
 on/off toggle for A/B and a `show buffer` view that dumps linearised depth or the raw
 edge mask to the screen — how the sub-texel bug above was found.
 
+**Surfaces.** Flat colour was the house style, but a whole town of it read as plastic:
+standing in the street, nothing told you a wall was brick rather than painted board.
+Walls, roofs and floors now carry small **procedural canvas textures** — mortar courses,
+shingle tabs, lap siding, render speckle, checkerboard tile, floorboards — drawn
+near-white so the bucket's own colour tints them, and hung as `map` on the same toon
+material. No assets, nothing to download, and the flat-shaded look survives intact.
+
+Two things make it work:
+
+- **The UVs are generated at flush time, not taken from the geometry.** A BoxGeometry's
+  UVs run 0..1 per face, so brick would stretch to fit each surface — eight courses on a
+  3 m wall and eight on a 30 m one, which is the thing that reads as fake fastest.
+  `projectUV` instead projects every triangle onto the world plane its normal points at.
+  Merged town geometry is already in world space, so this is a straight read of position:
+  no shader, no per-face bookkeeping, and the brick is the same size everywhere in town.
+- **Buckets key on colour *and* surface.** A brick wall and a painted one can share a
+  colour but not a material, and merging them would put mortar courses on the smooth one.
+  An untextured `put` keeps its plain colour key, so nothing that doesn't ask for a
+  surface pays for one.
+
+**Which house gets which surface is a hash of its own coordinates** (`vary`), never a
+draw from `prng()` — one extra random in the generator and the whole town re-rolls. Same
+house, same brick, every load, for free. Brick houses also override the pastel wall
+colour they were dealt with a brick palette, which costs nothing for the same reason:
+`rpick(WALL_COLS)` still happens, brick just ignores the result.
+
 **The characters.** The crowd is ~20 InstancedMeshes, one per body part, so the cheap
 place to add detail is *inside the existing geometry* — a merge costs vertices once at
 build time and nothing per frame, while a new part costs a draw call across up to 1,400
@@ -486,6 +514,21 @@ townsperson.
 
 *(One trap: the skull must stay a true sphere at r 0.28. Egg-shaping it by 6% in Y
 pushed the crown through all nine hairstyles, which are cut to fit that radius.)*
+
+**Wardrobe.** On top of the nine hairstyles: **beanies, fedoras and hard hats**, each
+with its own palette (knitwear, felt and hi-vis do not share one), and each with a
+silhouette that reads at fifty metres — a roll, a brim, a peak — because at that range
+the colour is all you get. A hat *replaces* the hairstyle mesh rather than sitting on
+top of it: one instanced mesh per head is the whole design, and a fedora over an afro is
+a clipping fight nobody wins. About a sixth of the town wears **glasses** (their own
+mesh, sitting on the front of the eyeballs, which bulge proud of the face — a ring at
+z 0.33 clears a 0.175 eye centred at 0.185 with millimetres to spare). And a third wear
+**striped shirts**: the same torso geometry under a stripe texture, tinted by the same
+instance colour, so it is a whole second wardrobe for one draw call.
+
+All of it rolls on `Math.random`, not `prng()` — crowd looks were always deliberate
+runtime variety (the `female` roll has been on `Math.random` from the start), and the
+seeded stream must never see them.
 
 **The detail pass.** Every primitive that was meant to be round now is: cylinders and
 spheres swept up to 16-28 segments, cones to 16 — *except* cones with four or fewer
@@ -686,6 +729,12 @@ are bucketed by colour and merged, so the whole town is a few dozen draw calls.
   like the glazing band above it. The rule for anything added to `makeShop` in future:
   if it crosses the full width of the front face, it needs a `drop` entry and a
   door-aware rebuild.
+- **Building variety must come from a coordinate hash, never from `prng()`.** Which
+  surface a house gets, which brick colour, whether a room is tiled or boarded — all of
+  it goes through `vary(x, z, n)`, a pure hash. It is the same discipline as the trim
+  geometry (derived from `w`/`d`/`h`, no randoms): a single extra draw from the seeded
+  stream in the generator re-rolls the entire town. The whole texture pass landed with
+  all five canaries unmoved because of this.
 - **A transparent material must not write depth.** The ink pass is an edge detect
   over the scene's depth buffer, so anything that stamps itself into depth gets an
   outline — including the quad of a free-standing billboard sign, which comes back as

@@ -733,25 +733,178 @@ function collideCircle(px, pz, r, list) {
 }
 
 // =================================================================
+//  SURFACES
+//  Flat colour is the house style, but a whole town of it reads as plastic:
+//  standing in the street, nothing tells you a wall is brick rather than
+//  painted board. These are small procedural canvases — mortar courses,
+//  shingle tabs, lap siding, grout — drawn near-white so the bucket's own
+//  colour tints them, and hung as `map` on the same toon material. No assets,
+//  nothing to download, and the flat-shaded look survives intact.
+//
+//  The UVs are generated at flush time (see projectUV), not taken from the
+//  geometry. A BoxGeometry's UVs run 0..1 per face, so a brick texture would
+//  stretch to fit each surface — eight courses on a 3 m wall and eight on a
+//  30 m one, which is the single thing that reads as fake fastest. Projecting
+//  each triangle onto the world axis its normal points down instead keeps the
+//  brick the same size everywhere in town.
+// =================================================================
+function surfCanvas(px, draw) {
+  const c = document.createElement('canvas'); c.width = c.height = px;
+  const g = c.getContext('2d');
+  g.fillStyle = '#fff'; g.fillRect(0, 0, px, px);
+  draw(g, px);
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.colorSpace = THREE.SRGBColorSpace;
+  t.anisotropy = renderer.capabilities.getMaxAnisotropy();
+  return t;
+}
+// A tiny local generator for the speckled surfaces. Deliberately not prng() (the town's
+// stream must not see the artwork) and deliberately not Math.random() either, so the
+// stucco is the same stucco on every load.
+function texRnd(seed) { let x = seed; return () => (x = Math.imul(x ^ (x >>> 15), 0x2545f491) >>> 0) / 4294967296; }
+
+const texBrick = surfCanvas(256, (g, P) => {
+  const rows = 10, hR = P/rows, bw = P/4;
+  g.fillStyle = '#c6c6c6'; g.fillRect(0, 0, P, P);              // mortar behind everything
+  for (let r = 0; r < rows; r++) {
+    const off = (r % 2) * bw/2;
+    for (let b = -1; b <= 4; b++) {
+      const v = 250 - ((r*7 + b*13) % 5) * 8;                   // course-to-course variation
+      g.fillStyle = `rgb(${v},${v},${v})`;
+      g.fillRect(b*bw + off + 1.6, r*hR + 1.6, bw - 3.2, hR - 3.2);
+    }
+  }
+});
+const texShingle = surfCanvas(256, (g, P) => {
+  const rows = 9, hR = P/rows, tw = P/6;
+  g.fillStyle = '#b9b9b9'; g.fillRect(0, 0, P, P);
+  for (let r = 0; r < rows; r++) {
+    const off = (r % 2) * tw/2;
+    for (let b = -1; b <= 6; b++) {
+      const v = 252 - ((r*5 + b*11) % 4) * 11;
+      g.fillStyle = `rgb(${v},${v},${v})`;
+      g.fillRect(b*tw + off + 1, r*hR, tw - 2, hR - 2.6);       // gap only along the butt edge
+    }
+  }
+});
+const texSiding = surfCanvas(128, (g, P) => {
+  const rows = 7, hR = P/rows;
+  for (let r = 0; r < rows; r++) {
+    g.fillStyle = 'rgb(253,253,253)'; g.fillRect(0, r*hR, P, hR - 1.6);
+    g.fillStyle = 'rgba(0,0,0,0.16)'; g.fillRect(0, r*hR + hR - 2.2, P, 2.2);   // the lap shadow
+  }
+});
+const texStucco = surfCanvas(128, (g, P) => {
+  const R = texRnd(0x5eed01);
+  for (let i = 0; i < 3000; i++) {
+    g.fillStyle = `rgba(0,0,0,${0.04 + R()*0.07})`;
+    g.fillRect((R()*P)|0, (R()*P)|0, 2, 2);
+  }
+});
+const texTile = surfCanvas(128, (g, P) => {                      // the classic checker floor
+  const n = 4, sz = P/n;
+  g.fillStyle = '#b4b4b4'; g.fillRect(0, 0, P, P);               // grout
+  for (let y = 0; y < n; y++) for (let x = 0; x < n; x++) {
+    const v = (x + y) % 2 ? 214 : 253;
+    g.fillStyle = `rgb(${v},${v},${v})`;
+    g.fillRect(x*sz + 1.6, y*sz + 1.6, sz - 3.2, sz - 3.2);
+  }
+});
+const texPlank = surfCanvas(128, (g, P) => {
+  const R = texRnd(0xb0a2d), rows = 5, hR = P/rows;
+  for (let r = 0; r < rows; r++) {
+    const v = 252 - ((r*7) % 3) * 10;
+    g.fillStyle = `rgb(${v},${v},${v})`; g.fillRect(0, r*hR, P, hR - 1.2);
+    g.fillStyle = 'rgba(0,0,0,0.18)';   g.fillRect(0, r*hR + hR - 1.6, P, 1.6);
+    for (let k = 0; k < 5; k++) {                                // grain
+      g.fillStyle = `rgba(0,0,0,${0.05 + R()*0.05})`;
+      g.fillRect(R()*P, r*hR + 2 + R()*(hR - 6), 10 + R()*30, 1);
+    }
+    g.fillStyle = 'rgba(0,0,0,0.2)';                             // one butt joint per course
+    g.fillRect(((r*47) % P), r*hR, 1.4, hR - 1.6);
+  }
+});
+
+// scale is texture tiles per metre — the only dial that matters for how big the
+// brick looks, and the one worth putting on the G panel
+const SURFACES = {
+  brick:   { tex: texBrick,   scale: 0.62 },
+  shingle: { tex: texShingle, scale: 0.55 },
+  siding:  { tex: texSiding,  scale: 0.42 },
+  stucco:  { tex: texStucco,  scale: 0.3  },
+  tile:    { tex: texTile,    scale: 0.42 },
+  plank:   { tex: texPlank,   scale: 0.34 },
+};
+const surfCache = new Map();
+function surfMat(color, kind) {
+  const k = color + ':' + kind;
+  if (!surfCache.has(k)) surfCache.set(k,
+    new THREE.MeshToonMaterial({ color, gradientMap: RAMP, map: SURFACES[kind].tex }));
+  return surfCache.get(k);
+}
+// Project every triangle onto the world plane its normal points at. Merged town geometry
+// is already in world space, so this is a straight read of position — no per-face bookkeeping
+// and no shader. Works on the cylinders and prisms too, near enough for a cartoon.
+function projectUV(geo, scale) {
+  const p = geo.attributes.position, n = geo.attributes.normal;
+  const uv = new Float32Array(p.count * 2);
+  for (let i = 0; i < p.count; i += 3) {
+    const nx = Math.abs(n.getX(i)), ny = Math.abs(n.getY(i)), nz = Math.abs(n.getZ(i));
+    const axis = (ny >= nx && ny >= nz) ? 1 : (nx >= nz ? 0 : 2);
+    for (let k = 0; k < 3; k++) {
+      const j = i + k;
+      const x = p.getX(j), y = p.getY(j), z = p.getZ(j);
+      uv[j*2]     = (axis === 0 ? z : x) * scale;
+      uv[j*2 + 1] = (axis === 1 ? z : y) * scale;
+    }
+  }
+  geo.setAttribute('uv', new THREE.BufferAttribute(uv, 2));
+}
+// Which surface a given building gets. Hashed from its own coordinates rather than
+// drawn from prng(), for the same reason all the trim geometry is: a single extra draw
+// from the seeded stream here would re-roll the entire town. Same house, same brick,
+// every load — and it costs nothing.
+function vary(x, z, n) {
+  let h = Math.imul((Math.round(x*13) * 73856093) ^ (Math.round(z*13) * 19349663), 0x45d9f3b);
+  h ^= h >>> 15; h = Math.imul(h, 0x27d4eb2d); h ^= h >>> 13;
+  return (h >>> 0) % n;
+}
+// Brick wants its own palette — pastel-mint brick is not a thing.
+const BRICK_COLS = [0xb5654a, 0xa8534a, 0xc47c5c, 0x8f5a4a, 0xcfa88a];
+
+// =================================================================
 //  BUILDINGS
 //  Parts are bucketed by colour and merged, so the whole town is a
 //  handful of draw calls while every house still looks individual.
 // =================================================================
+// Buckets are keyed on colour *and* surface, not colour alone: a brick wall and a
+// painted one can share a colour but not a material, and merging them would put mortar
+// courses on the smooth one. An untextured put keeps its plain colour key, so nothing
+// that doesn't ask for a surface pays for one.
 const BUCKETS = new Map();
-function put(color, geo) {
+const bkey = (color, kind) => kind ? color + ':' + kind : String(color);
+function put(color, geo, kind) {
   // mergeGeometries returns null unless every input agrees on indexing and attributes,
   // and the roof prisms below are built non-indexed — normalise here.
   if (geo.index) geo = geo.toNonIndexed();
-  let b = BUCKETS.get(color); if (!b) BUCKETS.set(color, b = []);
-  b.push(geo);
+  const k = bkey(color, kind);
+  let b = BUCKETS.get(k); if (!b) BUCKETS.set(k, b = { color, kind, list: [] });
+  b.list.push(geo);
 }
 const BOX = (w,h,d) => new THREE.BoxGeometry(w,h,d);
 // Remember the geometry put() just bucketed, so it can be withdrawn later if the building
 // turns out to be one we hollow out. Everything is still *built* either way, which is what
 // keeps the seeded stream — and therefore the town — identical.
-const lastPut = color => { const a = BUCKETS.get(color); return [color, a[a.length-1]]; };
+const lastPut = (color, kind) => {
+  const k = bkey(color, kind), b = BUCKETS.get(k);
+  return [k, b.list[b.list.length-1]];
+};
 const withdraw = drop => {
-  for (const [c, g] of drop) { const a = BUCKETS.get(c), i = a.indexOf(g); if (i >= 0) a.splice(i, 1); }
+  for (const [k, g] of drop) {
+    const b = BUCKETS.get(k); if (!b) continue;
+    const i = b.list.indexOf(g); if (i >= 0) b.list.splice(i, 1);
+  }
 };
 
 // =================================================================
@@ -768,27 +921,30 @@ const ROOMS = [];
 // The building's outer walls, with a gap cut for the doorway. `L` maps building-local
 // geometry into the world; `q` slides the doorway along the facade in local x, so the
 // opening can dodge whatever ended up parked outside.
-function buildShell(L, w, d, h, wallCol, dw, dh, q) {
+function buildShell(L, w, d, h, wallCol, dw, dh, q, skin) {
   const T = WALL_T, hw = w/2, hd = d/2;
   const lw = (q - dw/2) + hw, rw = hw - (q + dw/2);            // wall either side of the gap
   const lc = -hw + lw/2, rc = hw - rw/2;
-  put(wallCol, L(baked(BOX(w, h, T), 0, h/2, -hd + T/2)));                      // back
-  put(wallCol, L(baked(BOX(T, h, d - T*2), -hw + T/2, h/2, 0)));                // left
-  put(wallCol, L(baked(BOX(T, h, d - T*2),  hw - T/2, h/2, 0)));                // right
-  put(wallCol, L(baked(BOX(lw, h, T), lc, h/2, hd - T/2)));                     // front, door-left
-  put(wallCol, L(baked(BOX(rw, h, T), rc, h/2, hd - T/2)));                     // front, door-right
-  put(wallCol, L(baked(BOX(dw, h - dh, T), q, dh + (h - dh)/2, hd - T/2)));     // header over the door
+  put(wallCol, L(baked(BOX(w, h, T), 0, h/2, -hd + T/2)), skin);                // back
+  put(wallCol, L(baked(BOX(T, h, d - T*2), -hw + T/2, h/2, 0)), skin);          // left
+  put(wallCol, L(baked(BOX(T, h, d - T*2),  hw - T/2, h/2, 0)), skin);          // right
+  put(wallCol, L(baked(BOX(lw, h, T), lc, h/2, hd - T/2)), skin);               // front, door-left
+  put(wallCol, L(baked(BOX(rw, h, T), rc, h/2, hd - T/2)), skin);               // front, door-right
+  put(wallCol, L(baked(BOX(dw, h - dh, T), q, dh + (h - dh)/2, hd - T/2)), skin);  // header
 }
 
 // The habitable room inside the shell. `ir` is its local rect, which is the shell's
 // interior trimmed back off anything the town had already built inside this footprint —
 // so the far side of a partition may be a dead space nobody can reach. `ir.z1` is always
 // the door wall and never moves.
-function buildRoomBox(L, ir, dw, dh, q) {
+function buildRoomBox(L, ir, dw, dh, q, floor) {
   const rw = ir.x1 - ir.x0, rd = ir.z1 - ir.z0, cxl = (ir.x0 + ir.x1)/2, czl = (ir.z0 + ir.z1)/2;
   const LIN = 0xf2e4c8, SK = 0x8c6a44, P = 0.3;
   put(0xf0efe6, L(baked(BOX(rw, 0.3, rd), cxl, CEIL_H + 0.15, czl)));           // ceiling
-  put(0x9a6b3f, L(baked(BOX(rw, 0.14, rd), cxl, 0.02, czl)));                   // floorboards
+  // tiled or boarded, by the room's own coordinates — a checkerboard shop floor and a
+  // boarded one next door is most of what makes two identical rooms read as two places
+  put(floor === 'tile' ? 0xe6e2d8 : 0x9a6b3f,
+      L(baked(BOX(rw, 0.14, rd), cxl, 0.02, czl)), floor || 'plank');
   put(LIN, L(baked(BOX(rw, CEIL_H, P), cxl, CEIL_H/2, ir.z0 + P/2)));           // back
   put(LIN, L(baked(BOX(P, CEIL_H, rd), ir.x0 + P/2, CEIL_H/2, czl)));           // left
   put(LIN, L(baked(BOX(P, CEIL_H, rd), ir.x1 - P/2, CEIL_H/2, czl)));           // right
@@ -876,13 +1032,21 @@ function makeHouse(cx, cz, fx, fz, w, d) {
   const spot = placeClear(cx, cz, fx, fz, w, d, yaw);
   if (!spot) return null;                        // nowhere clear of the road for it
   cx = spot.x; cz = spot.z;
-  const wall = rpick(WALL_COLS), roof = rpick(ROOF_COLS), door = rpick(DOOR_COLS);
+  let wall = rpick(WALL_COLS);
+  const roof = rpick(ROOF_COLS), door = rpick(DOOR_COLS);
   const storeys = prng() < 0.35 ? 2 : 1;
   const h = storeys === 2 ? rnd(8.5, 10) : rnd(5.4, 6.4);
   const L = (g) => baked(g, cx, 0, cz, 0, yaw, 0);   // place in the house's own frame
 
-  put(wall, L(baked(BOX(w, h, d), 0, h/2, 0)));
-  put(roof, L(baked(roofPrism(w+1.4, rnd(2.6,3.8), d+1.4), 0, h, 0)));
+  // Wall surface, and for a brick house its colour too. Both come from vary() — the
+  // coordinate hash — so a street is a genuine mix of brick, board and render without
+  // the generator drawing a single extra random. rpick(WALL_COLS) above still happens
+  // either way; brick just overrides what came out, so the stream is untouched.
+  const skin = ['brick', 'siding', 'siding', 'stucco', 'brick', 'siding'][vary(cx, cz, 6)];
+  if (skin === 'brick') wall = BRICK_COLS[vary(cz, cx, BRICK_COLS.length)];
+
+  put(wall, L(baked(BOX(w, h, d), 0, h/2, 0)), skin);
+  put(roof, L(baked(roofPrism(w+1.4, rnd(2.6,3.8), d+1.4), 0, h, 0)), 'shingle');
 
   const front = d/2 + 0.06;
   // Trim detail. All of it is derived from w/d/h — no rnd() anywhere in here, so the
@@ -915,10 +1079,10 @@ function makeHouse(cx, cz, fx, fz, w, d) {
   }
   if (prng() < 0.55) {                                    // chimney
     const bx = rnd(-w*0.3, w*0.3);
-    put(0x9a5c4a, L(baked(BOX(1.5, 3.4, 1.5), bx, h+1.7, rnd(-d*0.2, d*0.2))));
+    put(0x9a5c4a, L(baked(BOX(1.5, 3.4, 1.5), bx, h+1.7, rnd(-d*0.2, d*0.2))), 'brick');
   }
   if (prng() < 0.4) {                                     // porch roof on posts
-    put(roof, L(baked(BOX(w*0.62, 0.35, 2.6), 0, 3.5, front+1.2)));
+    put(roof, L(baked(BOX(w*0.62, 0.35, 2.6), 0, 3.5, front+1.2)), 'shingle');
     for (const s of [-1,1]) put(TRIM, L(baked(BOX(0.3, 3.5, 0.3), s*w*0.26, 1.75, front+2.2)));
   }
   addBox(cx, cz, aabbW(w, d, yaw), aabbD(w, d, yaw), 'house', undefined, { w, d, yaw });
@@ -926,7 +1090,7 @@ function makeHouse(cx, cz, fx, fz, w, d) {
 }
 
 // a downtown storefront with a big signboard
-function makeShop(cx, cz, fx, fz, w, d, name, bodyCol, signCol) {
+function makeShop(cx, cz, fx, fz, w, d, name, bodyCol, signCol) {   // bodyCol is reassigned for brick
   const yaw = Math.atan2(fx, fz), h = rnd(7.5, 11);
   const spot = placeClear(cx, cz, fx, fz, w, d, yaw);
   if (!spot) return 0;
@@ -936,8 +1100,13 @@ function makeShop(cx, cz, fx, fz, w, d, name, bodyCol, signCol) {
   // SHOP_NAMES cycles. Any copy whose interior can't be cleared just stays solid.
   const walkIn = true;
   const drop = [];
-  put(bodyCol, L(baked(BOX(w, h, d), 0, h/2, 0)));
-  if (walkIn) drop.push(lastPut(bodyCol));
+  // Same trick as the houses: the surface, and for brick the colour, come from the
+  // coordinate hash rather than the seeded stream. `skin` has to travel with the
+  // WALKIN entry so the shell that replaces this body is the same material.
+  const skin = ['brick', 'stucco', 'stucco', 'brick'][vary(cx, cz, 4)];
+  if (skin === 'brick') bodyCol = BRICK_COLS[vary(cz, cx, BRICK_COLS.length)];
+  put(bodyCol, L(baked(BOX(w, h, d), 0, h/2, 0)), skin);
+  if (walkIn) drop.push(lastPut(bodyCol, skin));
   put(0x6f6a58, L(baked(BOX(w+1.2, 0.7, d+1.2), 0, h+0.35, 0)));     // parapet, doubles as the roof
   const front = d/2 + 0.06;
   put(0x2f3550, L(baked(BOX(w*0.86, 3.4, 0.2), 0, 2.0, front)));      // glazing band
@@ -973,7 +1142,7 @@ function makeShop(cx, cz, fx, fz, w, d, name, bodyCol, signCol) {
   signs.push({ text: name, x: cx + fx*(front+0.45), z: cz + fz*(front+0.45), y: h-1.6, yaw, w: w*0.9 });
   shopSpots.push({ name, cx, cz, fx, fz, w, d, h, yaw });
   addBox(cx, cz, W, D, 'shop');            // keeps the road audit and the radar honest
-  if (walkIn) WALKIN.push({ name, cx, cz, yaw, w, d, h, W, D, fx, fz, front, bodyCol, drop,
+  if (walkIn) WALKIN.push({ name, cx, cz, yaw, w, d, h, W, D, fx, fz, front, bodyCol, skin, drop,
                             foot: colliders[colliders.length-1],
                             dw: DOOR_W, dh: DOOR_H, glazed: true, avoid: [], reach: 9 });
   return h;
@@ -2257,8 +2426,8 @@ rngNeutral(() => {
     const fi = colliders.indexOf(b.foot); if (fi >= 0) colliders.splice(fi, 1);
     const L = g => baked(g, b.cx, 0, b.cz, 0, b.yaw, 0);
     const dx = b.cx + b.fx*b.front + sx*q, dz = b.cz + b.fz*b.front + sz*q;
-    buildShell(L, b.w, b.d, b.h, b.bodyCol, b.dw, b.dh, q);
-    buildRoomBox(L, ir, b.dw, b.dh, q);
+    buildShell(L, b.w, b.d, b.h, b.bodyCol, b.dw, b.dh, q, b.skin);
+    buildRoomBox(L, ir, b.dw, b.dh, q, vary(b.cx, b.cz, 3) ? 'tile' : 'plank');
     if (b.glazed) {                 // glazing either side, replacing the band across the front
       const lw = (q - b.dw/2) + b.w*0.43, rw = b.w*0.43 - (q + b.dw/2);
       const gl = (q - b.dw/2) + b.w*0.40, gr = b.w*0.40 - (q + b.dw/2);
@@ -2903,9 +3072,11 @@ const blimps = [];
 
 // Every building part is now generated, so flush each colour bucket into a single mesh.
 // This has to happen after the billboards, which also contribute geometry.
-for (const [color, list] of BUCKETS) {
-  if (!list.length) continue;
-  const m = new THREE.Mesh(merge(list), toon(color));
+for (const [, b] of BUCKETS) {
+  if (!b.list.length) continue;
+  const geo = merge(b.list);
+  if (b.kind) projectUV(geo, SURFACES[b.kind].scale);
+  const m = new THREE.Mesh(geo, b.kind ? surfMat(b.color, b.kind) : toon(b.color));
   m.castShadow = true; m.receiveShadow = true; scene.add(m);
 }
 
@@ -3745,18 +3916,40 @@ const HAIR_STYLES = ['short','short','bald','tall','spiky','bun','bun',
                      'cap','cap','afro','long','mohawk'];
 const BLUE_HAIR = 0x4a6fd8;
 const CAP_COLS = [0xd0392b, 0x2f6fc4, 0x2f8f4f, 0xf0b429, 0x4a4f58];
+// A hat replaces the hairstyle mesh rather than sitting on top of it: one instanced
+// mesh per head is the whole design, and a fedora over an afro is a clipping fight
+// nobody wins. Each gets its own palette — knitwear, felt and hi-vis do not share one.
+const HATS = ['beanie', 'beanie', 'fedora', 'hardhat', 'cap'];
+const BEANIE_COLS = [0xd0392b, 0x2f6a52, 0x7b4fa7, 0xf0b429, 0x4f7d8c, 0xe87ab0, 0xe8e3d3];
+const FELT_COLS   = [0x5a4632, 0x2b2f38, 0x6b5b45, 0x8a8a8a, 0x3a3226];
+const HIVIS_COLS  = [0xf0b429, 0xffffff, 0xe8532f, 0x2f6fc4];
+const SPEC_COLS   = [0x2b2f38, 0x1f2430, 0xc9a24b, 0x8c1f1f, 0x4f7d8c];
+// Everything below rolls on Math.random, not prng(): crowd looks are deliberate runtime
+// variety (the `female` roll always was), and the seeded stream must never see them —
+// one extra draw here and the whole town re-rolls.
+const mpick = a => a[(Math.random()*a.length)|0];
 function pickLook() {
   const female = Math.random() < 0.5;
   let style = rpick(HAIR_STYLES);
   if (!female && style === 'tall') style = 'short';
   if (!female && style === 'bun') style = Math.random() < 0.5 ? 'bald' : 'short';
-  const hair = style === 'tall' ? BLUE_HAIR : style === 'cap' ? rpick(CAP_COLS) : rpick(HAIR);
+  if (Math.random() < 0.24) style = mpick(HATS);
+  const hair = style === 'tall'    ? BLUE_HAIR
+             : style === 'cap'     ? rpick(CAP_COLS)
+             : style === 'beanie'  ? mpick(BEANIE_COLS)
+             : style === 'fedora'  ? mpick(FELT_COLS)
+             : style === 'hardhat' ? mpick(HIVIS_COLS)
+             : rpick(HAIR);
   return {
     shoulder: female ? rnd(0.44, 0.55) : rnd(0.56, 0.68),
     // depth, independent of width: a town of one build reads as clones however much
     // the heights vary, because the silhouette from the side never changes
     build: rnd(0.86, 1.28),
     tall: rnd(0.85, 1.15), style,
+    // a striped shirt is the same torso mesh under a stripe texture, tinted by the same
+    // instance colour — a whole second wardrobe for one draw call
+    striped: Math.random() < 0.3,
+    specs: Math.random() < 0.17 ? new THREE.Color(mpick(SPEC_COLS)) : null,
     skin:new THREE.Color(rpick(SKIN)), hair:new THREE.Color(hair),
     shirt:new THREE.Color(rpick(SHIRT)), pants:new THREE.Color(rpick(PANTS)),
     shoe:new THREE.Color(rpick([0x2b2f38, 0x1f2430, 0x5a3a2a, 0x8c1f1f, 0xe8e3d3])),
@@ -3816,6 +4009,36 @@ const hairMohawk = merge(
   [[-0.18, 0.22], [-0.06, 0.3], [0.06, 0.3], [0.18, 0.22]].map(([sz, h]) =>
     baked(BOX(0.09, h, 0.15), 0, 1.95 + h/2 - 0.1, sz - 0.02))
 );
+// Hats. Each has to clear the r 0.28 skull the way the hairstyles do, and each needs a
+// silhouette that reads at fifty metres — a brim, a roll, a peak — because at that range
+// the colour is all you get otherwise.
+const hairBeanie = merge([
+  dome(0.305, 0.92, 1.72),
+  baked(new THREE.TorusGeometry(0.288, 0.055, 8, 18), 0, 1.75, -0.01, Math.PI/2),   // turned-up roll
+  baked(new THREE.SphereGeometry(0.07, 10, 8), 0, 2.06, -0.01),                     // bobble
+]);
+const hairFedora = merge([
+  dome(0.275, 0.66, 1.75),
+  baked(new THREE.CylinderGeometry(0.47, 0.5, 0.05, 20), 0, 1.79, -0.01),           // brim
+  baked(new THREE.CylinderGeometry(0.285, 0.285, 0.07, 18), 0, 1.83, -0.01),        // band
+]);
+const hairHardhat = merge([
+  dome(0.3, 0.82, 1.71),
+  baked(BOX(0.07, 0.1, 0.5), 0, 1.95, -0.01),                                       // centre ridge
+  baked(new THREE.CylinderGeometry(0.34, 0.34, 0.05, 18, 1, false, -0.9, 1.8), 0, 1.74, 0.02),  // front peak
+]);
+// Glasses sit on the front of the eyeballs, which bulge proud of the face — a ring at
+// z 0.33 clears a 0.175 eye centred at 0.185 with a couple of millimetres to spare.
+const glassesGeo = merge([
+  baked(new THREE.TorusGeometry(0.132, 0.021, 6, 16), -0.125, 1.85, 0.325),
+  baked(new THREE.TorusGeometry(0.132, 0.021, 6, 16),  0.125, 1.85, 0.325),
+  baked(BOX(0.1, 0.03, 0.028), 0, 1.85, 0.325),                                     // bridge
+  baked(BOX(0.028, 0.028, 0.2), -0.252, 1.86, 0.23),                                // arms back to the ears
+  baked(BOX(0.028, 0.028, 0.2),  0.252, 1.86, 0.23),
+]);
+const texShirtStripe = surfCanvas(64, (g, P) => {
+  for (let i = 0; i < 10; i += 2) { g.fillStyle = 'rgba(0,0,0,0.3)'; g.fillRect(0, i*P/10, P, P/10); }
+});
 // a rounded toe on the shoe: a small merge that stops the crowd reading as a pile of
 // rectangles once you are close enough to see them
 const shoeGeo = merge([
@@ -3861,6 +4084,7 @@ const CI = {
   shoeL: instanced(shoeGeo, toon(0xffffff), CROWD_MAX),
   shoeR: instanced(shoeGeo, toon(0xffffff), CROWD_MAX),
   torso: instanced(torsoGeo, toon(0xffffff), CROWD_MAX),
+  torsoS:instanced(torsoGeo, new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP, map: texShirtStripe }), CROWD_MAX),
   armL:  instanced(armGeo, toon(0xffffff), CROWD_MAX),
   armR:  instanced(armGeo, toon(0xffffff), CROWD_MAX),
   // both hands share one mesh at twice the capacity — a left and a right hand are the
@@ -3881,9 +4105,14 @@ const CI = {
   hairAfro:  instanced(hairAfro,  toon(0xffffff), CROWD_MAX),
   hairLong:  instanced(hairLong,  toon(0xffffff), CROWD_MAX),
   hairMohawk:instanced(hairMohawk,toon(0xffffff), CROWD_MAX),
+  hairBeanie: instanced(hairBeanie,  toon(0xffffff), CROWD_MAX),
+  hairFedora: instanced(hairFedora,  toon(0xffffff), CROWD_MAX),
+  hairHardhat:instanced(hairHardhat, toon(0xffffff), CROWD_MAX),
+  glasses:   instanced(glassesGeo, toon(0xffffff), CROWD_MAX, false),
 };
 const HAIR_MESH = { short:'hairShort', tall:'hairTall', spiky:'hairSpiky', bun:'hairBun', bald:'hairBald',
-                    cap:'hairCap', afro:'hairAfro', long:'hairLong', mohawk:'hairMohawk' };
+                    cap:'hairCap', afro:'hairAfro', long:'hairLong', mohawk:'hairMohawk',
+                    beanie:'hairBeanie', fedora:'hairFedora', hardhat:'hairHardhat' };
 for (const k in CI) {
   CI[k].count = 0;
   // setColorAt allocates a zero-filled buffer, i.e. every instance starts BLACK.
@@ -3911,7 +4140,7 @@ function renderCrowd(sub) {
     dummy.position.set(g.position.x, g.position.y, g.position.z);
     dummy.rotation.set(g.rotation.x, g.rotation.y, g.rotation.z);
     dummy.scale.set(1, L.tall, 1); dummy.updateMatrix(); rootM.copy(dummy.matrix);
-    put2('torso', L.shirt, 0,0,0, 0,0, sh, L.build);
+    put2(L.striped ? 'torsoS' : 'torso', L.shirt, 0,0,0, 0,0, sh, L.build);
     put2('head',  L.skin,  0,0,0);
     put2('muzzle',L.skin,  0,0,0);
     put2('mouth', null,    0,0,0);
@@ -3924,6 +4153,7 @@ function renderCrowd(sub) {
     put2('pupil', null, gx, gy, 0);
     put2('brow', L.hair, 0,0,0);
     put2(HAIR_MESH[L.style], L.hair, 0,0,0);
+    if (L.specs) put2('glasses', L.specs, 0,0,0);
     put2('legL', L.pants, -0.14, 0.86, 0, u.legL.rotation.x);
     put2('legR', L.pants,  0.14, 0.86, 0, u.legR.rotation.x);
     put2('shoeL', L.shoe, -0.14, 0.86, 0, u.legL.rotation.x);
