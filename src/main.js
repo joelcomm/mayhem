@@ -7288,27 +7288,28 @@ let riding = null, rideExitCd = 0;
 //  the carriageway the old reserved-rectangle siting let it clip.
 // =================================================================
 {
-  const B = 2.6, TOP = 26;
+  const B = 2.6, TOP = 40;
   const CTRL = [
-    [-20, B, -40], [2, B, -40], [24, B, -40],          // the flat station run
-    [46, B + 5, -34], [58, B + 13, -16],               // the chain lift, slow and steady
-    [62, TOP - 3, 4], [56, TOP, 24],                   // ... to the crest
-    [42, 6, 38],                                       // THE DROP
-    [26, 10, 28], [12, 14, 40], [-2, 8, 30],           // twists
-    [-18, 12, 40],                                     // into the circle, coming in high
-    [-34, 11, 38],
-    [-52, 10, 34], [-58, 8.5, 22], [-50, 7, 11],       // round...
-    [-38, 6, 10], [-29, 5.5, 20], [-31, 5, 32],        // ...and round...
-    [-36, 4.8, 36],                                    // ...closing it under the way in
-    [-50, 5.5, 42],                                    // breaking out along the top
-    [-62, 9, 28], [-58, 12, 8], [-48, 4.5, -10],       // hill
-    [-54, 10, -24], [-40, 4, -34],                     // hill
-    [-28, B, -40],                                     // and flatten home
+    [-22, B, -40], [2, B, -40], [26, B, -40],          // the flat station run (board here)
+    [48, B + 8, -33], [60, B + 22, -14],               // the chain lift, slow and steady
+    [66, TOP - 5, 6], [58, TOP, 26],                   // ... up to a tall crest, pulled over the top
+    [50, TOP - 8, 36],                                 // the lip
+    [43, 6, 41],                                       // THE DROP — a steep near-vertical plunge
+    [33, 21, 36],                                      // straight into a big airtime hill
+    [22, 5, 30],                                       // valley floor
+    [10, 18, 40], [-3, 6, 31], [-15, 17, 41],          // a run of camelbacks and S-bends
+    [-30, 8, 40],
+    [-47, 12, 36], [-60, 9, 22], [-56, 7, 7],          // into the circle, coming in high
+    [-43, 6, 4], [-31, 6.5, 16], [-35, 6, 31],         // round and round, closing under the way in
+    [-49, 7, 40],                                      // breaking out along the top
+    [-62, 14, 24], [-60, 19, 4], [-47, 5, -10],        // up and over a hill
+    [-54, 16, -24], [-40, 5, -33],                     // one more hill
+    [-30, B, -40],                                     // brake run, flatten home
   ];
-  // Scaled to two-thirds so the whole loop fits in a fair-sized green — a full-size
-  // 124x82 loop couldn't validate near the dense fair and jumped ~300 m away. Uniform
-  // scale about the station height keeps every slope identical, just smaller.
-  const S = 0.46;
+  // Bigger than before now that there's room: a taller lift and a steeper drop, scaled so
+  // the whole loop still validates on the fair's green beside the carousel. Uniform scale
+  // about the station height keeps every slope identical, just larger.
+  const S = 0.56;
   const curve = new THREE.CatmullRomCurve3(
     CTRL.map(c => new THREE.Vector3(c[0]*S, B + (c[1]-B)*S, c[2]*S)), true);
   const SAMPLES = curve.getSpacedPoints(260);
@@ -7420,9 +7421,15 @@ let riding = null, rideExitCd = 0;
     {
       const sz0 = stz - 2.7, sx0 = stx - 8.4, sx1 = stx - 4.75;   // stairs off the west end
       const z0 = stz - 1.2, z1 = stz + 1.2, STEPS = 6;
-      for (let k = 0; k < STEPS; k++)
-        mesh2(BOX((sx1 - sx0)/STEPS, deckTop*(k + 1)/STEPS, z1 - z0),
-          0x8c6a44, sx0 + (STEPS - k - 0.5)*(sx1 - sx0)/STEPS, deckTop*(k + 1)/STEPS/2, (z0 + z1)/2);
+      // Each step's height must match the walkable ramp (rise 'x+', low at sx0, full at
+      // the platform edge sx1): the tallest step sits AGAINST the platform, the shortest
+      // at the ground. Previously the visual steps ran the other way — a wall at the
+      // bottom and a lip you stepped down onto the deck — so they never lined up for entry.
+      for (let k = 0; k < STEPS; k++) {
+        const h = deckTop * (k + 1) / STEPS;                       // rises toward the platform
+        const x = sx0 + (k + 0.5) * (sx1 - sx0) / STEPS;           // k=0 at the ground, last at the deck
+        mesh2(BOX((sx1 - sx0)/STEPS, h, z1 - z0), 0x8c6a44, x, h/2, (z0 + z1)/2);
+      }
       DECKS.push({ x0: sx0, x1: sx1, z0, z1, h: deckTop, rise: 'x+' });
       for (const rz of [z0 + 0.1, z1 - 0.1]) {
         const rail = new THREE.Mesh(BOX(Math.hypot(sx1 - sx0, deckTop) + 0.4, 0.08, 0.08), toon(0xf6f3ea));
