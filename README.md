@@ -43,6 +43,7 @@ that cost the most round trips.
 | C | cycle camera distance |
 | R | reset (also clears heat) |
 | N | mute / unmute (or the 🔊 button, top right) |
+| P | pause — overlay with controls, the active job and your stats |
 | M | map view — pull back over the whole town |
 | H | air horn (once bought from the garage) |
 | 1-4 | buy, while standing on Gus's forecourt |
@@ -95,8 +96,17 @@ roof, POLICE on both doors, and a quick **double chirp** when one is close on yo
 more insistent the closer they get, rather than a constant wail. Coins chime when
 collected. All audio is short scheduled tones on one shared AudioContext (`tone()`),
 built lazily on the first key/mouse input, since browsers refuse audio before a gesture.
-The one exception is the **engine**: a single persistent sawtooth oscillator whose
-pitch rides the speed and whose gain gates on driving (`updateEngine`). On top of the
+The one exception is the **engine**: a single persistent oscillator whose
+pitch rides the speed and whose gain gates on driving (`updateEngine`) — and
+**each car body has its own voice** (`ENGINE_VOICE`): a truck idles at 29 Hz
+square, a compact at 60 Hz, triangle wagons get a gain lift, so a NEW RIDE from
+Gus's sounds different, not just looks it. Under everything sits a **town hum**
+(`ensureHum`): two barely-detuned 50 Hz sines beating over ~8 s plus a whisper
+of harmonic — felt more than heard, it mostly registers when you mute and the
+town goes dead. **Rides make their own noise while you're in the seat**
+(`updateRideAudio`): a music-box waltz on the carousel, a track rattle on the
+coaster that goes quiet in the station, a motor buzz in the bumper car — all
+scheduled one-shots through the master gain, so mute needs nothing special. On top of the
 tones: **crash thumps** against buildings, **metal clangs** on car-on-car hits, **dings**
 when street furniture pings off the bumper, **door creaks** on open and close, bomb
 beeps and booms at the prison — and the townsfolk **speak**: kicks, car
@@ -370,6 +380,23 @@ the thing that welds the job loop onto the chaos loop instead of competing with 
 - **RING RUSH** (Axel, near the spawn street) — 8 checkpoints around the ring
   highway (highway nodes filtered to the outer loop, sorted by angle), one lap
   through the tunnel vs a par from the octagon perimeter; session best tracked.
+- **THE GETAWAY** (Lefty Louie, outside the prison walls) — drive a bag across
+  town on an instant three stars, and the heat is *pinned* to at least one star
+  until you arrive, so there is no lying low. The wanted bonus means delivering
+  hot is the whole payday — a clean three-star drop pays 2.5x.
+- **SCRAP RUN** (Scrappy, at the stunt park) — launch six traffic cars in 80 s,
+  counted at the same >14 mph threshold that lifts a corner (`lift > 0` in the
+  ram code), so taps don't score. Cops, derby rigs and race rivals are excluded.
+  Runs the big round clock like Feather Frenzy.
+- **RIDE INSPECTOR** (Inspector Pru, at the fair gate) — on foot: sit six
+  seconds on each of the three rides. The coaster runs its own schedule, so
+  catching it in the station is part of the job. The guide arrow walks the
+  inspection, aiming at the nearest ride still unridden.
+
+The stunt park and the fair pick their sites with `findGreen`, which runs after
+the marker block — so their givers (Scrappy, Pru) can't be placed with the rest.
+The marker builder escapes through the `addJobMarker` hook instead of hoisting
+its dozen block-local helpers.
 
 Jobs that are about driving carry `needsCar` and **refuse to start while you are on
 foot** ("YOU NEED TO BE IN A CAR") rather than handing you a timed delivery you have
@@ -407,6 +434,9 @@ back to …") and radar blip all lead back to them until you're close or you sta
 something else. **Finding jobs on the radar**: available givers are red dots in
 range, and when you're idle the nearest out-of-range giver clamps to the rim as
 a lead; the gold pulsing blip is always the active target (or the retry point).
+Unbroken **? crates are little wooden diamonds**, each fair ride is a **purple
+dot**, and when the whole fairground is off-radar its site clamps to the rim as
+a standing lead — the one landmark worth a permanent signpost.
 All mission code runs **after the tree stage**, so none of it touches the seeded
 stream — the audits are byte-identical.
 
@@ -576,6 +606,19 @@ the slope, and the instant it runs off the lip `surfaceY` drops away, `carVY` ta
 over and it is genuinely airborne, landing on the heightfield like any other drop.
 Making them colliders instead would just give you four walls to crash into.
 
+**Air pays now.** While the car is off the ground a stunt clock runs (`airT`/
+`airPeak`/`airSpin` in `updateCar`, banked by `landStunt`): air time and peak
+height pay flat points into the combo — flat, not multiplied, the multiplier is
+for wrecking things — and winding the wheel mid-air pays a spin bonus per
+quarter turn (steering deliberately has no ground check; that *is* the trick
+system). Tiers toast as NICE/BIG/HUGE AIR, 360s get named, and a rising
+arpeggio plays. Kerb hops (under half a second or under knee height) are free,
+so ordinary driving never toasts. A landing draws a fraction of the heat a
+wreck of the same worth would. The nose follows the arc mid-air — which needed
+the car's Euler order switched to YXZ, because with the default XYZ the pitch
+axis is the world's and a car heading along x rolls instead (with pitch 0 the
+two orders compose identically, so nothing else moved).
+
 ### Day and night — SHELVED
 **Off by default** (`DAY_CYCLE = false`): the town reads better in permanent
 daylight, so the clock is frozen at its construction-time noon and `nightAmt`
@@ -594,15 +637,34 @@ through open doorways once it's dark — the best free scenery in the game.
 looks at). The cones are what actually sell it; in flat toon shading, volumetric-looking
 light reads better than a brighter patch of ground.
 
-**To do** — lit windows and Club Inferno coming alive after dark; stunt scoring for
-air time; wanted escalation (roadblocks, spike strips); reviving the shelved prison
-minigame in some better form. On the graphics side: authored GLTF props (sparingly —
-the code-built box aesthetic is a genuine strength), rim lighting, a water shader for
-the river, LOD.
+**To do** — lit windows and Club Inferno coming alive after dark; wanted
+escalation (roadblocks, spike strips); reviving the shelved prison minigame in
+some better form. On the graphics side: authored GLTF props (sparingly — the
+code-built box aesthetic is a genuine strength), LOD. (Stunt scoring, the
+river's water shader and rim lighting all shipped 2026-07-22.)
 
 ## How it's drawn
 Everything is `MeshToonMaterial` on a 3-step ramp. **The ink outlines are a
 post-process**, not geometry.
+
+**The river is the one custom shader in the game** (`riverWater`, in the river
+block): four summed sines drifting downstream over world xz, a finite-difference
+normal quantized to three hard toon bands, stepped sun glints and a fresnel lift
+toward the sky. The normals are deliberately over-steep — a physically-sized
+ripple quantizes to a single toon band and the river reads as paint again, which
+is exactly how the first version failed. Transparent with `depthWrite` off, so
+the ink pass ignores it like the material it replaced. Its `uSun` uniform holds
+the `sunDir` vector by reference, so it would track the shelved day cycle for
+free. `uTime` is fed in `animate`.
+
+**Characters and cars carry a rim light** — a thin bright edge where the surface
+curls away from the camera, injected into the toon shader via `onBeforeCompile`
+(`addRim`): one smoothstep on the view angle, tinted mostly by the surface's own
+instance colour so a pink car rims pink. The scoping is the real work: the crowd
+gets its own shared white material (`crowdToon`) instead of the `toon()` cache's
+white, and the vehicle dark/chrome materials left the cache too, so the rim
+lands on people and cars and never on buildings or street furniture, where it
+reads as frost. Patched materials share one program via `customProgramCacheKey`.
 
 **The ink pass.** Outlines used to be a back-face shell mesh per object — a second
 copy of the geometry pushed out along its normals and drawn in flat ink. It looked
