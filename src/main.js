@@ -4892,10 +4892,25 @@ const carShadow = blobShadow(8), playerShadow = blobShadow(2.6);
 // =================================================================
 const keys = {};
 let mode = 'car';
+// Pause: the sim runs on dt, so a paused game is just dt forced to 0 — everything
+// keeps rendering exactly where it stands, and there is no resume bookkeeping.
+let paused = false;
+const helpEl = document.getElementById('help');
+function togglePause() {
+  paused = !paused;
+  helpEl.classList.toggle('show', paused);
+  if (paused) {
+    const tr = document.getElementById('trophies').textContent;
+    helpEl.querySelector('.obj').innerHTML =
+      (missionHUD() || 'No job on — walk into a red <b>!</b> to take one') +
+      '<br>' + coinCount + ' coins · ' + chaosScore.toLocaleString() + ' chaos · ' + tr;
+  }
+}
 addEventListener('keydown', e => {
   sirenInit();
   keys[e.code] = true;
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+  if (e.code === 'KeyP') togglePause();
   if (e.code === 'KeyC') camIdx = (camIdx+1) % 3;
   if (e.code === 'KeyM') mapView = !mapView;
   if (e.code === 'KeyR') resetAll();
@@ -5728,7 +5743,7 @@ function updateEngine() {
   }
   const v = ENGINE_VOICE[carType] || ENGINE_VOICE.convert;
   if (engineOsc.type !== v.type) engineOsc.type = v.type;
-  const driving = mode === 'car' && drowning <= 0;
+  const driving = mode === 'car' && drowning <= 0 && !paused;
   const f = v.base + Math.abs(speed) * v.mul + Math.sin(performance.now() * 0.02) * 1.5;
   engineOsc.frequency.setTargetAtTime(f, sirenCtx.currentTime, 0.05);
   const g = driving ? (0.012 + (Math.abs(speed) / MAX_SPEED) * 0.022) * v.g : 0;
@@ -5741,6 +5756,7 @@ const CAROUSEL_TUNE = [523, 659, 784, 659, 698, 587, 784, 523, 659, 784, 880, 78
 let rideBeat = 0, rideSndT = 0;
 function updateRideAudio(dt) {
   if (!sirenCtx || !riding) { rideBeat = 0; rideSndT = 0; return; }
+  if (paused) return;                 // dt is 0 — without this the due beat fires every frame
   rideSndT -= dt;
   if (rideSndT > 0) return;
   const t = sirenCtx.currentTime;
@@ -8737,7 +8753,7 @@ tagNoInk(scene);
 const clock = new THREE.Clock();
 function animate() {
   requestAnimationFrame(animate);
-  const dt = Math.min(clock.getDelta(), 0.05);
+  const dt = paused ? 0 : Math.min(clock.getDelta(), 0.05);
   const now = performance.now();
   const sub = mode === 'car' ? car.position : player.position;
 

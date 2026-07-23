@@ -123,6 +123,23 @@
   #tank i { display:block; height:100%; background:#3fa9e8; border-radius:4px; width:100%;
     transition:width .08s linear; }
 
+  #help { position:fixed; inset:0; z-index:15; display:none; align-items:center; justify-content:center;
+    background:rgba(20,25,46,.55); pointer-events:none; }
+  #help.show { display:flex; }
+  #help .card { background:rgba(20,25,46,.92); border:4px solid var(--ink); border-radius:16px;
+    color:#fff; padding:20px 26px 14px; min-width:520px; max-width:640px; }
+  #help h3 { font-size:30px; font-weight:900; letter-spacing:2px; color:var(--sun); margin:0 0 10px; }
+  #help .cols { display:flex; gap:26px; font-size:14px; font-weight:700; line-height:1.75; }
+  #help .cols > div { flex:1; }
+  #help .cols b { display:block; color:var(--sun); letter-spacing:1px; margin-bottom:2px; }
+  #help .cols em { font-style:normal; color:var(--sun); font-weight:900; }
+  #help .obj { margin-top:12px; padding-top:10px; border-top:2px solid rgba(255,255,255,.18);
+    font-size:15px; font-weight:800; }
+  #help .obj b { color:var(--sun); }
+  #help .tips { margin-top:6px; font-size:13px; font-weight:700; opacity:.75; }
+  #help small { display:block; margin-top:10px; font-size:12px; font-weight:800;
+    letter-spacing:2px; opacity:.65; text-align:center; }
+
   #loader { position:fixed; inset:0; z-index:20; display:flex; flex-direction:column; align-items:center;
     justify-content:center; gap:16px; background:linear-gradient(#7cc7ee, #cdebfb); color:var(--ink);
     transition:opacity .7s; }
@@ -151,7 +168,7 @@
     <b>F</b> get in / out &nbsp; <b>C</b> camera<br>
     <b>R</b> reset &nbsp; <b>M</b> map &nbsp; <b>H</b> horn<br>
     <b>L-click</b> punch &nbsp; <b>R-click</b> kick<br>
-    <b>N</b> mute
+    <b>N</b> mute &nbsp; <b>P</b> pause
   </div>
   <button id="mute" class="panel" type="button" title="Mute sound (N)"
     aria-label="Mute sound" aria-pressed="false">🔊</button>
@@ -165,6 +182,30 @@
   <div id="reticle"></div>
   <div id="tank"><i></i></div>
   <div id="shop"></div>
+</div>
+
+<div id="help">
+  <div class="card">
+    <h3>PAUSED</h3>
+    <div class="cols">
+      <div>
+        <b>ON FOOT</b>
+        <em>WASD</em> walk · <em>Shift</em> run · <em>Space</em> jump<br>
+        <em>L-click</em> punch · <em>R-click</em> kick<br>
+        <em>F</em> door / ride / car · <em>1-4</em> buy at Gus's
+      </div>
+      <div>
+        <b>DRIVING</b>
+        <em>WASD</em> drive · <em>Space</em> handbrake<br>
+        <em>C</em> camera · <em>M</em> map · <em>H</em> horn<br>
+        <em>R</em> reset · <em>N</em> mute · <em>G</em> tuning
+      </div>
+    </div>
+    <div class="obj"></div>
+    <div class="tips">Jobs wait under a red ! · crates hide coins (and worse) · the purple dot is the fair ·
+      ramps pay for air time · deliver jobs while wanted for the bonus</div>
+    <small>P RESUMES</small>
+  </div>
 </div>
 
 <div id="loader">
