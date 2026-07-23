@@ -7299,39 +7299,30 @@ let riding = null, rideExitCd = 0;
 //  the carriageway the old reserved-rectangle siting let it clip.
 // =================================================================
 {
-  const B = 2.6, TOP = 46;
+  const B = 2.6, TOP = 40;
   const CTRL = [
-    // --- station + a dead-straight chain lift (no turns) up to a tall crest ---
-    [-64, B,  -22], [-50, B,  -22],        // the flat station run (board here)
-    [-38, 14, -22], [-26, 30, -22],        // the lift: straight, no turns, climbing steadily
-    [-14, TOP, -22],                       // the crest, high over everything
-    // --- the first drop: straight down the far side, near-vertical ---
-    [-2,  40, -22],                        // pulled over the top
-    [10,  7,  -22],                        // THE DROP — the bottom of a steep plunge
-    // --- out leg: a train of camelback airtime hills ---
-    [22,  31, -22], [34, 6, -22],          // big airtime hill into the valley
-    [46,  23, -22],                        // second hill
-    // --- far turnaround: 180°, banked, carried up high ---
-    [58,  14, -20], [66, 13, -8],
-    [68,  13, 4],                          // outer apex of the turn
-    [64,  12, 16], [54, 12, 24],
-    // --- the run home along the parallel straight, more airtime hills ---
-    [40,  21, 24], [26, 7, 24],
-    [12,  18, 24], [-2, 7, 24],
-    [-16, 16, 24], [-30, 7, 24],
-    [-42, 12, 22],
-    // --- near turnaround, dropping into the brake run and home to the station ---
-    [-54, 11, 16], [-62, 9, 6],
-    [-66, 8, -4],                          // outer apex
-    [-62, 6, -14],                         // the brakes bite on the descent
-    [-64, B, -20],                         // level off and roll home
+    [-22, B, -40], [2, B, -40], [26, B, -40],          // the flat station run (board here)
+    [48, B + 8, -33], [60, B + 22, -14],               // the chain lift, slow and steady
+    [66, TOP - 5, 6], [58, TOP, 26],                   // ... up to a tall crest, pulled over the top
+    [50, TOP - 8, 36],                                 // the lip
+    [43, 6, 41],                                       // THE DROP — a steep near-vertical plunge
+    [33, 21, 36],                                      // straight into a big airtime hill
+    [22, 5, 30],                                       // valley floor
+    [10, 18, 40], [-3, 6, 31], [-15, 17, 41],          // a run of camelbacks and S-bends
+    [-30, 8, 40],
+    [-47, 12, 36], [-60, 9, 22], [-56, 7, 7],          // into the circle, coming in high
+    [-43, 6, 4], [-31, 6.5, 16], [-35, 6, 31],         // round and round, closing under the way in
+    [-49, 7, 40],                                      // breaking out along the top
+    [-62, 14, 24], [-60, 19, 4], [-47, 5, -10],        // up and over a hill
+    [-54, 16, -24], [-40, 5, -33],                     // one more hill
+    [-30, B, -40],                                     // brake run, flatten home
   ];
-  // Modelled on a classic out-and-back hyper-coaster (à la Magnum XL-200): one tall,
-  // dead-straight lift, a steep first drop, then a run of camelback airtime hills out to a
-  // banked turnaround and a matching train of hills back — no impossible knots, no helix
-  // threading itself. Big, now that the fair has the room. Uniform scale about the station
-  // height keeps every slope identical, just larger.
-  const S = 0.75;
+  // The known-good layout: a flowing sequence of hills, camelbacks and a circle that closes
+  // under its own way in — smooth, logically continuous, and the cross-ties space evenly on
+  // it. Bigger than the original with a taller lift and a steeper drop, scaled so the whole
+  // loop still validates on the fair's green beside the carousel. Uniform scale about the
+  // station height keeps every slope identical, just larger.
+  const S = 0.56;
   const curve = new THREE.CatmullRomCurve3(
     CTRL.map(c => new THREE.Vector3(c[0]*S, B + (c[1]-B)*S, c[2]*S)), true);
   const SAMPLES = curve.getSpacedPoints(260);
@@ -7359,8 +7350,8 @@ let riding = null, rideExitCd = 0;
   // a road clipping one edge that findGreen's coarse grid missed), so a direct scan is
   // what actually finds the room that is there.
   let site = null, bestD = Infinity;
-  for (let sx = plot[0] - 92; sx <= plot[0] + 92; sx += 4)
-    for (let sz = plot[1] - 50; sz <= plot[1] + 50; sz += 4) {
+  for (let sx = plot[0] - 58; sx <= plot[0] + 58; sx += 4)
+    for (let sz = plot[1] - 22; sz <= plot[1] + 22; sz += 4) {
       const d = (sx - fairAt[0])**2 + (sz - fairAt[1])**2;
       if (d >= bestD) continue;
       if (pathOK(sx, sz)) { bestD = d; site = { x: sx, z: sz }; }
@@ -7379,7 +7370,7 @@ let riding = null, rideExitCd = 0;
   }
   if (site) {
     const cx = site.x, cz = site.z;
-    TAKEN.push({ x: cx, z: cz, w: 160*S, d: 80*S });
+    TAKEN.push({ x: cx, z: cz, w: 140*S, d: 100*S });
     const mesh2 = (geo, col, x, y, z) => {
       const m = new THREE.Mesh(geo, toon(col));
       m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true;
@@ -7394,7 +7385,7 @@ let riding = null, rideExitCd = 0;
     };
     let crestU = 0, crestY = 0;
     SAMPLES.forEach((p, i) => { if (p.y > crestY) { crestY = p.y; crestU = i / (SAMPLES.length - 1); } });
-    const stopU = uNear(-57*S, -22*S), brakeU = uNear(-62*S, -14*S);
+    const stopU = uNear(2*S, -40*S), brakeU = uNear(-40*S, -34*S);
     // rails: two offset tubes, ties, posts down to the ground
     const up = new THREE.Vector3(0, 1, 0);
     const railCurve = (sgn) => {
@@ -7434,8 +7425,8 @@ let riding = null, rideExitCd = 0;
     }
     scene.add(cart);
     // the station: platform beside the flat run, stairs up, all walking surface. The flat
-    // run is the local z=-22 straight (centre x=-57); the platform sits just outside it.
-    const stx = cx - 57*S, stz = cz - 22*S - 2.6, deckH = B - 0.3, deckTop = deckH + 0.22;
+    // run is the local z=-40 straight (centre x=2); the platform sits just outside it.
+    const stx = cx + 2*S, stz = cz - 40*S - 2.6, deckH = B - 0.3, deckTop = deckH + 0.22;
     mesh2(BOX(9.5, deckH, 5.4), 0x8c6a44, stx, deckH/2, stz);
     mesh2(BOX(9.9, 0.22, 5.8), 0xa8845c, stx, deckH + 0.11, stz);
     for (const sxp of [-4, 4]) mesh2(BOX(0.3, 3.4, 0.3), 0x6b6f76, stx + sxp, deckH + 1.7, stz);
