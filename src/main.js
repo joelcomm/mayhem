@@ -4179,6 +4179,63 @@ function rejoin(t) {
   t.rpitch = t.pitch; t.rroll = t.roll; t.ry = t.y;
   t.rec = 1;
 }
+// Keep at least one civilian car in view. 165 cars spread over the whole graph leave
+// some junctions empty, which reads as a ghost town — so if none is within sight of the
+// player, the farthest one is quietly relocated onto a road near them (preferring the
+// way they are looking), where it rejoins traffic and drives in. Cheap: one scan a
+// second, and it only fires when the coast is genuinely clear.
+let sightT = 0;
+const SIGHT_R = 78;
+function ensureCarInSight(dt) {
+  sightT -= dt; if (sightT > 0) return;
+  sightT = 1.1;
+  const sub = mode === 'car' ? car.position : player.position;
+  for (const t of traffic) {
+    if (t.cop || t.derby || t.racer || t.rival || t.knock > 0) continue;
+    const dx = t.x - sub.x, dz = t.z - sub.z;
+    if (dx*dx + dz*dz < SIGHT_R*SIGHT_R) return;   // already one nearby — done
+  }
+  // None in sight. The road graph is sparse — its nodes sit tens of metres apart, so a
+  // junction can have no *node* inside the sight ring even though a road plainly runs
+  // through it. So we scan the *edges*, sampling lane points along each town street, and
+  // pick the one that lands inside the ring and most nearly ahead of the camera. That is
+  // guaranteed to find a spot on real tarmac in view whenever any road passes nearby.
+  const fx = Math.sin(camYaw), fz = Math.cos(camYaw);
+  const R0 = 34, R1 = SIGHT_R - 5;
+  let best = null, bs = -1e9, fb = null, fbd = 1e9;
+  for (let i = 0; i < NET.edges.length; i++) {
+    const e = NET.edges[i];
+    if (e.hw) continue;                               // town streets only
+    const A = NET.nodes[e.a], d = edgeDir(e, e.a);
+    const step = Math.max(6, e.len / Math.ceil(e.len / 10));
+    for (let s = 0; s <= e.len + 0.01; s += step) {
+      const ss = Math.min(s, e.len);
+      const px = A.x + d.dx*ss - d.dz*LANE, pz = A.z + d.dz*ss + d.dx*LANE;
+      const ex = px - sub.x, ez = pz - sub.z, dist = Math.hypot(ex, ez);
+      if (dist < R0) continue;
+      const cand = { ei: i, from: e.a, dist: ss, x: px, z: pz, yaw: Math.atan2(d.dx, d.dz) };
+      if (dist <= R1) {
+        const score = (ex*fx + ez*fz)/dist;           // +1 dead ahead, -1 behind
+        if (score > bs) { bs = score; best = cand; }
+      } else if (dist < fbd) { fbd = dist; fb = cand; }  // ring empty: nearest road beyond it
+    }
+  }
+  const spot = best || fb;
+  if (!spot) return;
+  // Move the farthest civilian car onto that spot and hand it back to the graph, so it
+  // drives in naturally from there rather than blinking into existence.
+  let far = null, fd = -1;
+  for (const t of traffic) {
+    if (t.cop || t.derby || t.racer || t.rival || t.knock > 0) continue;
+    const dx = t.x - sub.x, dz = t.z - sub.z, d = dx*dx + dz*dz;
+    if (d > fd) { fd = d; far = t; }
+  }
+  if (!far) return;
+  far.from = spot.from; far.ei = spot.ei; far.dist = spot.dist; far.cur = far.baseSpeed*0.6;
+  far.x = spot.x; far.z = spot.z; far.yaw = spot.yaw;
+  far.knock = 0; far.rec = 0; far.y = 0; far.pitch = 0; far.roll = 0;
+  far.stopping = false; far.waitT = 0; far.jam = 0; far.push = 0;
+}
 function updateTraffic(dt) {
   updateGaps();
   if (tauntT > 0) tauntT -= dt;
@@ -9914,6 +9971,7 @@ function animate() {
   updateRoomState(dt);
   updateDoors(dt);
   updateChaos(dt);
+  ensureCarInSight(dt);
   updateTraffic(dt);
   updatePeds(dt);
   updateChickens(dt);
