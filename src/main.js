@@ -521,12 +521,19 @@ function rect(arr, x0, z0, x1, z1, y, uv, s) {
   arr.push(x0,y,z0, x1,y,z1, x1,y,z0,  x0,y,z0, x0,y,z1, x1,y,z1);
   if (uv) { const u=(x1-x0)/s, v=(z1-z0)/s; uv.push(0,0, u,v, u,0,  0,0, 0,v, u,v); }
 }
-function surface(pos, uv, mat) {
+// The ground, lots, roads, kerbs, lane paint and crosswalks are all near-flat layers
+// stacked a couple of centimetres apart. Seen from a car that reads fine, but from the
+// air or the map the camera is hundreds of metres off and the depth buffer can no longer
+// tell 2 cm apart — so the layers z-fight and the roads flicker on and off. A polygon
+// offset biases each layer's depth by a fixed amount, so the paint always wins over the
+// road and the road always wins over the grass no matter how far away the camera is.
+function surface(pos, uv, mat, offset) {
   if (!pos.length) return null;
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos,3));
   if (uv) g.setAttribute('uv', new THREE.Float32BufferAttribute(uv,2));
   g.computeVertexNormals();
+  if (offset) { mat = mat.clone(); mat.polygonOffset = true; mat.polygonOffsetFactor = offset; mat.polygonOffsetUnits = offset; }
   const m = new THREE.Mesh(g, mat); m.receiveShadow = true; scene.add(m); return m;
 }
 
@@ -646,17 +653,17 @@ for (let i = 0; i < GN; i++) for (let j = 0; j < GN; j++) {
   const { c: rc, g: rg } = noiseCanvas(256, '#5b5570', 20);
   rg.strokeStyle = 'rgba(40,36,54,.35)'; rg.lineWidth = 3;
   for (let i = 0; i < 4; i++) { rg.beginPath(); const y = prng()*256; rg.moveTo(0,y); rg.lineTo(256, y+rnd(-18,18)); rg.stroke(); }
-  surface(roadPos, roadUV, toonMapped(tex(rc, null, 16)));
+  surface(roadPos, roadUV, toonMapped(tex(rc, null, 16)), -2);   // road sits above the grass
 
   const { c: wc, g: wg } = noiseCanvas(256, '#cfd3d8', 12);
   wg.strokeStyle = 'rgba(120,126,136,.65)'; wg.lineWidth = 4;
   for (let i = 0; i <= 4; i++) { const p = Math.round(i*64);
     wg.beginPath(); wg.moveTo(p,0); wg.lineTo(p,256); wg.stroke();
     wg.beginPath(); wg.moveTo(0,p); wg.lineTo(256,p); wg.stroke(); }
-  surface(walkPos, walkUV, toonMapped(tex(wc, null, 16)));
+  surface(walkPos, walkUV, toonMapped(tex(wc, null, 16)), -2);   // sidewalk above the grass
 
-  surface(dashPos, null, toon(0xf2c73c));
-  surface(zebraPos, null, toon(0xf2f2ee));
+  surface(dashPos, null, toon(0xf2c73c), -5);                    // lane paint above the road
+  surface(zebraPos, null, toon(0xf2f2ee), -5);                   // crosswalks above the road
 }
 
 // kerbs: a thin lip along both sides of every street, so sidewalks read as raised
@@ -2768,11 +2775,11 @@ const OPENING_DOOR = (() => {
   const { c } = noiseCanvas(128, '#7fc95d', 14);
   surface(lawnPos, null, toon(0x74c05a));
   const { c: dc } = noiseCanvas(128, '#b9b2a4', 14);
-  surface(drivePos, drivewayUV, toonMapped(tex(dc, null, 8)));
+  surface(drivePos, drivewayUV, toonMapped(tex(dc, null, 8)), -2);
   const { c: lc, g: lg } = noiseCanvas(256, '#6d6880', 16);
   lg.strokeStyle = 'rgba(240,240,230,.55)'; lg.lineWidth = 3;
   for (let i = 0; i < 256; i += 32) { lg.beginPath(); lg.moveTo(i, 30); lg.lineTo(i, 110); lg.stroke(); }
-  surface(lotPos, lotUV, toonMapped(tex(lc, null, 8)));
+  surface(lotPos, lotUV, toonMapped(tex(lc, null, 8)), -2);
 }
 
 // shop signs and billboards
@@ -9895,7 +9902,14 @@ function updateCamera(dt, now) {
     camera.updateProjectionMatrix();
     return;
   }
-  if (camera.near !== 0.4) { camera.near = 0.4; camera.updateProjectionMatrix(); }
+  // Up in the plane the camera is high and looking at ground hundreds of metres off, so
+  // (like the map) pull the near plane in with altitude for better depth precision — the
+  // chase cam sits ~17 m back, so there's no risk of clipping the plane. On foot/in a car
+  // the default 0.4 stays.
+  const wantNear = mode === 'plane'
+    ? THREE.MathUtils.clamp(plane.position.y * 0.06, 0.4, 12)
+    : 0.4;
+  if (camera.near !== wantNear) { camera.near = wantNear; camera.updateProjectionMatrix(); }
   scene.fog = townFog;
   if (riding) {
     // First person, straight from the seat. The mouse still looks around, added on top
