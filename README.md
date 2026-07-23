@@ -354,13 +354,15 @@ the thing that welds the job loop onto the chaos loop instead of competing with 
   unchanged — `flockHome()` returns the pen, with the castle hall as fallback
   if the pen ever fails to find a site. The castle stands empty (its gate and
   hall remain).
-- **YARD SOAKER — SHELVED.** The prison-break minigame (orange-jumpsuit runners
-  planting wall charges, blown breaches, the super soaker with reticule, water
-  jet and depleting tank bar) is fully built but **spiked by design decision**:
-  its giver, Warden Norris, is commented out in the markers block, which makes
-  the mission unreachable while every piece of machinery (`soak` def,
-  `spawnSoaker`/`updateSoak`/`blowWall`, the gun, reticule, tank bar, round
-  lockdown/eject) sits dormant behind it. Un-comment the marker to revive it.
+- **YARD SOAKER** (Warden Norris, outside the Penitentiary gate — opposite Lefty
+  Louie) — revived. Drive to the gate, raise the portcullis (F), step into the
+  yard and the round locks down: 60 s to hose down orange-jumpsuit runners with
+  the super-soaker (hold left click; a long blue water arc, a depleting tank bar
+  that refills only when you let go, a reticule you aim with the camera) before
+  they plant charges and blow the walls. Soaking one defuses their charge; an
+  existing breach is a free exit most runners take. **Now with real stakes**:
+  soak 5+ to clear it, and if 12 get away the breakout succeeds and you fail. Pays
+  by the tally (22/soak, +80 at 8, +200 at 12) plus coins and chaos per soak.
   The Penitentiary's **portcullis gate stays live** in free roam, and it is a
   one-way door with a joke attached: **F at the button outside** raises the bars
   for free, but the gate drops behind you, and from *inside* the yard the button
