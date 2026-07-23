@@ -7017,6 +7017,7 @@ let riding = null, rideExitCd = 0;
       }
       FAIR.push({ kind: 'carousel', label: 'CAROUSEL', x: mx, z: mz, r: 9.5,
                    spin, horses, t: 0, seat: 0, cx: mx, cz: mz });
+      FAIR.carousel = [mx, mz];        // the coaster sites itself across the street from here
       // the deck is solid so you cannot stand inside the machinery
       colliders.push({ minX: mx-7.2, maxX: mx+7.2, minZ: mz-7.2, maxZ: mz+7.2 });
     }
@@ -7081,8 +7082,15 @@ let riding = null, rideExitCd = 0;
                    cars, HW, HD, bx, bz, seat: 0, freeSeat: 0, cx: bx, cz: bz });
     }
 
-    // one board on the way in
-    const [sx0, sz0] = [cx - 20, cz - FD/2 + 2];
+    // one board on the way in — nudged off the carriageway if the plot edge lands on it
+    let sx0 = cx - 20, sz0 = cz - FD/2 + 2;
+    if (onRoad(sx0, sz0, 4)) {
+      let placed = false;
+      for (let dz = 0; dz <= 14 && !placed; dz += 2)
+        for (const s2 of [1, -1]) {                    // walk inward off the road
+          if (!onRoad(sx0, sz0 + s2*dz, 4)) { sz0 = sz0 + s2*dz; placed = true; break; }
+        }
+    }
     const brd = new THREE.Mesh(new THREE.PlaneGeometry(16, 4),
       new THREE.MeshBasicMaterial({ map: signTexture('MAPLEWOOD FAIR', '#7b4fa7', '#ffd23b', 512, 128),
                                     transparent: true, side: THREE.DoubleSide }));
@@ -7129,10 +7137,17 @@ let riding = null, rideExitCd = 0;
     [-54, 10, -24], [-40, 4, -34],                     // hill
     [-28, B, -40],                                     // and flatten home
   ];
-  const curve = new THREE.CatmullRomCurve3(CTRL.map(c => new THREE.Vector3(c[0], c[1], c[2])), true);
+  // Scaled to two-thirds so the whole loop fits in a fair-sized green — a full-size
+  // 124x82 loop couldn't validate near the dense fair and jumped ~300 m away. Uniform
+  // scale about the station height keeps every slope identical, just smaller.
+  const S = 0.46;
+  const curve = new THREE.CatmullRomCurve3(
+    CTRL.map(c => new THREE.Vector3(c[0]*S, B + (c[1]-B)*S, c[2]*S)), true);
   const SAMPLES = curve.getSpacedPoints(260);
-  // site: candidates spiral out from the fair, first one whose path validates wins
-  const fairAt = FAIR.at0 || [0, 0];
+  // site: candidates spiral out from the CAROUSEL — the user wants the coaster right
+  // across the street from it, not off on its own ground.
+  const fairAt = FAIR.carousel || FAIR.at0 || [0, 0];
+  const plot = FAIR.at0 || fairAt;              // the fair plot centre (its own reservation)
   const pathOK = (sx, sz) => {
     for (const p of SAMPLES) {
       const px = sx + p.x, pz = sz + p.z;
@@ -7140,27 +7155,40 @@ let riding = null, rideExitCd = 0;
       if (p.y < 14) {
         if (OCC.has(occKey(px, pz)) || pointBlocked(px, pz, 2.5)) return false;
         for (const tk of TAKEN) {
-          if (Math.hypot(tk.x - fairAt[0], tk.z - fairAt[1]) < 20) continue;  // the fair itself is fine to abut
+          // the fair's own plot reservation is where we WANT the coaster — skip it
+          if (Math.hypot(tk.x - plot[0], tk.z - plot[1]) < 6) continue;
           if (Math.abs(px - tk.x) < tk.w/2 + 3 && Math.abs(pz - tk.z) < tk.d/2 + 3) return false;
         }
       }
     }
     return true;
   };
-  let site = null;
-  outer:
-  for (let r = 0; r <= 420 && !site; r += 16) {
-    const steps = Math.max(1, Math.round(r/10));
-    for (let k = 0; k < steps; k++) {
-      const a = k/steps*Math.PI*2;
-      const sx = fairAt[0] + Math.cos(a)*r, sz = fairAt[1] + Math.sin(a)*r;
-      if (Math.abs(sx) > TOWN - 80 || Math.abs(sz) > TOWN - 80) continue;
-      if (pathOK(sx, sz)) { site = { x: sx, z: sz }; break outer; }
+  // Scan the fair plot interior on a fine grid and take the clear spot nearest the
+  // carousel. A polar spiral's angular steps skip the narrow valid window (the plot has
+  // a road clipping one edge that findGreen's coarse grid missed), so a direct scan is
+  // what actually finds the room that is there.
+  let site = null, bestD = Infinity;
+  for (let sx = plot[0] - 58; sx <= plot[0] + 58; sx += 4)
+    for (let sz = plot[1] - 22; sz <= plot[1] + 22; sz += 4) {
+      const d = (sx - fairAt[0])**2 + (sz - fairAt[1])**2;
+      if (d >= bestD) continue;
+      if (pathOK(sx, sz)) { bestD = d; site = { x: sx, z: sz }; }
+    }
+  if (!site) {                                      // fallback: spiral out across town
+    outer:
+    for (let r = 12; r <= 360; r += 12) {
+      const steps = Math.max(16, Math.round(r));
+      for (let k = 0; k < steps; k++) {
+        const a = k/steps*Math.PI*2;
+        const sx = fairAt[0] + Math.cos(a)*r, sz = fairAt[1] + Math.sin(a)*r;
+        if (Math.abs(sx) > TOWN - 80 || Math.abs(sz) > TOWN - 80) continue;
+        if (pathOK(sx, sz)) { site = { x: sx, z: sz }; break outer; }
+      }
     }
   }
   if (site) {
     const cx = site.x, cz = site.z;
-    TAKEN.push({ x: cx, z: cz, w: 140, d: 100 });
+    TAKEN.push({ x: cx, z: cz, w: 140*S, d: 100*S });
     const mesh2 = (geo, col, x, y, z) => {
       const m = new THREE.Mesh(geo, toon(col));
       m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true;
@@ -7175,7 +7203,7 @@ let riding = null, rideExitCd = 0;
     };
     let crestU = 0, crestY = 0;
     SAMPLES.forEach((p, i) => { if (p.y > crestY) { crestY = p.y; crestU = i / (SAMPLES.length - 1); } });
-    const stopU = uNear(2, -40), brakeU = uNear(-40, -34);
+    const stopU = uNear(2*S, -40*S), brakeU = uNear(-40*S, -34*S);
     // rails: two offset tubes, ties, posts down to the ground
     const up = new THREE.Vector3(0, 1, 0);
     const railCurve = (sgn) => {
@@ -7215,7 +7243,7 @@ let riding = null, rideExitCd = 0;
     }
     scene.add(cart);
     // the station: platform beside the flat run, stairs up, all walking surface
-    const stx = cx + 2, stz = cz - 43.4, deckH = B - 0.3, deckTop = deckH + 0.22;
+    const stx = cx + 2*S, stz = cz - 40*S - 2.6, deckH = B - 0.3, deckTop = deckH + 0.22;
     mesh2(BOX(9.5, deckH, 5.4), 0x8c6a44, stx, deckH/2, stz);
     mesh2(BOX(9.9, 0.22, 5.8), 0xa8845c, stx, deckH + 0.11, stz);
     for (const sxp of [-4, 4]) mesh2(BOX(0.3, 3.4, 0.3), 0x6b6f76, stx + sxp, deckH + 1.7, stz);
@@ -7941,12 +7969,11 @@ const rideSeat = (R) => {
   if (R.kind === 'coaster') {
     const [x, y, z] = R.P(R.t), [x2, , z2] = R.P(R.t + 0.0025);
     const yaw = Math.atan2(x2 - x, z2 - z);
-    // Sat at the front of the cart, not in the middle of it. At the cart's own origin
-    // the camera is inside the nose cone and the screen is a red octagon; a metre back
-    // and the body fills the bottom half. Forward of the body and just above the cone,
-    // you get what a coaster POV should be: the nose dipping over the crest and the
-    // rails running away in front of you.
-    return { x: x + Math.sin(yaw)*0.55, y: y + 1.45, z: z + Math.cos(yaw)*0.55, yaw };
+    // Sat BEHIND the cart's centre and up, looking forward — so you see the cart you are
+    // riding in: its body and the red nose cone dip away ahead of you over each crest,
+    // and the rails run out in front. (Ahead of the cart, as it was, the body is off
+    // screen behind you and there is nothing to tell you what you are in.)
+    return { x: x - Math.sin(yaw)*1.5, y: y + 1.9, z: z - Math.cos(yaw)*1.5, yaw };
   }
   const c = R.cars[R.seat];
   return { x: c.x, y: 1.66, z: c.z, yaw: c.yaw };
