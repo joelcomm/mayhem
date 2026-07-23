@@ -5691,22 +5691,71 @@ function coinSfx() {
 let bleepT = 0;
 
 // ---- the rest of the town's noises ----
+// A low bed under everything: two barely-detuned sines that beat against each
+// other over ~8 s plus a whisper of third harmonic. Felt more than heard — it
+// mostly registers when you mute and the town goes dead. Routed through the
+// master gain like everything else, so mute still costs one number.
+let humBuilt = false;
+function ensureHum() {
+  if (!sirenCtx || humBuilt) return;
+  humBuilt = true;
+  for (const [f, g0, type] of [[50, 0.009, 'sine'], [50.12, 0.009, 'sine'], [150, 0.0025, 'triangle']]) {
+    const o = sirenCtx.createOscillator(), g = sirenCtx.createGain();
+    o.type = type; o.frequency.value = f; g.gain.value = g0;
+    o.connect(g); g.connect(sirenOut); o.start();
+  }
+}
 // The engine is the one sound that can't be a scheduled one-shot: a persistent
-// sawtooth whose pitch rides the speed, with its gain gated by whether you drive.
+// oscillator whose pitch rides the speed, with its gain gated by whether you
+// drive. Each body type has its own voice — a truck idles lower and squarer
+// than a compact — so a NEW RIDE from Gus's sounds different, not just looks it.
+const ENGINE_VOICE = {
+  convert: { type: 'sawtooth', base: 44, mul: 2.7, g: 1.0 },
+  sedan:   { type: 'sawtooth', base: 52, mul: 2.9, g: 1.0 },
+  wagon:   { type: 'triangle', base: 38, mul: 2.4, g: 1.7 },
+  compact: { type: 'square',   base: 60, mul: 3.4, g: 0.7 },
+  truck:   { type: 'square',   base: 29, mul: 1.9, g: 0.9 },
+};
 let engineOsc = null, engineGain = null;
 function updateEngine() {
   if (!sirenCtx) return;
+  ensureHum();
   if (!engineOsc) {
     engineOsc = sirenCtx.createOscillator(); engineOsc.type = 'sawtooth';
     engineGain = sirenCtx.createGain(); engineGain.gain.value = 0;
     engineOsc.connect(engineGain); engineGain.connect(sirenOut);
     engineOsc.start();
   }
+  const v = ENGINE_VOICE[carType] || ENGINE_VOICE.convert;
+  if (engineOsc.type !== v.type) engineOsc.type = v.type;
   const driving = mode === 'car' && drowning <= 0;
-  const f = 44 + Math.abs(speed) * 2.7 + Math.sin(performance.now() * 0.02) * 1.5;
+  const f = v.base + Math.abs(speed) * v.mul + Math.sin(performance.now() * 0.02) * 1.5;
   engineOsc.frequency.setTargetAtTime(f, sirenCtx.currentTime, 0.05);
-  const g = driving ? 0.012 + (Math.abs(speed) / MAX_SPEED) * 0.022 : 0;
+  const g = driving ? (0.012 + (Math.abs(speed) / MAX_SPEED) * 0.022) * v.g : 0;
   engineGain.gain.setTargetAtTime(g, sirenCtx.currentTime, 0.08);
+}
+// Ride sounds, while you're in the seat: a music-box waltz on the carousel, a
+// track rattle on the coaster (silent in the station), a motor buzz in the
+// bumper car. All scheduled one-shots, so mute needs nothing special.
+const CAROUSEL_TUNE = [523, 659, 784, 659, 698, 587, 784, 523, 659, 784, 880, 784, 698, 659, 587, 523];
+let rideBeat = 0, rideSndT = 0;
+function updateRideAudio(dt) {
+  if (!sirenCtx || !riding) { rideBeat = 0; rideSndT = 0; return; }
+  rideSndT -= dt;
+  if (rideSndT > 0) return;
+  const t = sirenCtx.currentTime;
+  if (riding.kind === 'carousel') {
+    rideSndT = 0.3;
+    tone(CAROUSEL_TUNE[rideBeat % CAROUSEL_TUNE.length], t, 0.22, 0.045, 'triangle');
+    if (rideBeat % 4 === 0) tone(262, t, 0.28, 0.028, 'triangle');
+    rideBeat++;
+  } else if (riding.kind === 'coaster') {
+    rideSndT = 0.09;
+    if (riding.wait <= 0) tone(70 + rnd(-8, 8), t, 0.03, 0.03, 'square');
+  } else {
+    rideSndT = 0.13;
+    tone(96 + rnd(-6, 6), t, 0.08, 0.02, 'sawtooth');
+  }
 }
 let crashT = 0, dingT = 0, sayT = 0;
 function crashSfx(impact) {                        // wall and building thumps
@@ -5866,6 +5915,7 @@ function updateChaos(dt) {
   if (dingT > 0) dingT -= dt;
   if (sayT > 0) sayT -= dt;
   updateEngine();
+  updateRideAudio(dt);
 
   // While you're wanted the combo is held, not ticking down: it banks at a bonus when
   // you shake them off, and is lost entirely if they take you. Without this the run
