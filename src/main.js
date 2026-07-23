@@ -5076,6 +5076,8 @@ const player = buildPerson(HERO_LOOK);
 player.visible = false; scene.add(player);
 const playerVel = new THREE.Vector3();
 let playerOnGround = true, canDouble = false;
+let chuteReady = false, chuteOpen = false;      // bail out of the plane, then pull the chute
+const CHUTE_FALL = 4.5;                          // terminal descent under the open canopy (m/s)
 
 // The rider sitting in the player's car. He used to be parked at one fixed height that
 // suited the convertible, so in anything with a roof his head went straight through the
@@ -5113,6 +5115,21 @@ function blobShadow(size) {
 }
 const carShadow = blobShadow(8), playerShadow = blobShadow(2.6);
 
+// the eject parachute — a canopy dome with a cone of shroud lines, floated above the
+// player while it's open and hidden the rest of the time
+const chute = new THREE.Group();
+{
+  const canopy = new THREE.Mesh(
+    new THREE.SphereGeometry(2.7, 18, 10, 0, Math.PI*2, 0, Math.PI*0.52),
+    new THREE.MeshToonMaterial({ color: 0xe8532f, gradientMap: RAMP, side: THREE.DoubleSide }));
+  canopy.position.y = 3.4; chute.add(canopy);
+  const shroud = new THREE.Mesh(new THREE.ConeGeometry(2.5, 2.5, 12, 1, true),
+    new THREE.MeshBasicMaterial({ color: 0x2b2f38, wireframe: true }));
+  shroud.position.y = 2.05; shroud.rotation.x = Math.PI;   // base up at the canopy, apex at the pilot
+  chute.add(shroud);
+}
+chute.visible = false; scene.add(chute);
+
 // =================================================================
 //  INPUT
 // =================================================================
@@ -5148,7 +5165,11 @@ addEventListener('keydown', e => {
   }
   if (e.code === 'KeyC') camIdx = (camIdx+1) % 3;
   if (e.code === 'KeyM') mapView = !mapView;
-  if (e.code === 'KeyR') resetAll();
+  if (e.code === 'KeyR') {
+    if (mode === 'plane') ejectPlane();                                  // bail out of the cockpit
+    else if (mode === 'foot' && !playerOnGround && chuteReady && !chuteOpen) deployChute();
+    else resetAll();
+  }
   // ride, gate, doorway, then the shop games, then car — F is the one interact key
   if (e.code === 'KeyF' && !tryRide() && !tryGate() && !tryDoor() && !tryBowl() &&
       !tryRush() && !tryWhack() && !tryDance() && !tryPint() &&
@@ -5417,8 +5438,20 @@ function updatePlayer(dt) {
   player.position.z = THREE.MathUtils.clamp(rc.z, -TOWN-40, TOWN+40);
   const pgy = surfaceY(player.position.x, player.position.z, player.position.y);
   playerVel.y -= GRAV*dt;
+  if (chuteOpen && !playerOnGround && playerVel.y < -CHUTE_FALL) playerVel.y = -CHUTE_FALL;   // canopy drag
   player.position.y += playerVel.y*dt;
-  if (player.position.y <= pgy) { player.position.y = pgy; playerVel.y = 0; playerOnGround = true; canDouble = false; }
+  if (player.position.y <= pgy) {
+    const hard = chuteReady && !chuteOpen && playerVel.y < -18;
+    player.position.y = pgy; playerVel.y = 0; playerOnGround = true; canDouble = false;
+    if (chuteReady || chuteOpen) {                 // touched down from a bail-out
+      if (chuteOpen) toast('SAFE LANDING');
+      else if (hard) { shake = Math.max(shake, 1.5); toast('OOF — no chute!'); }
+      chuteReady = false; chuteOpen = false; chute.visible = false;
+    }
+  }
+  // float the open canopy above the pilot while he's still in the air
+  if (chuteOpen && !playerOnGround) { chute.visible = true; chute.position.set(player.position.x, player.position.y + 1.05, player.position.z); }
+  else if (chute.visible) chute.visible = false;
   if (inWater(player.position.x, player.position.z) && player.position.y < WATER_Y + 1.4) {
     for (let k = 0; k < 20; k++)
       emit(tmpV.set(player.position.x + rnd(-1.6,1.6), WATER_Y + 0.4, player.position.z + rnd(-1.6,1.6)),
@@ -7661,11 +7694,10 @@ let planeSpeed = 0, planePitch = 0, planeRoll = 0, planeHeading = 0;
 const PLANE_SPAWN = { x: 0, z: 0, heading: 0 };
 const plane = new THREE.Group(); plane.rotation.order = 'YXZ'; plane.visible = false; scene.add(plane);
 let planeShadow = null;
-const SKYRINGS = [], skyRingMeshes = [];
 // flight tuning
 const PLANE_MAX = 58, PLANE_ACCEL = 20, PLANE_DECEL = 24, PLANE_DRAG = 5, PLANE_BRAKE = 40,
       PLANE_TAKEOFF = 24, PITCH_RATE = 1.0, PITCH_MAX = 0.55, ROLL_MAX = 0.8, ROLL_RATE = 1.9,
-      YAW_RATE = 0.75, GROUND_STEER = 1.5, SINK = 11, CRASH_VY = 18;
+      YAW_RATE = 0.75, GROUND_STEER = 1.5, STALL_FALL = 15, CRASH_VY = 18;
 
 function buildPlane() {
   const g = new THREE.Group();
@@ -7772,24 +7804,9 @@ if (AIRPORT) {
   plane.visible = true;
   planeShadow = blobShadow(9);
 
-  // the sky-ring course — a scenic loop of gates at altitude, all inside the ring road
-  const RC = 8;
-  for (let i = 0; i < RC; i++) {
-    const a = (i / RC) * Math.PI * 2 + 0.4;
-    const R = 340 + (i % 2) * 80;
-    SKYRINGS.push({ x: Math.cos(a) * R, z: Math.sin(a) * R, y: 24 + (i % 3) * 10, r: 8 });
-  }
-  const ringGeo = new THREE.TorusGeometry(8, 0.7, 10, 28);
-  for (let i = 0; i < SKYRINGS.length; i++) {
-    const s = SKYRINGS[i], nx = SKYRINGS[(i + 1) % SKYRINGS.length];
-    const m = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd23b, transparent: true, opacity: 0.85 }));
-    m.position.set(s.x, s.y, s.z); m.lookAt(nx.x, nx.y, nx.z);   // hole faces the next gate
-    m.visible = false; m.renderOrder = 4; scene.add(m); skyRingMeshes.push(m);
-  }
-  // Pilot Pete, right beside the plane so boarding starts the run
-  if (addJobMarker) addJobMarker(PLANE_SPAWN.x - 3, PLANE_SPAWN.z - 3,
-    'PILOT PETE', 'Take her up and thread every ring before the fuel runs dry!', 'skyrings');
-  console.log(`airport at ${ax|0},${az|0} · runway ${RWL}m · ${SKYRINGS.length} sky rings`);
+  // (The sky-ring BARNSTORMER course is removed for now — the plane is free-flight only.
+  //  Walk up and press F to fly.)
+  console.log(`airport at ${ax|0},${az|0} · runway ${RWL}m · free-flight`);
 } else {
   plane.position.set(1e6, 0, 1e6);   // no room found — keep it off-world, unboardable
   console.log('airport: no clear parcel found');
@@ -7799,14 +7816,6 @@ function nearPlane() {
   return mode === 'foot' && !playerRag.active && AIRPORT &&
     (plane.position.x - player.position.x)**2 + (plane.position.z - player.position.z)**2 < 49;
 }
-function highlightRing(i) {
-  for (let k = 0; k < skyRingMeshes.length; k++) {
-    const cur = k === i;
-    skyRingMeshes[k].material.color.setHex(cur ? 0x7ef0a0 : 0xffd23b);
-    skyRingMeshes[k].material.opacity = cur ? 0.95 : 0.5;
-    skyRingMeshes[k].scale.setScalar(cur ? 1 : 0.9);
-  }
-}
 function planeHome() {
   if (!AIRPORT) return;
   plane.position.set(PLANE_SPAWN.x, surfaceY(PLANE_SPAWN.x, PLANE_SPAWN.z), PLANE_SPAWN.z);
@@ -7814,10 +7823,15 @@ function planeHome() {
   plane.rotation.set(0, planeHeading, 0);
 }
 function planeCrash() {
-  burst(plane.position.x, plane.position.y + 0.6, plane.position.z, 0xff7a2b, 22);
-  burst(plane.position.x, plane.position.y + 0.6, plane.position.z, 0x40424a, 14);
-  shake = 2.0; toast('CRASH! back to the apron');
-  missionEvent('reset');                       // fails BARNSTORMER if it was on
+  const px = plane.position.x, py = plane.position.y + 0.6, pz = plane.position.z;
+  burst(px, py, pz, 0xff7a2b, 34);             // fireball
+  burst(px, py, pz, 0xffd23b, 22);             // sparks
+  burst(px, py, pz, 0x40424a, 20);             // smoke
+  for (let k = 0; k < 12; k++)                 // flung debris
+    emit(tmpV.set(px, py, pz),
+      new THREE.Vector3(rnd(-9, 9), rnd(4, 14), rnd(-9, 9)), 0x2b2f38, rnd(0.3, 0.6), 0.7, 1.6);
+  shake = 2.6; crashSfx(60); toast('CRASH! back to the apron');
+  missionEvent('reset');
   planeHome();
   mode = 'foot'; player.visible = true; rider.visible = false;
   player.position.set(PLANE_SPAWN.x + 4, 0, PLANE_SPAWN.z);
@@ -7838,7 +7852,32 @@ function tryPlane() {
   if (!nearPlane()) return false;
   mode = 'plane'; player.visible = false; rider.visible = false;
   planeSpeed = 0; planePitch = 0; planeRoll = 0; camYaw = planeHeading;
-  toast('W/S throttle · A/D turn · Q/E roll · Space nose-up · Ctrl nose-down');
+  toast('W/S throttle · A/D turn · Q/E roll · Space up · Ctrl down · R eject');
+  return true;
+}
+// bail out: leave the plane in mid-air and fall. The plane flies itself home to the apron;
+// hit R again to pull the chute before you meet the ground.
+function ejectPlane() {
+  if (mode !== 'plane') return false;
+  const fx = Math.sin(planeHeading), fz = Math.cos(planeHeading);
+  const horiz = planeSpeed * Math.cos(planePitch);
+  const gy = surfaceY(plane.position.x, plane.position.z);
+  mode = 'foot'; player.visible = true; rider.visible = false;
+  player.position.set(plane.position.x, Math.max(plane.position.y, gy + 1) + 1.4, plane.position.z);
+  player.rotation.set(0, planeHeading, 0);
+  playerVel.set(fx*horiz*0.35, 6.5, fz*horiz*0.35);      // flung up and forward out of the cockpit
+  playerOnGround = false; canDouble = false;
+  chuteReady = true; chuteOpen = false;
+  planeHome();                                            // the empty plane returns to its stand
+  shake = 0.8;
+  toast('EJECT!  press R again to pull the chute');
+  return true;
+}
+function deployChute() {
+  if (mode !== 'foot' || playerOnGround || !chuteReady || chuteOpen) return false;
+  chuteOpen = true;
+  if (playerVel.y < -CHUTE_FALL) playerVel.y = -CHUTE_FALL;   // the canopy bites at once
+  toast('CHUTE OPEN — glide her down');
   return true;
 }
 function updatePlane(dt) {
@@ -7860,31 +7899,42 @@ function updatePlane(dt) {
   else planeSpeed -= PLANE_DRAG*dt;
   planeSpeed = THREE.MathUtils.clamp(planeSpeed, 0, PLANE_MAX);
 
-  // yaw: A/D turn left/right with no pitch coupling. Car-like on the ground (steering
-  // scales with speed, none when stopped); a steady flat turn once flying.
+  // yaw: A = turn left, D = turn right. Car-like on the ground (steering scales with
+  // speed, none when stopped); a steady flat turn once flying.
   const yawIn = (K('KeyD') ? 1 : 0) - (K('KeyA') ? 1 : 0);
-  if (flying) planeHeading -= yawIn * YAW_RATE * dt;
-  else planeHeading -= yawIn * GROUND_STEER * THREE.MathUtils.clamp(planeSpeed/12, 0, 1) * dt;
+  if (flying) planeHeading += yawIn * YAW_RATE * dt;
+  else planeHeading += yawIn * GROUND_STEER * THREE.MathUtils.clamp(planeSpeed/12, 0, 1) * dt;
 
-  // pitch: Space = nose up, Ctrl = nose down. Held flat while taxiing; gentle auto-level
-  // in the air so letting go settles toward level flight.
+  // pitch: Space = nose up, Ctrl = nose down. Flat while taxiing. In the air, hands-off,
+  // the nose SAGS — gently under power (holds near level) but hard toward a dive with the
+  // throttle closed. So idling never hovers: cut the power and you descend, and you'll fly
+  // it into the ground unless you throttle up and pull the nose back level.
   const pIn = (K('Space') ? 1 : 0) - (K('ControlLeft') || K('ControlRight') ? 1 : 0);
-  if (!flying) planePitch += (0 - planePitch) * Math.min(1, dt*6);
-  else { planePitch += pIn * PITCH_RATE * dt; if (!pIn) planePitch += (0 - planePitch) * Math.min(1, dt*0.8); }
+  if (!flying) {
+    planePitch += (0 - planePitch) * Math.min(1, dt*6);
+  } else if (pIn) {
+    planePitch += pIn * PITCH_RATE * dt;
+  } else {
+    const powered = K('KeyW');
+    const sag = powered ? 0 : -PITCH_MAX*0.85;               // throttle closed -> nose drops
+    planePitch += (sag - planePitch) * Math.min(1, dt*(powered ? 0.9 : 1.6));
+  }
   planePitch = THREE.MathUtils.clamp(planePitch, -PITCH_MAX, PITCH_MAX);
 
-  // roll: Q/E bank the wings, self-levelling when you let go. A banked wing also slips
-  // the nose round a touch, the way a real coordinated turn does.
-  const rIn = (K('KeyE') ? 1 : 0) - (K('KeyQ') ? 1 : 0);
+  // roll: Q = bank left, E = bank right — and the bank now matches the way it turns, a
+  // banked wing slipping the nose round the same direction it dips (Q left, E right).
+  const rIn = (K('KeyQ') ? 1 : 0) - (K('KeyE') ? 1 : 0);
   if (flying) { planeRoll += rIn * ROLL_RATE * dt; if (!rIn) planeRoll += (0 - planeRoll) * Math.min(1, dt*1.5); planeHeading -= planeRoll * 0.5 * dt; }
   else planeRoll += (0 - planeRoll) * Math.min(1, dt*6);
   planeRoll = THREE.MathUtils.clamp(planeRoll, -ROLL_MAX, ROLL_MAX);
 
   const lift = THREE.MathUtils.clamp(planeSpeed / PLANE_TAKEOFF, 0, 1);
-  // vertical: climb from airspeed×nose-up when there's lift, sink when stalled
+  // vertical: airspeed on the wing turns the nose angle into climb or dive; too slow and
+  // the wing stops flying and you simply fall. No hover — level cruise only holds because
+  // the nose stays level under power.
   let vy;
   if (!flying) vy = 0;
-  else vy = planeSpeed * Math.sin(planePitch) * lift - SINK * (1 - lift);
+  else vy = planeSpeed * Math.sin(planePitch) * lift - STALL_FALL * (1 - lift);
 
   const fx = Math.sin(planeHeading), fz = Math.cos(planeHeading);
   const horiz = planeSpeed * Math.cos(planePitch);
@@ -7901,8 +7951,10 @@ function updatePlane(dt) {
   const gy2 = surfaceY(nx, nz);
   plane.position.x = nx; plane.position.z = nz;
   if (ny <= gy2) {                                   // touching down
-    const steep = Math.abs(planePitch) > 0.5 || Math.abs(planeRoll) > 0.55;
-    if ((-vy > CRASH_VY || steep) && planeSpeed > 12) { planeCrash(); return; }
+    // a safe landing is flat and slow: nose near level, wings level. Come in nose-down
+    // (a dive) or dropping fast and you pile in.
+    const steep = Math.abs(planePitch) > 0.3 || Math.abs(planeRoll) > 0.5;
+    if ((-vy > CRASH_VY || steep) && planeSpeed > 8) { planeCrash(); return; }
     plane.position.y = gy2; planePitch = 0;
   } else plane.position.y = ny;
   if (inWater(plane.position.x, plane.position.z) && plane.position.y < WATER_Y + 2.2) { planeCrash(); return; }
@@ -9548,42 +9600,6 @@ const MISSION_DEFS = {
       return 'checkpoint <b>' + (m.data.count + 1) + '/' + ringCheckpoints().length + '</b> · ' +
         Math.round(Math.hypot(tg.x - sub.x, tg.z - sub.z)) + 'm · lap ' + fmtT(m.data.lapT);
     },
-  },
-  skyrings: {
-    needsPlane: true,
-    title: 'BARNSTORMER', late: 'ran out of fuel',
-    start(m) {
-      m.data.i = 0; m.timed = true;
-      let per = 0;
-      for (let k = 0; k < SKYRINGS.length; k++) {
-        const a = SKYRINGS[k], b = SKYRINGS[(k + 1) % SKYRINGS.length];
-        per += Math.hypot(b.x - a.x, b.z - a.z);
-      }
-      m.data.par = per/26 + 26; m.t = m.data.par;
-      for (const r of skyRingMeshes) r.visible = true;
-      highlightRing(0);
-      setTarget(SKYRINGS[0].x, SKYRINGS[0].z, 60, 'fly through the rings');
-    },
-    update(m, dt, sub) {
-      if (mode !== 'plane') { failMission('you left the plane'); return; }
-      const ring = SKYRINGS[m.data.i];
-      const dx = plane.position.x - ring.x, dy = plane.position.y - ring.y, dz = plane.position.z - ring.z;
-      if (dx*dx + dy*dy + dz*dz < (ring.r + 2)*(ring.r + 2)) {
-        coinSfx(); burst(ring.x, ring.y, ring.z, 0xffd23b, 16);
-        m.data.i++;
-        if (m.data.i >= SKYRINGS.length) {
-          winMission(180 + Math.round(m.t*9), SKYRINGS.length + ' rings · ' + fmtT(m.data.par - m.t) + ' left ' + fmtT(m.t));
-          return;
-        }
-        highlightRing(m.data.i);
-        const nr = SKYRINGS[m.data.i];
-        setTarget(nr.x, nr.z, 60, null);
-      }
-    },
-    hud(m) {
-      return 'ring <b>' + (m.data.i + 1) + '/' + SKYRINGS.length + '</b> · alt ' + Math.max(0, Math.round(plane.position.y)) + 'm';
-    },
-    cleanup(m, won) { for (const r of skyRingMeshes) r.visible = false; },
   },
   getaway: {
     needsCar: true,
