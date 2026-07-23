@@ -10471,12 +10471,28 @@ function animate() {
 
 const loader = document.getElementById('loader');
 const bar = loader.querySelector('.bar i');
+// The title / instructions screen: once the town is built we hold the sim paused behind it
+// and wait for the player to press any key (or tap) before the game runs.
+const startScreen = document.getElementById('start');
+let gameStarted = false;
+function beginGame() {
+  if (gameStarted) return;
+  gameStarted = true;
+  startScreen.classList.remove('show');
+  paused = false;
+  sirenInit();                                       // the tap/keypress is the audio gesture too
+}
+// Capture phase so the first key just dismisses the splash instead of also driving/jumping.
+addEventListener('keydown', e => { if (!gameStarted) { e.preventDefault(); e.stopPropagation(); beginGame(); } }, true);
+startScreen.addEventListener('pointerdown', e => { e.preventDefault(); beginGame(); });
 let prog = 0;
 const li = setInterval(() => {
   prog = Math.min(100, prog + 25); bar.style.width = prog + '%';
   if (prog >= 100) {
     clearInterval(li);
     setTimeout(() => { loader.style.opacity = '0'; setTimeout(() => loader.remove(), 700); }, 220);
+    paused = true;                                   // freeze the town under the splash
+    startScreen.classList.add('show');
     animate();
   }
 }, 110);
