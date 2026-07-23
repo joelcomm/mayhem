@@ -7429,9 +7429,35 @@ const PEN = { inner: null, walls: [] };
       const p = new THREE.Mesh(BOX(0.5, 4.6, 0.5), toon(0x6b6f76));
       p.position.set(cx + sx, 2.3, cz + D/2 + 0.4); scene.add(p);
     }
+    // The gate itself — a swing section across the south gap, on Nurse Mabel's side.
+    // Closed until Feather Frenzy is accepted (so the flock can't wander out and you
+    // can't wander in early); the mission opens it and shuts it again on the way out.
+    {
+      // two rails plus end posts spanning the gap
+      const gm = [];
+      gm.push(baked(BOX(0.18, 1.0, 0.18), -GATE/2 + 0.09, 0.5, 0));
+      gm.push(baked(BOX(0.18, 1.0, 0.18),  GATE/2 - 0.09, 0.5, 0));
+      for (const h of [0.42, 0.86]) gm.push(baked(BOX(GATE, 0.1, 0.1), 0, h, 0));
+      const gate = new THREE.Mesh(merge(gm), toon(0xf6f3ea));
+      gate.position.set(cx, 0, cz + D/2); gate.castShadow = true; scene.add(gate);
+      const block = { minX: cx - GATE/2, maxX: cx + GATE/2, minZ: cz + D/2 - 0.2, maxZ: cz + D/2 + 0.2 };
+      colliders.push(block); PEN.walls.push(block);
+      PEN.gate = { mesh: gate, block, closed: true, cz: cz + D/2 };
+    }
     if (addJobMarker) addJobMarker(cx, cz + D/2 + 9,
       'NURSE MABEL', "The flock's gone feral down at the farm. Boot me seven of them!", 'feather');
     console.log(`farm pen at ${cx|0},${cz|0}`);
+  }
+}
+// open/close the pen gate: hide the swing section and park its collider far away
+function setPenGate(open) {
+  const g = PEN.gate; if (!g) return;
+  g.closed = !open;
+  g.mesh.visible = !open;
+  if (open) { g.block.minX = g.block.maxX = g.block.minZ = g.block.maxZ = 1e9; }
+  else {
+    g.block.minX = PEN.inner.cx - 3; g.block.maxX = PEN.inner.cx + 3;
+    g.block.minZ = g.cz - 0.2; g.block.maxZ = g.cz + 0.2;
   }
 }
 
@@ -8885,9 +8911,11 @@ const MISSION_DEFS = {
     title: 'FEATHER FRENZY', late: 'the flock outlasted you',
     start(m) {
       const r = PEN.inner || CASTLE.inner;
+      setPenGate(true);                                  // Mabel swings the gate open for you
       m.timed = true; m.t = driveTime(m.giver.x, m.giver.z, r.cx || (r.x0+r.x1)/2, r.cz || (r.z0+r.z1)/2, 13) + 30;
-      setTarget((r.x0 + r.x1)/2, (r.z0 + r.z1)/2, 10, 'get into the pen on foot');
+      setTarget((r.x0 + r.x1)/2, (r.z0 + r.z1)/2, 10, 'the gate is open — get into the pen on foot');
     },
+    cleanup() { setPenGate(false); },                    // and shuts it again after
     update(m, dt, sub) {
       if (m.stage === 0) {
         // on foot only — this one's about the boot, not the bumper
