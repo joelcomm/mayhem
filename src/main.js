@@ -140,6 +140,7 @@ function tagNoInk(root) {
 const hemi = new THREE.HemisphereLight(0xcdeaff, 0x6f8a52, 2.1);
 scene.add(hemi);
 const sunDir = new THREE.Vector3(0.42, 0.78, 0.32).normalize();
+let riverWater = null;                        // the river's ShaderMaterial — uTime fed per frame
 const sun = new THREE.DirectionalLight(0xfff6e2, 2.5);
 sun.castShadow = true;
 sun.shadow.mapSize.set(4096, 4096);
@@ -2736,7 +2737,58 @@ const railCols = [];   // bridge-rail colliders, deferred past the scatter filte
   const wg = new THREE.BufferGeometry();
   wg.setAttribute('position', new THREE.Float32BufferAttribute(water,3));
   wg.computeVertexNormals();
-  const wm = new THREE.Mesh(wg, new THREE.MeshToonMaterial({ color: 0x3f8fd8, gradientMap: RAMP, transparent: true, opacity: 0.9 }));
+  // The water is the one custom shader in the game. Ripples are four summed sines
+  // over world xz (drifting along +x, the way the river runs); the normal is a
+  // finite difference of that height field, lit in three hard toon bands with a
+  // stepped sun glint and a fresnel lift toward the sky at grazing angles — so it
+  // reads as the same cartoon world, just alive. Transparent + depthWrite:false
+  // keeps it invisible to the ink pass, exactly like the toon material it replaced.
+  riverWater = new THREE.ShaderMaterial({
+    transparent: true, depthWrite: false,
+    uniforms: {
+      uTime: { value: 0 },
+      uSun: { value: sunDir },                 // by reference: tracks the day cycle for free
+      uDeep: { value: new THREE.Color(0x2e6cb0) },
+      uShallow: { value: new THREE.Color(0x58a4e0) },
+      uSky: { value: new THREE.Color(0xcfe9ff) },
+    },
+    vertexShader: `
+      varying vec3 vWorld;
+      void main() {
+        vec4 wp = modelMatrix * vec4(position, 1.0);
+        vWorld = wp.xyz;
+        gl_Position = projectionMatrix * viewMatrix * wp;
+      }`,
+    fragmentShader: `
+      uniform float uTime;
+      uniform vec3 uSun, uDeep, uShallow, uSky;
+      varying vec3 vWorld;
+      float wave(vec2 p) {
+        p.x -= uTime * 2.0;                    // the whole field drifts downstream
+        return sin(p.x*0.23 + uTime*0.9) * 1.4
+             + sin(p.x*0.11 - p.y*0.19 + uTime*0.6) * 1.8
+             + sin(p.y*0.31 + uTime*1.4) * 1.0
+             + sin((p.x+p.y)*0.53 - uTime*1.9) * 0.7;
+      }
+      void main() {
+        vec2 p = vWorld.xz * 1.4;              // a touch finer than world scale — big
+        float e = 0.7;                          // blobs read as a lake, not a river
+        float h0 = wave(p);
+        // deliberately over-steep normals: a physically-sized ripple quantizes to one
+        // flat toon band and the river reads as paint again
+        vec3 n = normalize(vec3(h0 - wave(p + vec2(e, 0.0)), 1.6, h0 - wave(p + vec2(0.0, e))));
+        float d = max(dot(n, normalize(uSun)), 0.0);
+        float band = floor(clamp((d - 0.35) * 1.6, 0.0, 0.999) * 3.0) / 2.0;
+        vec3 col = mix(uDeep, uShallow, band);
+        vec3 view = normalize(cameraPosition - vWorld);
+        float fres = pow(1.0 - max(view.y, 0.0), 2.0);
+        col = mix(col, uSky, fres * 0.5);
+        float spec = pow(max(dot(n, normalize(normalize(uSun) + view)), 0.0), 30.0);
+        col = mix(col, vec3(1.0), step(0.6, spec) * 0.7);   // hard-edged cartoon glints
+        gl_FragColor = vec4(col, 0.88);
+      }`,
+  });
+  const wm = new THREE.Mesh(wg, riverWater);
   wm.renderOrder = 1; scene.add(wm);
   const bg = new THREE.BufferGeometry();
   bg.setAttribute('position', new THREE.Float32BufferAttribute(bank,3));
@@ -8523,6 +8575,7 @@ function animate() {
 
   updateLights(dt);
   updateSky(dt);
+  if (riverWater) riverWater.uniforms.uTime.value += dt;
   updateHeadlights();
   updateCar(dt);
   updatePlayer(dt);
