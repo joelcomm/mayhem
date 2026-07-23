@@ -8379,6 +8379,29 @@ function updateHUD(dt) {
   rd.fillStyle = '#3fa9d8';
   for (const t of traffic) { const bx=(t.x-px)*sc, bz=(t.z-pz)*sc;
     if (bx*bx+bz*bz < R*R) rd.fillRect(bx-1.5, bz-1.5, 3, 3); }
+  // ? crates: little wooden diamonds, only the unbroken ones
+  rd.fillStyle = '#c98a3d'; rd.strokeStyle = '#5a3d1e'; rd.lineWidth = 1;
+  for (const c of crates) { if (c.gone) continue;
+    const bx=(c.x-px)*sc, bz=(c.z-pz)*sc;
+    if (bx*bx+bz*bz < R*R) {
+      rd.beginPath(); rd.moveTo(bx, bz-3); rd.lineTo(bx+3, bz); rd.lineTo(bx, bz+3); rd.lineTo(bx-3, bz);
+      rd.closePath(); rd.fill(); rd.stroke();
+    } }
+  // the fair: a purple dot per ride in range, and the site clamped to the rim as a
+  // lead when it's off the radar — the one landmark worth a standing signpost
+  rd.fillStyle = '#a55fd6'; rd.strokeStyle = '#3a1d52'; rd.lineWidth = 1.5;
+  if (FAIR.length) {
+    let seen = false;
+    for (const Rr of FAIR) {
+      const bx=(Rr.x-px)*sc, bz=(Rr.z-pz)*sc;
+      if (bx*bx+bz*bz < (R*0.92)**2) { seen = true;
+        rd.beginPath(); rd.arc(bx, bz, 3, 0, 7); rd.fill(); rd.stroke(); }
+    }
+    if (!seen) {
+      const fx=(FAIR[0].x-px)*sc, fz=(FAIR[0].z-pz)*sc, fd = Math.hypot(fx, fz) || 1;
+      rd.beginPath(); rd.arc(fx/fd*R*0.94, fz/fd*R*0.94, 2.4, 0, 7); rd.fill(); rd.stroke();
+    }
+  }
   // job givers: red dots in range; when idle, the nearest one clamps to the rim as a lead
   rd.fillStyle = '#e8302f'; rd.strokeStyle = '#14192e'; rd.lineWidth = 1.5;
   let lead = null, ld = Infinity;
