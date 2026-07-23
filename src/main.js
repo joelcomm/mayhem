@@ -5134,6 +5134,8 @@ addEventListener('keydown', e => {
   sirenInit();
   keys[e.code] = true;
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
+  // flying uses Ctrl (nose down) and Q/E (roll); swallow them so the page doesn't act on them
+  if (mode === 'plane' && ['ControlLeft','ControlRight','KeyQ','KeyE'].includes(e.code)) e.preventDefault();
   if (e.code === 'KeyP') togglePause();
   if (e.code === 'Space' && mode === 'foot' && !playerRag.active && !riding && !paused) {
     if (playerOnGround) { playerVel.y = JUMP; playerOnGround = false; canDouble = true; }
@@ -6986,6 +6988,38 @@ function findGreen(w, d) {
   return best;
 }
 
+// Like findGreen, but for the airfield: it wants the wide-open country out in the belt
+// between the last blocks and the ring highway, so it prefers the clear parcel FARTHEST
+// from the middle (hugging the loop) and searches past TOWN to reach it. Every corner of
+// the strip must sit a comfortable margin inside the ring, and the whole footprint clears
+// roads (the highway included), the river and anything already taken.
+function findAirfield(w, d) {
+  const hw = w/2, hd = d/2;
+  const RINGR = TOWN + 150;                              // the highway ring radius (see HIGHWAY)
+  const insideRing = (x, z) => x*x + z*z < (RINGR - 30)*(RINGR - 30);
+  const clear = (cx, cz) => {
+    // keep the whole strip inside the loop, tested at the four corners
+    if (!insideRing(cx-hw, cz-hd) || !insideRing(cx+hw, cz-hd) ||
+        !insideRing(cx-hw, cz+hd) || !insideRing(cx+hw, cz+hd)) return false;
+    for (const t of TAKEN)
+      if (Math.abs(cx - t.x) < (w + t.w)/2 && Math.abs(cz - t.z) < (d + t.d)/2) return false;
+    for (let i = -4; i <= 4; i++) for (let j = -4; j <= 4; j++) {
+      const x = cx + i*hw/4, z = cz + j*hd/4;
+      if (onRoad(x, z, 4) || overRiver(x, z, 14) || OCC.has(occKey(x, z))) return false;
+    }
+    return true;
+  };
+  let best = null, bestD = -Infinity;
+  const LIM = TOWN + 120;
+  for (let cx = -LIM; cx <= LIM; cx += 12) for (let cz = -LIM; cz <= LIM; cz += 12) {
+    const dd = cx*cx + cz*cz;
+    if (dd <= bestD || !clear(cx, cz)) continue;         // prefer the far edge, out by the loop
+    bestD = dd; best = { x: cx, z: cz };
+  }
+  if (best) TAKEN.push({ x: best.x, z: best.z, w, d });
+  return best;
+}
+
 // =================================================================
 //  THE STUNT PARK
 //  A green with four kickers in it. The ramps are wedges that raise surfaceY (see
@@ -7612,8 +7646,8 @@ let planeShadow = null;
 const SKYRINGS = [], skyRingMeshes = [];
 // flight tuning
 const PLANE_MAX = 58, PLANE_ACCEL = 20, PLANE_DECEL = 24, PLANE_DRAG = 5, PLANE_BRAKE = 40,
-      PLANE_TAKEOFF = 24, PITCH_RATE = 1.0, PITCH_MAX = 0.55, ROLL_MAX = 0.7, TURN_RATE = 1.25,
-      SINK = 11, CRASH_VY = 18;
+      PLANE_TAKEOFF = 24, PITCH_RATE = 1.0, PITCH_MAX = 0.55, ROLL_MAX = 0.8, ROLL_RATE = 1.9,
+      YAW_RATE = 0.75, GROUND_STEER = 1.5, SINK = 11, CRASH_VY = 18;
 
 function buildPlane() {
   const g = new THREE.Group();
@@ -7642,37 +7676,42 @@ function buildPlane() {
   return g;
 }
 
-const AIRPORT = findGreen(132, 54);
+// Sited out in the open country of the green belt, hard by the ring highway, on a
+// parcel big enough for a proper long runway (findAirfield prefers the far edge).
+const AIRPORT = findAirfield(504, 90);
 if (AIRPORT) {
   const ax = AIRPORT.x, az = AIRPORT.z;
-  const RWL = 116, RWW = 18;
-  // runway tarmac + markings (flat, not colliders — you taxi on it)
+  const RWL = 464, RWW = 20;                    // four times the old strip — a real runway
+  // `inward` points from the runway toward the middle of town: the apron, terminal,
+  // tower and hangar all sit on that side, so nothing spills out across the ring road.
+  const inward = az >= 0 ? -1 : 1;
+  // runway tarmac + markings (flat, not colliders — you taxi and take off on it)
   const rw = new THREE.Mesh(BOX(RWL, 0.12, RWW), toon(0x33353d)); rw.position.set(ax, 0.06, az); scene.add(rw);
-  for (let x = -RWL/2 + 8; x <= RWL/2 - 8; x += 10) {
-    const d = new THREE.Mesh(BOX(4, 0.02, 0.5), toon(0xf0ede6)); d.position.set(ax + x, 0.14, az); scene.add(d);
+  for (let x = -RWL/2 + 10; x <= RWL/2 - 10; x += 12) {
+    const d = new THREE.Mesh(BOX(5, 0.02, 0.6), toon(0xf0ede6)); d.position.set(ax + x, 0.14, az); scene.add(d);
   }
   for (const end of [-1, 1]) for (let k = -3; k <= 3; k++) {
-    const s = new THREE.Mesh(BOX(3, 0.02, 1.1), toon(0xf0ede6));
-    s.position.set(ax + end*(RWL/2 - 4), 0.14, az + k*2.2); scene.add(s);
+    const s = new THREE.Mesh(BOX(3.5, 0.02, 1.2), toon(0xf0ede6));
+    s.position.set(ax + end*(RWL/2 - 5), 0.14, az + k*2.4); scene.add(s);
   }
-  // apron off the north edge, where the plane, terminal, tower and hangar live
-  const apZ = az + RWW/2 + 17, apx = ax - RWL/2 + 26;
-  const ap = new THREE.Mesh(BOX(46, 0.12, 28), toon(0x3a3d47)); ap.position.set(apx, 0.06, apZ); scene.add(ap);
+  // apron on the town-facing side, near one end of the long runway
+  const apZ = az + inward*(RWW/2 + 16), apx = ax - RWL/2 + 60;
+  const ap = new THREE.Mesh(BOX(48, 0.12, 26), toon(0x3a3d47)); ap.position.set(apx, 0.06, apZ); scene.add(ap);
   // taxiway linking apron to runway
-  const tx = new THREE.Mesh(BOX(7, 0.12, 18), toon(0x3a3d47)); tx.position.set(apx, 0.05, az + RWW/2 + 4); scene.add(tx);
+  const tx = new THREE.Mesh(BOX(8, 0.12, 20), toon(0x3a3d47)); tx.position.set(apx, 0.05, az + inward*(RWW/2 + 3)); scene.add(tx);
 
   const solid = (cx, cz, w, d) => colliders.push({ minX: cx - w/2, maxX: cx + w/2, minZ: cz - d/2, maxZ: cz + d/2 });
-  // terminal
+  // terminal (further from the runway than the apron, i.e. another step inward)
   {
-    const tz = apZ + 9;
+    const tz = apZ + inward*10;
     const m = new THREE.Mesh(merge([ baked(BOX(26, 7, 12), 0, 3.5, 0), baked(BOX(28, 1, 14), 0, 7.3, 0) ]), toon(0xcdd6de));
     m.castShadow = true; m.position.set(apx, 0, tz); scene.add(m);
-    const glz = new THREE.Mesh(BOX(24, 3, 0.3), RAMP_GLASS); glz.position.set(apx, 3, tz - 6.1); scene.add(glz);
+    const glz = new THREE.Mesh(BOX(24, 3, 0.3), RAMP_GLASS); glz.position.set(apx, 3, tz - inward*6.1); scene.add(glz);
     solid(apx, tz, 26, 12);
   }
   // control tower
   {
-    const twx = apx + 20, twz = apZ + 8;
+    const twx = apx + 22, twz = apZ + inward*9;
     const shaft = new THREE.Mesh(BOX(4.4, 15, 4.4), toon(0xb9c2cb)); shaft.castShadow = true; shaft.position.set(twx, 7.5, twz); scene.add(shaft);
     const cab = new THREE.Mesh(BOX(6.4, 3.4, 6.4), RAMP_GLASS); cab.position.set(twx, 16.5, twz); scene.add(cab);
     const cap = new THREE.Mesh(BOX(7, 0.6, 7), toon(0x2b2f38)); cap.position.set(twx, 18.4, twz); scene.add(cap);
@@ -7680,33 +7719,36 @@ if (AIRPORT) {
   }
   // hangar — a rounded shed, open toward the apron
   {
-    const hx = apx - 20, hz = apZ + 7;
+    const hx = apx - 22, hz = apZ + inward*9;
     const walls = new THREE.Mesh(merge([ baked(BOX(1, 9, 18), -10, 4.5, 0), baked(BOX(1, 9, 18), 10, 4.5, 0),
                                          baked(BOX(21, 1, 18), 0, 9, 0) ]), toon(0x9aa6b0));
     walls.castShadow = true; walls.position.set(hx, 0, hz); scene.add(walls);
     const roof = new THREE.Mesh(new THREE.CylinderGeometry(10.5, 10.5, 18, 20, 1, false, 0, Math.PI).rotateZ(-Math.PI/2), toon(0x7d8892));
     roof.rotation.y = Math.PI/2; roof.position.set(hx, 9, hz); scene.add(roof);
-    solid(hx - 10, hz, 2, 18); solid(hx + 10, hz, 2, 18); solid(hx, hz + 9, 21, 2);
+    solid(hx - 10, hz, 2, 18); solid(hx + 10, hz, 2, 18); solid(hx, hz + inward*9, 21, 2);
   }
-  // windsock
+  // windsock, out at the far runway end on the open side
   {
-    const wsx = ax + RWL/2 - 10, wsz = az + RWW/2 + 5;
+    const wsx = ax + RWL/2 - 14, wsz = az - inward*(RWW/2 + 5);
     const pole = new THREE.Mesh(BOX(0.3, 6, 0.3), toon(0xd7dbe0)); pole.position.set(wsx, 3, wsz); scene.add(pole);
     const sock = new THREE.Mesh(new THREE.ConeGeometry(0.7, 2.4, 12).rotateZ(-Math.PI/2), toon(0xff7a2b));
     sock.position.set(wsx + 1.6, 5.6, wsz); scene.add(sock);
   }
-  // entrance billboard
+  // entrance billboard, on the town side so you spot it driving out from the blocks
   {
     const t = signTexture('MAPLEWOOD REGIONAL', '#20242c', '#63b8ec', 512, 96);
+    const bz = apZ + inward*16;
     const brd = new THREE.Mesh(new THREE.PlaneGeometry(20, 3.75),
       new THREE.MeshBasicMaterial({ map: t, transparent: true, side: THREE.DoubleSide }));
-    brd.position.set(apx, 6.5, apZ - 15); scene.add(brd);
-    for (const sx of [-9, 9]) { const p = new THREE.Mesh(BOX(0.6, 6.5, 0.6), toon(0x6b6f76)); p.position.set(apx + sx, 3.25, apZ - 15); scene.add(p); }
+    brd.position.set(apx, 6.5, bz); scene.add(brd);
+    for (const sx of [-9, 9]) { const p = new THREE.Mesh(BOX(0.6, 6.5, 0.6), toon(0x6b6f76)); p.position.set(apx + sx, 3.25, bz); scene.add(p); }
   }
 
-  // park the plane on the apron, nose pointing down the runway (+x)
+  // park the plane at the taxiway mouth, nose pointed at the runway: throttle up and it
+  // rolls forward onto the strip like a car, then you swing onto the centreline to take off
   const pRig = buildPlane(); plane.add(pRig);
-  PLANE_SPAWN.x = apx + 6; PLANE_SPAWN.z = apZ - 4; PLANE_SPAWN.heading = Math.PI/2;   // +x
+  PLANE_SPAWN.x = apx; PLANE_SPAWN.z = az + inward*(RWW/2 + 9);
+  PLANE_SPAWN.heading = inward < 0 ? 0 : Math.PI;         // face the runway
   plane.position.set(PLANE_SPAWN.x, 0, PLANE_SPAWN.z);
   planeHeading = PLANE_SPAWN.heading; plane.rotation.set(0, planeHeading, 0);
   plane.visible = true;
@@ -7778,39 +7820,52 @@ function tryPlane() {
   if (!nearPlane()) return false;
   mode = 'plane'; player.visible = false; rider.visible = false;
   planeSpeed = 0; planePitch = 0; planeRoll = 0; camYaw = planeHeading;
-  toast('TAKE OFF!  W throttle · ↑↓ pitch · A/D bank · Space brake');
+  toast('W/S throttle · A/D turn · Q/E roll · Space nose-up · Ctrl nose-down');
   return true;
 }
 function updatePlane(dt) {
   if (mode !== 'plane' || !AIRPORT) return;
-  // Controls: throttle W/S, pitch ↑/↓ (nose up = climb), bank A/D, Space air-brakes.
+  // Controls: W/S throttle, A/D flat turn (yaw, no bank needed), Q/E roll the wings,
+  // Space = nose up, Ctrl = nose down. On the ground below takeoff speed the plane
+  // handles like a car — throttle to roll, steer with A/D — so you taxi to the runway.
   const on = !paused;
-  const rl = on && keys.KeyA ? 1 : 0, rr = on && keys.KeyD ? 1 : 0;
+  const K = c => on && !!keys[c];
   const gy = surfaceY(plane.position.x, plane.position.z);
   const grounded = plane.position.y <= gy + 0.06;
+  // once you're rolling fast enough to fly (or already airborne) the flight controls
+  // take over; below that on the tarmac you're taxiing.
+  const flying = !grounded || planeSpeed >= PLANE_TAKEOFF;
 
-  // throttle
-  if (on && keys.KeyW) planeSpeed += PLANE_ACCEL*dt;
-  else if (on && keys.KeyS) planeSpeed -= PLANE_DECEL*dt;
+  // throttle: W up, S down — S bites hard on the ground so it doubles as a brake
+  if (K('KeyW')) planeSpeed += PLANE_ACCEL*dt;
+  else if (K('KeyS')) planeSpeed -= (grounded ? PLANE_BRAKE : PLANE_DECEL)*dt;
   else planeSpeed -= PLANE_DRAG*dt;
-  if (on && keys.Space) planeSpeed -= PLANE_BRAKE*dt;         // air-brake
   planeSpeed = THREE.MathUtils.clamp(planeSpeed, 0, PLANE_MAX);
 
-  // pitch (arrow up = nose up = climb), auto-levels with no input
-  const pIn = on ? ((keys.ArrowUp ? 1 : 0) - (keys.ArrowDown ? 1 : 0)) : 0;
-  if (grounded && planeSpeed < PLANE_TAKEOFF) planePitch += (0 - planePitch) * Math.min(1, dt*6);
-  else { planePitch += pIn * PITCH_RATE * dt; if (!pIn) planePitch += (0 - planePitch) * Math.min(1, dt*1.2); }
+  // yaw: A/D turn left/right with no pitch coupling. Car-like on the ground (steering
+  // scales with speed, none when stopped); a steady flat turn once flying.
+  const yawIn = (K('KeyD') ? 1 : 0) - (K('KeyA') ? 1 : 0);
+  if (flying) planeHeading -= yawIn * YAW_RATE * dt;
+  else planeHeading -= yawIn * GROUND_STEER * THREE.MathUtils.clamp(planeSpeed/12, 0, 1) * dt;
+
+  // pitch: Space = nose up, Ctrl = nose down. Held flat while taxiing; gentle auto-level
+  // in the air so letting go settles toward level flight.
+  const pIn = (K('Space') ? 1 : 0) - (K('ControlLeft') || K('ControlRight') ? 1 : 0);
+  if (!flying) planePitch += (0 - planePitch) * Math.min(1, dt*6);
+  else { planePitch += pIn * PITCH_RATE * dt; if (!pIn) planePitch += (0 - planePitch) * Math.min(1, dt*0.8); }
   planePitch = THREE.MathUtils.clamp(planePitch, -PITCH_MAX, PITCH_MAX);
 
-  // roll / bank turn
-  const rIn = rr - rl;
-  planeRoll += (rIn*ROLL_MAX - planeRoll) * Math.min(1, dt*3);
-  const lift = THREE.MathUtils.clamp(planeSpeed / PLANE_TAKEOFF, 0, 1);
-  planeHeading -= planeRoll * TURN_RATE * lift * dt;
+  // roll: Q/E bank the wings, self-levelling when you let go. A banked wing also slips
+  // the nose round a touch, the way a real coordinated turn does.
+  const rIn = (K('KeyE') ? 1 : 0) - (K('KeyQ') ? 1 : 0);
+  if (flying) { planeRoll += rIn * ROLL_RATE * dt; if (!rIn) planeRoll += (0 - planeRoll) * Math.min(1, dt*1.5); planeHeading -= planeRoll * 0.5 * dt; }
+  else planeRoll += (0 - planeRoll) * Math.min(1, dt*6);
+  planeRoll = THREE.MathUtils.clamp(planeRoll, -ROLL_MAX, ROLL_MAX);
 
+  const lift = THREE.MathUtils.clamp(planeSpeed / PLANE_TAKEOFF, 0, 1);
   // vertical: climb from airspeed×nose-up when there's lift, sink when stalled
   let vy;
-  if (grounded && planeSpeed < PLANE_TAKEOFF) vy = 0;
+  if (!flying) vy = 0;
   else vy = planeSpeed * Math.sin(planePitch) * lift - SINK * (1 - lift);
 
   const fx = Math.sin(planeHeading), fz = Math.cos(planeHeading);
