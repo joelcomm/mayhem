@@ -3930,16 +3930,43 @@ function deckY(x, z) {
 // overlap, so the single-valued surface stays well-defined: miss a pad and you are over
 // bare ground (or a lower pad) and you fall.
 const PADS = [];
-function padY(x, z) {
+// Tyre columns of the fire climb, as real solids (see collideTires). Kept apart
+// from `colliders` because the spiral packs them diagonally ~1.85 m apart at the
+// top, where the square AABBs collideCircle uses would overlap and eject you off
+// an adjacent pad — a circle push is gentle enough to sit between them.
+const TIRECOLS = [];
+const PAD_STEP = 0.4;   // how far above your feet a pad top may be and still lift you
+// The pad you rest on is the highest disc whose top is at or below your feet (plus a
+// small step-up), NOT the tallest overlapping disc: on a tight spiral the columns'
+// footprints overlap, so a global max would yank you off a low tier up to a taller
+// one you are standing beside. `fromY` is the player's current height; cars and peds
+// call without it and keep the old max behaviour (they never climb).
+function padY(x, z, fromY) {
   let best = 0;
   for (const p of PADS) {
     const dx = x - p.x, dz = z - p.z;
     if (dx*dx + dz*dz > p.r*p.r) continue;
+    if (fromY !== undefined && p.h > fromY + PAD_STEP) continue;
     if (p.h > best) best = p.h;
   }
   return best;
 }
-function surfaceY(x, z) {
+// Push the player out of any tyre column taller than their feet — a solid side you
+// cannot walk through, so a jump that lands short slides off instead of dropping
+// through the rubber. Once your feet reach the top (minus a lip tolerance) the column
+// stops blocking and padY lifts you onto it. Circle-vs-circle, player only.
+function collideTires(px, pz, r, feetY) {
+  let x = px, z = pz;
+  for (const t of TIRECOLS) {
+    if (feetY >= t.top - 0.15) continue;          // at/above the top: land on it, don't wall off
+    const dx = x - t.x, dz = z - t.z, rr = t.r + r, d2 = dx*dx + dz*dz;
+    if (d2 >= rr*rr || d2 === 0) continue;
+    const d = Math.sqrt(d2), push = rr - d;
+    x += dx/d * push; z += dz/d * push;
+  }
+  return { x, z };
+}
+function surfaceY(x, z, fromY) {
   const d = Math.abs(z - riverZ(x));
   if (d < RIVER_HW + 11) {
     if (onBridge(x, z)) return 0;                 // the deck carries you across
@@ -3947,7 +3974,7 @@ function surfaceY(x, z) {
     return -6.4 + ((d - RIVER_HW) / 11) * 6.4;    // sloping bank
   }
   return groundH(x, z) + (RAMPS.length ? rampY(x, z) : 0) + (DECKS.length ? deckY(x, z) : 0)
-       + (PADS.length ? padY(x, z) : 0);
+       + (PADS.length ? padY(x, z, fromY) : 0);
 }
 const inWater = (x, z) => Math.abs(z - riverZ(x)) < RIVER_HW && !onBridge(x, z);
 
@@ -5380,9 +5407,10 @@ function updatePlayer(dt) {
   const fx = Math.sin(player.rotation.y), fz = Math.cos(player.rotation.y);
   const res = collideCircle(player.position.x + fx*drive*spd*dt, player.position.z + fz*drive*spd*dt, 0.75, colliders, player.position.y);
   const rt = collideTraffic(res.x, res.z, 0.75);
-  player.position.x = THREE.MathUtils.clamp(rt.x, -TOWN-40, TOWN+40);
-  player.position.z = THREE.MathUtils.clamp(rt.z, -TOWN-40, TOWN+40);
-  const pgy = surfaceY(player.position.x, player.position.z);
+  const rc = TIRECOLS.length ? collideTires(rt.x, rt.z, 0.75, player.position.y) : rt;
+  player.position.x = THREE.MathUtils.clamp(rc.x, -TOWN-40, TOWN+40);
+  player.position.z = THREE.MathUtils.clamp(rc.z, -TOWN-40, TOWN+40);
+  const pgy = surfaceY(player.position.x, player.position.z, player.position.y);
   playerVel.y -= GRAV*dt;
   player.position.y += playerVel.y*dt;
   if (player.position.y <= pgy) { player.position.y = pgy; playerVel.y = 0; playerOnGround = true; canDouble = false; }
@@ -5410,7 +5438,7 @@ function updatePlayer(dt) {
     const k = Math.sin(Math.max(0, Math.min(1, (0.22 - punchT)/0.22)) * Math.PI);
     u.armR.rotation.x = -2.05*k; u.armL.rotation.x = 0.75*k;
   }
-  playerShadow.position.set(player.position.x, surfaceY(player.position.x, player.position.z) + 0.09, player.position.z);
+  playerShadow.position.set(player.position.x, surfaceY(player.position.x, player.position.z, player.position.y) + 0.09, player.position.z);
   if (drive !== 0) hitPropsAt(player.position.x, player.position.z, fx*drive, fz*drive, spd*0.6, 1.0, 2.5);
 }
 function nearestJackable() {
@@ -7376,6 +7404,10 @@ if (TIREFIRE) {
     const px = cx + Math.cos(th) * R, pz = cz + Math.sin(th) * R;
     const h = 1.2 + i * 1.05;
     PADS.push({ x: px, z: pz, r: PR, h });
+    // the column is a real solid: sides you cannot pass, top you land on. Radius 1.0
+    // (a hair under the ~1.85 m gap to the next pad centre, once the 0.75 m player
+    // radius is added) so neighbouring columns never eject you off the tier you stand on.
+    TIRECOLS.push({ x: px, z: pz, r: 1.0, top: h });
     // the tyre column beneath it, and a worn cap you stand on
     for (let y = 0.5; y < h - 0.2; y += 0.85)
       tori.push(baked(torus, px, y, pz, Math.PI/2, 0, (i*13 + y*7) % 3));
