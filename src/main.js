@@ -5030,6 +5030,11 @@ function updateCar(dt) {
       // Everything below scales from nothing at that threshold, so a nudge in traffic
       // still just slides the car and only a real ram sends it barrel-rolling.
       const lift = Math.max(0, impact - 14) * 0.44;
+      // SCRAP RUN counts launches, not taps — the same threshold that lifts a corner
+      if (lift > 0 && MI && MI.id === 'rampage' && !other.cop && !other.derby && !other.racer) {
+        MI.data.n++;
+        if (MI.data.n < 6) toast(MI.data.n + ' / 6 — KEEP SWINGING');
+      }
       other.vy = lift;
       other.pitchV = (Math.random()-0.5) * lift * 0.55;
       other.rollV  = (side >= 0 ? 1 : -1) * lift * 0.6;
@@ -6031,7 +6036,7 @@ function updateChickens(dt) {
 // `needsCar` flags in MISSION_DEFS because the markers are placed long before that
 // object exists — so the two are cross-checked at startup and a drift shows up in the
 // console rather than as a giver you can never reach.
-const CAR_JOB = { donut: 1, taxi: 1, derby: 1, race: 1, street: 1 };
+const CAR_JOB = { donut: 1, taxi: 1, derby: 1, race: 1, street: 1, getaway: 1, rampage: 1 };
 
 // =================================================================
 //  ? CRATES
@@ -6248,6 +6253,10 @@ const GARAGE = { x: 0, z: 0, open: false, ride: 0 };
 let TOWN_CPS = null;              // hoisted for the same reason: the markers block
                                   // calls townCircuit() to stand Tess on the grid
 const MARKERS = [];
+// The stunt park and the fair pick their sites with findGreen, which runs after
+// this block — so their givers can't be placed here. The marker builder escapes
+// through this hook instead of being hoisted with its dozen block-local helpers.
+let addJobMarker = null;
 {
   const c = document.createElement('canvas'); c.width = 128; c.height = 160;
   const g = c.getContext('2d');
@@ -6361,6 +6370,11 @@ const MARKERS = [];
     const hx = b.x - a.x, hz = b.z - a.z, hl = Math.hypot(hx, hz) || 1;
     marker(a.x + hx/hl*18, a.z + hz/hl*18,
       'TIRE-IRON TESS', 'Three of us race these streets. Care to make it four?', 'street'); }
+  // Louie stands outside the prison walls, which is exactly where you'd expect to
+  // pick up a bag nobody should ask about
+  if (PRISON.gate) marker(PRISON.gate.x + 8, PRISON.gate.z - 12,
+    'LEFTY LOUIE', "This bag needs to cross town, and the law knows it's moving. Drive.", 'getaway');
+  addJobMarker = marker;
 
   // ---- Gus, on his forecourt: not a job giver, a shop ----
   {
@@ -6572,6 +6586,8 @@ function findGreen(w, d) {
         const p = new THREE.Mesh(BOX(0.7, 6.5, 0.7), toon(0x6b6f76));
         p.position.set(cx + sx, 3.25, cz - 27); scene.add(p);
       }
+      if (addJobMarker) addJobMarker(cx - 34, cz - 24,
+        'SCRAPPY', 'Fill my yard: send six of their cars flying. Big hits only.', 'rampage');
     }
   }
 }
@@ -6757,6 +6773,8 @@ let riding = null, rideExitCd = 0;
       const p = new THREE.Mesh(BOX(0.6, 7, 0.6), toon(0x6b6f76));
       p.position.set(sx0 + dxp, 3.5, sz0); scene.add(p);
     }
+    if (addJobMarker) addJobMarker(sx0 - 8, sz0 - 8,
+      'INSPECTOR PRU', 'Safety inspection day. Ride all three and tell me they hold.', 'fairjob');
     console.log(`fair: ${FAIR.length} rides at ${cx|0},${cz|0}`);
   }
 }
@@ -7569,6 +7587,7 @@ function updateRoundHUD() {
   let t = null, s = '';
   if (MI && MI.stage === 1 && MI.id === 'feather') { t = MI.t; s = (MI.data.n || 0) + ' / 7 birds'; }
   if (MI && MI.stage === 1 && MI.id === 'soak') { t = MI.data.t; s = MI.data.soaked + ' soaked · ' + MI.data.esc + ' away'; }
+  if (MI && MI.id === 'rampage') { t = MI.t; s = MI.data.n + ' / 6 launched'; }
   roundEl.style.display = t === null ? 'none' : 'block';
   if (t === null) return;
   roundClk.textContent = fmtT(t);
@@ -7911,6 +7930,59 @@ const MISSION_DEFS = {
       const tg = m.target;
       return 'checkpoint <b>' + (m.data.count + 1) + '/' + ringCheckpoints().length + '</b> · ' +
         Math.round(Math.hypot(tg.x - sub.x, tg.z - sub.z)) + 'm · lap ' + fmtT(m.data.lapT);
+    },
+  },
+  getaway: {
+    needsCar: true,
+    title: 'THE GETAWAY', late: 'the buyer walked',
+    start(m) {
+      const g = m.giver;
+      const cands = ENTERABLE.filter(e => Math.hypot(e.x - g.x, e.z - g.z) > 260);
+      const e = cands.length ? cands[(Math.random()*cands.length)|0] : ENTERABLE[0];
+      // the law already knows the bag is moving: three stars on the spot, and the
+      // wanted bonus means delivering hot is the whole payday
+      heat = Math.max(heat, STAR_AT[3] * 1.05);
+      m.timed = true; m.t = driveTime(g.x, g.z, e.x, e.z, 13) + 8;
+      setTarget(e.x + e.fx*7, e.z + e.fz*7, 11, 'drop the bag at ' + e.name);
+    },
+    update(m, dt, sub) {
+      heat = Math.max(heat, STAR_AT[1] + 2);   // no lying low — the chase runs to the door
+      if (atTarget(sub, m.target)) winMission(150, 'the bag is theirs');
+    },
+  },
+  rampage: {
+    needsCar: true,
+    title: 'SCRAP RUN', late: 'the yard stays empty',
+    start(m) {
+      m.data.n = 0;
+      m.timed = true; m.t = 80;
+      banner('SCRAP RUN', 'send 6 cars flying — real hits, over 14 mph');
+    },
+    hud: m => '<b>' + m.data.n + ' / 6</b> cars launched',
+    update(m) {
+      if (m.data.n >= 6) winMission(280, 'a yard full of scrap');
+    },
+  },
+  fairjob: {
+    title: 'RIDE INSPECTOR', late: 'report overdue',
+    start(m) {
+      m.data.rode = { carousel: 0, coaster: 0, bumper: 0 };
+      m.timed = true; m.t = 210;
+    },
+    hud(m) {
+      const r = m.data.rode, mk = k => r[k] >= 6 ? '✓' : '…';
+      return 'carousel ' + mk('carousel') + ' · coaster ' + mk('coaster') + ' · bumpers ' + mk('bumper');
+    },
+    update(m, dt, sub) {
+      const r = m.data.rode;
+      if (riding) r[riding.kind] = (r[riding.kind] || 0) + dt;
+      if (r.carousel >= 6 && r.coaster >= 6 && r.bumper >= 6) {
+        winMission(240, 'all three rides pass'); return;
+      }
+      // the arrow walks the inspection: aim at the nearest ride still unridden
+      const need = FAIR.find(R => (r[R.kind] || 0) < 6);
+      if (need && (!m.target || m.target.x !== need.x || m.target.z !== need.z))
+        setTarget(need.x, need.z, 9, 'ride the ' + need.label + ' (6 s aboard)');
     },
   },
 };
