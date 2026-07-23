@@ -107,6 +107,23 @@ function toon(color) {                       // shared per colour, so merging st
   return matCache.get(color);
 }
 function toonMapped(map) { return new THREE.MeshToonMaterial({ map, gradientMap: RAMP }); }
+// A thin bright edge where the surface curls away from the camera — the classic
+// animated-film rim. Injected into the toon shader rather than a second pass: one
+// smoothstep on the view angle, tinted mostly by the surface's own (instance)
+// colour so a pink car rims pink, not white. Only characters and cars get it —
+// on buildings it reads as frost.
+function addRim(mat) {
+  mat.onBeforeCompile = sh => {
+    sh.fragmentShader = sh.fragmentShader.replace('#include <opaque_fragment>',
+      `{
+        float rimNV = 1.0 - saturate(dot(normalize(vViewPosition), normal));
+        outgoingLight += (diffuseColor.rgb * 0.7 + 0.3) * smoothstep(0.55, 0.75, rimNV) * 0.35;
+      }
+      #include <opaque_fragment>`);
+  };
+  mat.customProgramCacheKey = () => 'rim1';
+  return mat;
+}
 const INK_COLOR = 0x14192e;
 // The ink pass reads the scene's depth buffer, so anything that writes depth gets
 // outlined. Every transparent thing in this game — glow discs, beacons, headlight
@@ -3875,8 +3892,11 @@ function carGeo(type) {
   return { paint: merge(paint), dark: merge(dark), chrome: merge(chrome), glass: merge(glass), lamp: merge(lamp) };
 }
 const VEH_MATS = {
-  paint:  new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP }),
-  dark:   toon(0x2b2f38), chrome: toon(0xd8dde4),
+  paint:  addRim(new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP })),
+  // dark and chrome get their own materials rather than the toon() cache: the cached
+  // ones are shared with street furniture, which must not pick up the rim
+  dark:   addRim(new THREE.MeshToonMaterial({ color: 0x2b2f38, gradientMap: RAMP })),
+  chrome: addRim(new THREE.MeshToonMaterial({ color: 0xd8dde4, gradientMap: RAMP })),
   glass:  new THREE.MeshToonMaterial({ color: 0x9fdcf2, gradientMap: RAMP, transparent: true, opacity: 0.75 }),
   lamp:   new THREE.MeshBasicMaterial({ color: 0xfff3c4 }),
 };
@@ -4353,37 +4373,40 @@ const torsoGeo = merge([
   BOX(0.44, 0.075, 0.335).translate(0, 1.525, 0.005), // collar band
   BOX(1.05, 0.07, 0.335).translate(0, 0.875, 0),      // hem, sitting proud of the waist
 ]);
+// One shared white toon material for every crowd part — its own object, not the
+// toon() cache's white, so the rim lands on people and never on white buildings.
+const crowdToon = addRim(new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP }));
 const CI = {
-  legL:  instanced(BOX(0.2, 0.85, 0.2).translate(0,-0.425,0), toon(0xffffff), CROWD_MAX),
-  legR:  instanced(BOX(0.2, 0.85, 0.2).translate(0,-0.425,0), toon(0xffffff), CROWD_MAX),
-  shoeL: instanced(shoeGeo, toon(0xffffff), CROWD_MAX),
-  shoeR: instanced(shoeGeo, toon(0xffffff), CROWD_MAX),
-  torso: instanced(torsoGeo, toon(0xffffff), CROWD_MAX),
-  torsoS:instanced(torsoGeo, new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP, map: texShirtStripe }), CROWD_MAX),
-  armL:  instanced(armGeo, toon(0xffffff), CROWD_MAX),
-  armR:  instanced(armGeo, toon(0xffffff), CROWD_MAX),
+  legL:  instanced(BOX(0.2, 0.85, 0.2).translate(0,-0.425,0), crowdToon, CROWD_MAX),
+  legR:  instanced(BOX(0.2, 0.85, 0.2).translate(0,-0.425,0), crowdToon, CROWD_MAX),
+  shoeL: instanced(shoeGeo, crowdToon, CROWD_MAX),
+  shoeR: instanced(shoeGeo, crowdToon, CROWD_MAX),
+  torso: instanced(torsoGeo, crowdToon, CROWD_MAX),
+  torsoS:instanced(torsoGeo, addRim(new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP, map: texShirtStripe })), CROWD_MAX),
+  armL:  instanced(armGeo, crowdToon, CROWD_MAX),
+  armR:  instanced(armGeo, crowdToon, CROWD_MAX),
   // both hands share one mesh at twice the capacity — a left and a right hand are the
   // same object with different matrices, so two draw calls would buy nothing
-  hands: instanced(handGeo, toon(0xffffff), CROWD_MAX*2),
-  head:  instanced(headGeo, toon(0xffffff), CROWD_MAX),
-  muzzle:instanced(muzzleGeo, toon(0xffffff), CROWD_MAX),
-  brow:  instanced(browGeo, toon(0xffffff), CROWD_MAX),
+  hands: instanced(handGeo, crowdToon, CROWD_MAX*2),
+  head:  instanced(headGeo, crowdToon, CROWD_MAX),
+  muzzle:instanced(muzzleGeo, crowdToon, CROWD_MAX),
+  brow:  instanced(browGeo, crowdToon, CROWD_MAX),
   mouth: instanced(mouthGeo, new THREE.MeshBasicMaterial({ color:0x7a3b34 }), CROWD_MAX, false),
   eyes:  instanced(baked(eyePair, 0, 1.85, 0.185), new THREE.MeshToonMaterial({ color:0xffffff, gradientMap:RAMP }), CROWD_MAX),
   pupil: instanced(baked(pupilPair, 0, 1.85, 0.185), new THREE.MeshBasicMaterial({ color:0x14192e }), CROWD_MAX, false),
-  hairShort: instanced(hairShort, toon(0xffffff), CROWD_MAX),
-  hairTall:  instanced(hairTall,  toon(0xffffff), CROWD_MAX),
-  hairSpiky: instanced(hairSpiky, toon(0xffffff), CROWD_MAX),
-  hairBun:   instanced(hairBun,   toon(0xffffff), CROWD_MAX),
-  hairBald:  instanced(hairBald,  toon(0xffffff), CROWD_MAX),
-  hairCap:   instanced(hairCap,   toon(0xffffff), CROWD_MAX),
-  hairAfro:  instanced(hairAfro,  toon(0xffffff), CROWD_MAX),
-  hairLong:  instanced(hairLong,  toon(0xffffff), CROWD_MAX),
-  hairMohawk:instanced(hairMohawk,toon(0xffffff), CROWD_MAX),
-  hairBeanie: instanced(hairBeanie,  toon(0xffffff), CROWD_MAX),
-  hairFedora: instanced(hairFedora,  toon(0xffffff), CROWD_MAX),
-  hairHardhat:instanced(hairHardhat, toon(0xffffff), CROWD_MAX),
-  glasses:   instanced(glassesGeo, toon(0xffffff), CROWD_MAX, false),
+  hairShort: instanced(hairShort, crowdToon, CROWD_MAX),
+  hairTall:  instanced(hairTall,  crowdToon, CROWD_MAX),
+  hairSpiky: instanced(hairSpiky, crowdToon, CROWD_MAX),
+  hairBun:   instanced(hairBun,   crowdToon, CROWD_MAX),
+  hairBald:  instanced(hairBald,  crowdToon, CROWD_MAX),
+  hairCap:   instanced(hairCap,   crowdToon, CROWD_MAX),
+  hairAfro:  instanced(hairAfro,  crowdToon, CROWD_MAX),
+  hairLong:  instanced(hairLong,  crowdToon, CROWD_MAX),
+  hairMohawk:instanced(hairMohawk,crowdToon, CROWD_MAX),
+  hairBeanie: instanced(hairBeanie,  crowdToon, CROWD_MAX),
+  hairFedora: instanced(hairFedora,  crowdToon, CROWD_MAX),
+  hairHardhat:instanced(hairHardhat, crowdToon, CROWD_MAX),
+  glasses:   instanced(glassesGeo, crowdToon, CROWD_MAX, false),
 };
 const HAIR_MESH = { short:'hairShort', tall:'hairTall', spiky:'hairSpiky', bun:'hairBun', bald:'hairBald',
                     cap:'hairCap', afro:'hairAfro', long:'hairLong', mohawk:'hairMohawk',
@@ -4757,7 +4780,7 @@ function buildPlayerCar(type, color) {
     const m = new THREE.Mesh(geo, mat); m.castShadow = true; m.receiveShadow = true; grp.add(m);
     return m;
   };
-  mk(g.paint, new THREE.MeshToonMaterial({ color, gradientMap: RAMP }));
+  mk(g.paint, addRim(new THREE.MeshToonMaterial({ color, gradientMap: RAMP })));
   mk(g.dark, VEH_MATS.dark);
   mk(g.chrome, VEH_MATS.chrome);
   mk(g.glass, VEH_MATS.glass);
@@ -4783,7 +4806,7 @@ setPlayerCar('convert', 0xf07ab0);
 function buildPerson(look) {
   const g = new THREE.Group();
   const put3 = (geo, color) => {
-    const m = new THREE.Mesh(geo, new THREE.MeshToonMaterial({ color, gradientMap: RAMP }));
+    const m = new THREE.Mesh(geo, addRim(new THREE.MeshToonMaterial({ color, gradientMap: RAMP })));
     m.castShadow = true; g.add(m);
     return m;
   };
@@ -4802,11 +4825,11 @@ function buildPerson(look) {
   const limb = (px, color, w, len, top, hand) => {
     const j = new THREE.Group(); j.position.set(px, top, 0);
     const geo = BOX(w, len, w).translate(0, -len/2, 0);
-    const m = new THREE.Mesh(geo, new THREE.MeshToonMaterial({ color, gradientMap: RAMP }));
+    const m = new THREE.Mesh(geo, addRim(new THREE.MeshToonMaterial({ color, gradientMap: RAMP })));
     m.castShadow = true; j.add(m);
     if (hand) {                       // skin, not sleeve — same split as the crowd
       const h = new THREE.Mesh(handGeo.clone().translate(0, 0.62 - len - 0.04, 0),
-        new THREE.MeshToonMaterial({ color: look.skin, gradientMap: RAMP }));
+        addRim(new THREE.MeshToonMaterial({ color: look.skin, gradientMap: RAMP })));
       h.castShadow = true; j.add(h);
     }
     g.add(j); return j;
@@ -4814,7 +4837,7 @@ function buildPerson(look) {
   const legL = limb(-0.14, look.pants, 0.2, 0.85, 0.86);
   const legR = limb( 0.14, look.pants, 0.2, 0.85, 0.86);
   for (const lg of [legL, legR]) {
-    const sh2 = new THREE.Mesh(shoeGeo.clone(), new THREE.MeshToonMaterial({ color: look.shoe || 0x2b2f38, gradientMap: RAMP }));
+    const sh2 = new THREE.Mesh(shoeGeo.clone(), addRim(new THREE.MeshToonMaterial({ color: look.shoe || 0x2b2f38, gradientMap: RAMP })));
     sh2.castShadow = true; lg.add(sh2);
   }
   const armL = limb(-0.37, look.shirt, 0.16, 0.58, 1.42, true);
