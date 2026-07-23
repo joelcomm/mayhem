@@ -22,6 +22,7 @@ if (!existsSync(BUILT)) {
   process.exit(1);
 }
 const run = (cmd, cwd) => execSync(cmd, { cwd, stdio: 'inherit' });
+const capture = (cmd, cwd) => execSync(cmd, { cwd, encoding: 'utf8' }).trim();
 
 // ---- 1. this repo ----
 run('git add docs && git commit -m "Deploy: rebuild docs/" --allow-empty -q');
@@ -33,10 +34,14 @@ const tmp = mkdtempSync(join(tmpdir(), 'mayhem-hub-'));
 run(`git clone -q --depth 1 -b ${HUB_BRANCH} ${HUB_REPO} .`, tmp);
 mkdirSync(join(tmp, 'mayhem'), { recursive: true });
 copyFileSync(BUILT, join(tmp, 'mayhem', 'index.html'));
-try {
-  run('git add mayhem && git commit -q -m "Update Maplewood Mayhem"', tmp);
+run('git add mayhem', tmp);
+// Only skip when the artifact is genuinely identical. Any other failure (a 403 on
+// push, a network error, a rejected non-fast-forward) must crash the deploy loudly —
+// a swallowed catch here is how the hub silently drifts stale, as it did before.
+if (capture('git status --porcelain mayhem', tmp) === '') {
+  console.log('· hub unchanged (already up to date)');
+} else {
+  run('git commit -q -m "Update Maplewood Mayhem"', tmp);
   run(`git push -q origin ${HUB_BRANCH}`, tmp);
   console.log('✓ pushed to Mobile-fun/gh-pages — games.aiforeveryoneshow.com/mayhem/');
-} catch {
-  console.log('· hub unchanged (nothing new to publish)');
 }
