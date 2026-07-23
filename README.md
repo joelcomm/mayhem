@@ -502,8 +502,33 @@ coins, like Gus's garage — not missions.
   sign wrong), so squaring up matters: STRIKE! pays 40, pins pay 4 each, and a
   wild aim is a GUTTER…. Pins reset after a couple of seconds.
 
-Both copies of each shop get the treatment (SHOP_NAMES cycles), so there are
-two courses and two lanes in town.
+Seven more shops are playable now, same architecture (recorded by the fit-out,
+run by the MINIGAMES section, free play paid in coins):
+
+- **CRATE RUSH** (Bargain Barn) — F at the tee spawns six crates in the aisles;
+  run through them all inside 25 s; a clean sweep pays 30 on top.
+- **WHACK-A-CABINET** (Pixel Palace) — punch or kick the glowing cabinet before
+  the light moves on; 30 seconds, hits pay 3 each.
+- **DANCE FLOOR** (Club Inferno) — step on the lit tile before the window
+  closes; the floor speeds up as the streak grows; 10+ steps earns a bonus.
+- **LAST ORDERS** (The Rusty Mug) — F slides a pint down the bar, F again stops
+  it; on the gold mat pays 10, off the end smashes.
+- **THE HEIST** (Town Museum) — F cases the joint: red alarm beams sweep the
+  floor (you can jump them); reach the gold bust for 25, touch a beam and the
+  law hears about it (+22 heat). The one minigame wired into the police loop.
+- **CONVEYOR CATCH** (Golden Koi Sushi) — plates ride the counter whether
+  anyone plays or not; F grabs the passing plate. Gold pays 8, plain pays 2,
+  wasabi is its own punishment.
+- **THE INITIATION** (Order of the Owl) — the Order shows a punch/kick
+  sequence; repeat it back with the actual punch and kick. Each round adds a
+  move; seven rounds and you're INITIATED (+80).
+
+Round-game tees stand **past the doorway's F-reach** (the door eats the
+keypress otherwise — found the hard way), and the Owl's tee stands beside the
+ceremonial table because the table's foot is inside that reach too.
+
+Both copies of each shop get the treatment (SHOP_NAMES cycles), so most of
+these exist twice across the scattered quarters.
 
 ### Coins in shapes
 The block loop drops a handful of coins into every landmark and yard, which is fine but

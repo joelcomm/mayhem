@@ -953,6 +953,7 @@ const ROOMS = [];
 // PINTS gets the Rusty Mug's bar line. The runtime systems live in the
 // MINIGAMES section.
 const PUTTS = [], BOWLS = [], RUSHES = [], WHACKS = [], DANCES = [], PINTS = [];
+const HEISTS = [], KOIS = [], OWLS = [];   // museum heist, sushi conveyor, owl initiation
 
 // The glazing band's opening, in building-local Y. Everything that stands in front of a
 // shop window — the shell wall, the room's own lining, the dark band the glass sits in —
@@ -2202,6 +2203,11 @@ function furnishRoom(R, b, r, dx, dz, walls) {
         for (const uo of [-1.2, 0, 1.2]) cyl(0x2b2f38, uo, hv - 2.75, 0.3, 0.52, 0);
         guy(-1.2, hv - 2.75, 0, 1, null, 'sit');
         guy(1.2, hv - 2.75, 0, 1, null, 'sit');
+        // CONVEYOR CATCH: plates ride this counter — record the line, left to right
+        { const [ax2, az2] = P(-a/2 + 0.3, hv - 1.6);
+          const [bx2, bz2] = P(a/2 - 0.3, hv - 1.6);
+          KOIS.push({ A: { x: ax2, z: az2 }, B: { x: bx2, z: bz2 },
+                      len: Math.hypot(bx2 - ax2, bz2 - az2) }); }
       }
       for (const uo of [-hu*0.5, 0, hu*0.5]) {         // paper lanterns
         vis(0x8b929a, uo, 0, 0.05, 0.05, 0.5, CEIL_H - 0.55);
@@ -2374,6 +2380,11 @@ function furnishRoom(R, b, r, dx, dz, walls) {
         solid(0, hv*0.55, 1.5, 1.5);
         for (const uo of [-1.5, 0, 1.5]) cyl(0xc9a24b, uo, hv*0.55 - 1.7, 0.06, 0.9, 0);
         for (const uo of [-0.75, 0.75]) vis(0x8c3f5e, uo, hv*0.55 - 1.7, 1.4, 0.06, 0.07, 0.78);
+        // THE HEIST: sweeping alarm beams guard this exhibit after you take the job on
+        { const [ex2, ez2] = P(0, hv*0.55 - 1.2);
+          const [tx2, tz2] = P(ud, Math.min(0, -hv + 5.2));
+          HEISTS.push({ ex: { x: ex2, z: ez2 }, tee: { x: tx2, z: tz2 },
+                        cx: R.cx, cz: R.cz, arm: Math.max(2.2, Math.min(hu, hv) - 1.2) }); }
       }
       for (const [up, vp, kind] of [[-hu*0.5, -hv*0.1, 0], [hu*0.5, -hv*0.1, 1]]) {
         if (!ok(up, vp, 1.1, 1.1)) continue;           // side plinths
@@ -2414,6 +2425,11 @@ function furnishRoom(R, b, r, dx, dz, walls) {
           cyl(0xc9a24b, uT, vt + e*(len/2 - 0.4), 0.07, 1.1, 1.0);
           sph(0xf0b429, uT, vt + e*(len/2 - 0.4), 0.09, 2.2);
         }
+        // THE INITIATION: stand beside the table and prove yourself. The table's
+        // foot is inside the doorway's F-reach, so the tee goes to the side.
+        { const su = [uT + 2.6, uT - 2.6, uT + 3.2, uT - 3.2].find(u2 => ok(u2, vt, 0.8, 0.8));
+          const [tx2, tz2] = P(su !== undefined ? su : uT, su !== undefined ? vt : vt + len/2 + 1.2);
+          OWLS.push({ tee: { x: tx2, z: tz2 } }); }
       }
       backPanel(0x8f9aa6, 0, 2.6, 3.0, 2.2);           // the sacred tablet
       for (let gy = 0; gy < 3; gy++) for (let gx = -1; gx <= 1; gx++)
@@ -4090,10 +4106,15 @@ function trafficNear(x, z, r) {
   return false;
 }
 const LANE = 3.4;
+const tagCol = new THREE.Color();
 function renderTraffic() {
   const cnt = {};
   for (const k in VEH_INST) cnt[k] = 0;
+  let rc = 0;                                     // rival chevrons drawn this frame
+  const bob = Math.sin(performance.now()*0.005)*0.14;
   for (const t of traffic) {
+    // a wrecked rival waiting to respawn is hidden once it has finished tumbling
+    if (t.rival && t.rival.respawn > 0 && t.knock <= 0) continue;
     const inst = VEH_INST[t.type]; const i = cnt[t.type];
     if (i >= VEH_CAP) continue;
     dummy.position.set(t.x, t.y, t.z);
@@ -4106,6 +4127,14 @@ function renderTraffic() {
     for (const p of VEH_PARTS) if (inst[p]) inst[p].setMatrixAt(i, dummy.matrix);
     inst.paint.setColorAt(i, t.col);
     cnt[t.type] = i+1;
+    if (t.rival && rc < RIVAL_CAP) {              // the marker chevron over the roof
+      dummy.position.set(t.x, t.y + 3.3 + bob, t.z);
+      dummy.rotation.set(0, performance.now()*0.002, 0);
+      dummy.scale.set(1,1,1); dummy.updateMatrix();
+      rivalTag.setMatrixAt(rc, dummy.matrix);
+      rivalTag.setColorAt(rc, tagCol.setHex(t.rival.mood === 'hunt' ? 0xff2a1e : 0xffb020));
+      rc++;
+    }
   }
   dummy.rotation.order = 'XYZ';
   for (const k in VEH_INST) {
@@ -4113,6 +4142,9 @@ function renderTraffic() {
     for (const p of VEH_PARTS) if (inst[p]) { inst[p].count = cnt[k]; inst[p].instanceMatrix.needsUpdate = true; }
     if (inst.paint.instanceColor) inst.paint.instanceColor.needsUpdate = true;
   }
+  rivalTag.count = rc;
+  rivalTag.instanceMatrix.needsUpdate = true;
+  if (rivalTag.instanceColor) rivalTag.instanceColor.needsUpdate = true;
 }
 function rejoin(t) {
   const ni = nearestNode(t.x, t.z); if (ni < 0) return;
@@ -4145,6 +4177,7 @@ function rejoin(t) {
 }
 function updateTraffic(dt) {
   updateGaps();
+  if (tauntT > 0) tauntT -= dt;
   for (const t of traffic) {
     if (t.hitCooldown > 0) t.hitCooldown -= dt;
     if (t.knock > 0) {
@@ -4183,6 +4216,7 @@ function updateTraffic(dt) {
       if (t.knock <= 0 && !t.derby && !t.racer) rejoin(t);   // derby and race cars live off the graph
       continue;
     }
+    if (t.rival) { if (updateRival(t, dt)) continue; }
     if (t.derby) { updateDerbyCar(t, dt); continue; }
     if (t.racer) { updateRacerCar(t, dt); continue; }
     if (t.cop) {
@@ -5018,7 +5052,8 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyR') resetAll();
   // ride, gate, doorway, then the shop games, then car — F is the one interact key
   if (e.code === 'KeyF' && !tryRide() && !tryGate() && !tryDoor() && !tryBowl() &&
-      !tryRush() && !tryWhack() && !tryDance() && !tryPint()) toggleVehicle();
+      !tryRush() && !tryWhack() && !tryDance() && !tryPint() &&
+      !tryHeist() && !tryKoi() && !tryOwl()) toggleVehicle();
   if (e.code === 'KeyH') honk();
   if (e.code === 'KeyN') setMuted(!muted);
   if (e.code.startsWith('Digit')) shopBuy(+e.code.slice(5) - 1);        // the garage menu
@@ -5166,6 +5201,7 @@ function updateCar(dt) {
       // derby rivals are the one thing you're *meant* to ram: no heat, and your own
       // car shrugs most of it off so a bout isn't lost to attrition
       if (other.derby) derbyHit(other, impact);
+      else if (other.rival) rivalHit(other, impact);
       damageCar(impact*(other.derby ? 0.16 : 0.45));
       shake = Math.min(1.6, shake + 0.4 + impact*0.02);
       burst(other.x, 1.2, other.z, 0xffe27a, 6);
@@ -5569,6 +5605,7 @@ function punch() {
   }
   hitCratesAt(px + fx*1.3, pz + fz*1.3, 1.5);        // a fist opens one too
   whackTry();                                        // and scores at the arcade
+  initiationInput('P');                              // and counts before the Order
   if (!best) return;
   const now = performance.now();
   best.combo = (now - (best.hitAt || 0) < 2500) ? (best.combo || 0) + 1 : 1;
@@ -5622,6 +5659,7 @@ function kick() {
   hitCratesAt(ox, oz, 2.0);                          // the boot busts a crate open
   puttKick(fx, fz);                                  // and putts the mini-golf ball
   whackTry();                                        // and counts at the arcade
+  initiationInput('K');                              // and counts before the Order
   // chickens are fair game for the boot — Feather Frenzy runs on this counter
   for (const c of chickens) {
     if (c.dead > 0) continue;
@@ -5655,6 +5693,36 @@ const COMBO_HOLD = 4.0;                       // seconds of calm before a run ba
 const STAR_AT = [0, 14, 36, 66, 104, 150];    // heat needed for 1..5 stars
 const COP_PAINT = 0x1b2f6b, COP_SPEED = 30, COP_MAX = 5;
 const PURSUE_R = 36;                          // inside this they leave the graph and come at you
+
+// ---- FREE-ROAM RIVALS -------------------------------------------------------
+// A handful of named menaces who live in the traffic. They cruise the road graph
+// like anyone else until you are in a car within RIVAL_NOTICE, then they leave the
+// graph, hunt you and ram — no heat, no arrest, just aggravation. Ram one back hard
+// enough and it wrecks (bonus coins + chaos) and a new one rolls in a while later, so
+// they read as recurring rivals rather than disposable traffic.
+const RIVAL_NOTICE = 74, RIVAL_LOSE = 130, RIVAL_SPEED = 34, RIVAL_HP = 62, RIVAL_CAP = 4;
+const RIVAL_DEFS = [
+  { name: 'SPIKE',  type: 'truck',   color: 0xe8532f,
+    taunts: [['Found you!', "You're mine now.", 'Nowhere to run!'],
+             ['Gotcha!', 'Feel that?', 'Ha! Again!'],
+             ['Coward!', 'Come back and fight!', 'Chicken!']] },
+  { name: 'NITRO',  type: 'convert', color: 0xb026ff,
+    taunts: [['Race you? No. Wreck you.', 'Hello, roadkill.', 'Eyes on you.'],
+             ['Boom!', 'Paint trade!', 'Dented ya!'],
+             ['Weak!', 'Slow poke!', 'See ya, loser.']] },
+  { name: 'MAULER', type: 'wagon',   color: 0x1a1c22,
+    taunts: [['Fresh meat.', 'I smell fear.', 'This road is mine.'],
+             ['Crunch.', 'Nighty night.', 'Off you go.'],
+             ['Pathetic.', 'Run then.', 'Next time.']] },
+];
+const rivals = [];
+let tauntT = 0;
+function rivalTaunt(t, kind) {
+  if (tauntT > 0) return;
+  tauntT = 2.6;
+  const lines = t.rival.taunts[kind] || t.rival.taunts[0];
+  toast(t.rival.name + ': ' + lines[(Math.random()*lines.length)|0]);
+}
 
 let chaosScore = 0, comboPts = 0, comboMult = 1, comboT = 0, comboHits = 0;
 let heat = 0, stars = 0, cleanT = 99, bustT = 0;
@@ -6020,6 +6088,90 @@ function spawnCop() {
   traffic.push(t); cops.push(t);
   return true;
 }
+
+// a bright downward chevron over each rival so you can pick them out of traffic
+const rivalTag = instanced(new THREE.ConeGeometry(0.55, 1.0, 4).rotateX(Math.PI),
+  new THREE.MeshBasicMaterial({ color: 0xffffff }), RIVAL_CAP, false);
+rivalTag.count = 0; scene.add(rivalTag);
+function rivalHome(t) {                          // a far town node to (re)enter from
+  const sub = mode === 'car' ? car.position : player.position;
+  let best = -1, bd = 0;
+  for (let k = 0; k < 40; k++) {
+    const i = (Math.random()*NET.nodes.length)|0, n = NET.nodes[i];
+    if (!n.e.length || NET.edges[n.e[0]].hw) continue;      // start on a town street
+    const d = Math.hypot(n.x - sub.x, n.z - sub.z);
+    if (d > 120 && d > bd) { bd = d; best = i; }
+  }
+  return best < 0 ? (Math.random()*NET.nodes.length)|0 : best;
+}
+function spawnRival(def) {
+  const from = rivalHome(def), n = NET.nodes[from];
+  const t = { type: def.type, color: def.color, col: new THREE.Color(def.color),
+    x: n.x, z: n.z, yaw: 0, ei: n.e[0], from, dist: 0,
+    baseSpeed: rnd(13, 17), cur: 8, gap: 99, fx: 0, fz: 1,
+    stopping: false, waitT: 0, vx: 0, vz: 0, spin: 0, knock: 0, hitCooldown: 0,
+    y: 0, vy: 0, pitch: 0, roll: 0, pitchV: 0, rollV: 0, rec: 0,
+    rival: { name: def.name, taunts: def.taunts, mood: 'cruise', huntT: 0, cd: 0,
+             hp: RIVAL_HP, respawn: 0, def } };
+  traffic.push(t); rivals.push(t);
+}
+// returns true when the rival is driving itself (hunting or down); false while it
+// cruises the graph like ordinary traffic and should fall through to that code.
+function updateRival(t, dt) {
+  const r = t.rival;
+  if (r.respawn > 0) {
+    r.respawn -= dt;
+    if (r.respawn <= 0) {                        // revive far away, good as new
+      const from = rivalHome(r.def), n = NET.nodes[from];
+      t.from = from; t.ei = n.e[0]; t.dist = 0; t.x = n.x; t.z = n.z;
+      t.y = 0; t.pitch = 0; t.roll = 0; t.knock = 0; r.hp = RIVAL_HP; r.mood = 'cruise';
+    }
+    return true;
+  }
+  const dx = car.position.x - t.x, dz = car.position.z - t.z, d = Math.hypot(dx, dz) || 1;
+  r.cd = Math.max(0, r.cd - dt);
+  if (r.mood === 'cruise') {
+    if (mode === 'car' && d < RIVAL_NOTICE) { r.mood = 'hunt'; r.huntT = 16; rivalTaunt(t, 0); }
+    return false;
+  }
+  r.huntT -= dt;
+  if (r.huntT <= 0 || mode !== 'car' || d > RIVAL_LOSE) {
+    if (d <= RIVAL_LOSE && r.huntT <= 0) rivalTaunt(t, 2);
+    r.mood = 'cruise'; rejoin(t); return false;
+  }
+  t.yaw = lerpAngle(t.yaw, Math.atan2(dx, dz), 1 - Math.exp(-dt*3.4));
+  t.cur += (RIVAL_SPEED - t.cur) * Math.min(1, dt*2.6);
+  const res = collideCircle(t.x + Math.sin(t.yaw)*t.cur*dt, t.z + Math.cos(t.yaw)*t.cur*dt, 1.9, colliders);
+  t.x = res.x; t.z = res.z; t.fx = Math.sin(t.yaw); t.fz = Math.cos(t.yaw);
+  if (t.cur > 1.5) hitPeopleAt(t.x, t.z, t.fx, t.fz, t.cur, 1.9);
+  if (d < 4.7 && r.cd <= 0) {                     // rammed you
+    r.cd = 1.2;
+    damageCar(6 + Math.min(9, t.cur*0.35));
+    speed *= 0.72; shake = Math.min(1.7, shake + 0.5);
+    burst((t.x + car.position.x)/2, 1.2, (t.z + car.position.z)/2, 0xff6a3d, 9);
+    clangSfx(t.cur);
+    t.vx = -t.fx*8; t.vz = -t.fz*8; t.spin = rnd(-1.2, 1.2); t.knock = 0.45;
+    rivalTaunt(t, 1);
+  }
+  return true;
+}
+// you rammed a rival: chip its health, and wreck it on a hard enough hit
+function rivalHit(t, impact) {
+  const r = t.rival;
+  if (r.respawn > 0) return;
+  r.hp -= impact;
+  if (r.hp <= 0) {
+    r.respawn = 8; r.mood = 'cruise';
+    addCoins(70); chaosHit(45);
+    burst(t.x, 1.4, t.z, 0xff8a3d, 22); burst(t.x, 1.0, t.z, 0x33343c, 12);
+    toast('WRECKED ' + r.name + '!');
+    const a = Math.random()*6.28;                 // fling it, big
+    t.vx = Math.cos(a)*impact*0.9; t.vz = Math.sin(a)*impact*0.9;
+    t.vy = 6 + impact*0.2; t.spin = rnd(-3, 3); t.pitchV = rnd(-4, 4); t.rollV = rnd(-4, 4);
+    t.knock = 1.6;
+  }
+}
+for (const def of RIVAL_DEFS) spawnRival(def);
 function despawnCop(t) {
   const i = traffic.indexOf(t); if (i >= 0) traffic.splice(i, 1);
   const j = cops.indexOf(t);    if (j >= 0) cops.splice(j, 1);
@@ -7462,6 +7614,97 @@ function updateBowl(dt) {
     p.state = 'idle'; p.pos = 0; p.target = 0; p.doneT = 0;
   }
 }
+// ---- the heist, the conveyor, the initiation ----
+{
+  for (const h of HEISTS) {
+    h.beams = [0, 1].map(k => {
+      const m = new THREE.Mesh(BOX(h.arm*2, 0.06, 0.28),
+        new THREE.MeshBasicMaterial({ color: 0xff3b30, transparent: true, opacity: 0.6, depthWrite: false }));
+      m.position.set(h.cx, 0.55, h.cz); m.visible = false; scene.add(m);
+      return m;
+    });
+    h.active = false; h.a = 0;
+  }
+  for (const K of KOIS) {
+    // the conveyor runs whether anyone plays or not — it is scenery that happens
+    // to be a game. Five plates, one gold, one wasabi.
+    const kinds = ['gold', 'norm', 'wasabi', 'norm', 'norm'];
+    K.plates = kinds.map((kind, i) => {
+      const g = new THREE.Group();
+      const plate = new THREE.Mesh(new THREE.CylinderGeometry(0.16, 0.14, 0.05, 12),
+        toon(kind === 'gold' ? 0xc9a24b : 0xf6f3ea));
+      g.add(plate);
+      const top = new THREE.Mesh(new THREE.SphereGeometry(0.09, 10, 8),
+        toon(kind === 'gold' ? 0xffd23b : kind === 'wasabi' ? 0x7fbf3f : 0xe87ab0));
+      top.position.y = 0.1; g.add(top);
+      scene.add(g);
+      return { g, kind, t: i * K.len / kinds.length };
+    });
+  }
+  for (const o of OWLS) { o.active = false; o.seq = []; o.idx = 0; }
+}
+const OWL_MOVES = { P: '👊 PUNCH', K: '🦶 KICK' };
+function owlShow(o) {
+  banner('THE ORDER SHOWS', o.seq.map(k => OWL_MOVES[k]).join(' · ') + ' — repeat it');
+}
+function tryOwl() {
+  const o = nearGameTee(OWLS); if (!o) return false;
+  o.active = true;
+  o.seq = [Math.random() < 0.5 ? 'P' : 'K']; o.idx = 0;
+  owlShow(o);
+  return true;
+}
+function initiationInput(k) {
+  for (const o of OWLS) {
+    if (!o.active) continue;
+    if (k === o.seq[o.idx]) {
+      o.idx++;
+      if (sirenCtx) tone(523 + o.idx*80, sirenCtx.currentTime, 0.07, 0.07, 'triangle');
+      if (o.idx >= o.seq.length) {
+        if (o.seq.length >= 7) {
+          o.active = false; addCoins(80); coinSfx();
+          banner('INITIATED', 'the Order accepts you · +80 coins');
+        } else {
+          o.seq.push(Math.random() < 0.5 ? 'P' : 'K'); o.idx = 0;
+          owlShow(o);
+        }
+      }
+    } else {
+      const pay = (o.seq.length - 1) * 8;
+      o.active = false;
+      toast(pay ? 'THE OWL FROWNS · +' + pay : 'THE OWL FROWNS');
+      if (pay) { addCoins(pay); coinSfx(); }
+    }
+    return;
+  }
+}
+function tryHeist() {
+  const h = nearGameTee(HEISTS); if (!h) return false;
+  h.active = true; h.a = 0;
+  h.beams.forEach(b => b.visible = true);
+  banner('THE HEIST', 'reach the gold bust — the red beams are alarms (you can jump them)');
+  return true;
+}
+function tryKoi() {
+  if (mode !== 'foot' || playerRag.active) return false;
+  for (const K of KOIS) {
+    // grab whatever plate is passing in front of you
+    let best = null, bd = 1.2;
+    for (const p of K.plates) {
+      const d = Math.hypot(p.g.position.x - player.position.x, p.g.position.z - player.position.z);
+      if (d < bd) { bd = d; best = p; }
+    }
+    const nearBar = Math.hypot((K.A.x + K.B.x)/2 - player.position.x, (K.A.z + K.B.z)/2 - player.position.z) < K.len/2 + 1.6;
+    if (!nearBar) continue;
+    if (!best) { toast('time it…'); return true; }
+    if (best.kind === 'gold') { addCoins(8); coinSfx(); toast('OMAKASE! +8'); }
+    else if (best.kind === 'wasabi') { shake = Math.min(1.4, shake + 0.7); toast('WASABI!!'); sayOuch && sayOuch('kick'); }
+    else { addCoins(2); coinSfx(); toast('tasty +2'); }
+    best.t = 0;                                    // the plate goes back to the kitchen
+    return true;
+  }
+  return false;
+}
 // one shared "stand here, press F" test for the round-based games
 function nearGameTee(list) {
   if (mode !== 'foot' || playerRag.active) return null;
@@ -7579,6 +7822,48 @@ function updateShopGames(dt) {
       const pay = d.streak*4 + (d.streak >= 10 ? 20 : 0);
       toast(d.streak ? d.streak + ' STEPS +' + pay : 'THE FLOOR WINS…');
       if (pay) { addCoins(pay); coinSfx(); }
+    }
+  }
+  for (const h of HEISTS) {
+    if (!h.active) continue;
+    h.a += dt * 0.9;
+    h.beams[0].rotation.y = h.a;
+    h.beams[1].rotation.y = -h.a * 1.35 + 1.2;
+    h.beams.forEach(b => b.material.opacity = 0.45 + 0.2*Math.sin(markerBob*5));
+    const px2 = player.position.x - h.cx, pz2 = player.position.z - h.cz;
+    const rr = Math.hypot(px2, pz2);
+    if (mode !== 'foot' || rr > 30) {                 // walked out on the job
+      h.active = false; h.beams.forEach(b => b.visible = false); continue;
+    }
+    if (Math.hypot(h.ex.x - player.position.x, h.ex.z - player.position.z) < 1.5) {
+      h.active = false; h.beams.forEach(b => b.visible = false);
+      addCoins(25); coinSfx(); chaosHit(6);
+      banner('GOT THE GOODS', '+25 coins · walk out like you own it');
+      continue;
+    }
+    if (player.position.y < 0.9 && rr < h.arm && !playerRag.active) {
+      // distance from the player to each sweeping bar
+      for (const b of h.beams) {
+        const ca = Math.cos(b.rotation.y), sa = Math.sin(b.rotation.y);
+        // bar runs along (ca, -sa) in xz (rotation.y spins the +x axis that way)
+        const perp = Math.abs(px2*sa + pz2*ca);
+        if (perp < 0.45) {
+          h.active = false; h.beams.forEach(bb => bb.visible = false);
+          heat = Math.min(heat + 22, STAR_AT[5] * 1.25);
+          toast('ALARM!'); shake = Math.min(1.4, shake + 0.6);
+          if (sirenCtx) { const t2 = sirenCtx.currentTime;
+            tone(1200, t2, 0.12, 0.1); tone(900, t2 + 0.15, 0.12, 0.1); }
+          break;
+        }
+      }
+    }
+  }
+  for (const K of KOIS) {
+    const ux = (K.B.x - K.A.x)/K.len, uz = (K.B.z - K.A.z)/K.len;
+    for (const p of K.plates) {
+      p.t += 1.2*dt;
+      if (p.t > K.len) p.t -= K.len;
+      p.g.position.set(K.A.x + ux*p.t, 1.1, K.A.z + uz*p.t);
     }
   }
   for (const p of PINTS) {
@@ -9156,6 +9441,10 @@ function updateHUD(dt) {
     else if (nearGameTee(RUSHES)) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to start CRATE RUSH'; }
     else if (nearGameTee(WHACKS)) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> for WHACK-A-CABINET'; }
     else if (nearGameTee(DANCES)) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to hit the dance floor'; }
+    else if (nearGameTee(HEISTS)) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to case the museum'; }
+    else if (nearGameTee(OWLS)) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to seek initiation'; }
+    else if (KOIS.some(K => Math.hypot((K.A.x + K.B.x)/2 - player.position.x, (K.A.z + K.B.z)/2 - player.position.z) < K.len/2 + 1.6))
+      { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to grab a plate — gold pays best'; }
     else if (PINTS.some(p => p.state === 'idle' && Math.hypot(p.A.x - player.position.x, p.A.z - player.position.z) < 2.2))
       { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to slide a pint'; }
     else if (nearestJackable()) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to borrow this car'; }
@@ -9473,9 +9762,9 @@ rngNeutral(() => {
   ramps$.add(rampP, 'length', 5, 24, 0.5).name('run-up (feel)').onChange(reshape);
 
   const traffic$ = gui.addFolder('Traffic');
-  const trafP = { density: traffic.filter(t => !t.cop && !t.derby && !t.racer).length };
+  const trafP = { density: traffic.filter(t => !t.cop && !t.derby && !t.racer && !t.rival).length };
   traffic$.add(trafP, 'density', 0, 260, 5).name('cars in town').onChange(v => {
-    const civil = traffic.filter(t => !t.cop && !t.derby && !t.racer);
+    const civil = traffic.filter(t => !t.cop && !t.derby && !t.racer && !t.rival);
     if (v > civil.length) for (let i = civil.length; i < v; i++) spawnTraffic();
     else for (let i = civil.length - 1; i >= v; i--) {
       const k = traffic.indexOf(civil[i]); if (k >= 0) traffic.splice(k, 1);
@@ -9528,6 +9817,7 @@ tagNoInk(scene);
   if (drift.length) console.warn('CAR_JOB out of step with MISSION_DEFS:', drift);
 }
 
+window.__probe = { rivals, player, car, rivalHit, carHP:()=>carHealth };
 const clock = new THREE.Clock();
 function animate() {
   requestAnimationFrame(animate);
