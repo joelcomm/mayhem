@@ -1776,15 +1776,17 @@ function fillTireFire(B) {
   const r = B.r;
   const cx = (r.x0+r.x1)/2, cz = (r.z0+r.z1)/2;
   rect(lotPos, r.x0, r.z0, r.x1, r.z1, 0.014, lotUV, 9);
+  const heap = [];
   for (let k = 0; k < 90; k++) {                                      // heaped tyres
     const a = prng()*Math.PI*2, rad = prng()*22;
     const h = Math.max(0, 9 - rad*0.34) * prng();
-    put(0x2b2f38, baked(new THREE.TorusGeometry(1.5, 0.62, 6, 10),
-      cx + Math.cos(a)*rad, 0.6 + h, cz + Math.sin(a)*rad, Math.PI/2, 0, prng()*3));
+    const tx = cx + Math.cos(a)*rad, tz = cz + Math.sin(a)*rad, cy = 0.6 + h;
+    put(0x2b2f38, baked(new THREE.TorusGeometry(1.5, 0.62, 6, 10), tx, cy, tz, Math.PI/2, 0, prng()*3));
+    heap.push({ x: tx, z: tz, top: cy + 0.62 });                     // top of the tube — where you stand
   }
   addBox(cx, cz, 30, 30, 'fire');
   TIREFIRE = { cx, cz, x0: r.x0, z0: r.z0, x1: r.x1, z1: r.z1,
-               col: colliders[colliders.length-1] };
+               col: colliders[colliders.length-1], heap };
   for (let k = 0; k < 5; k++) {
     const a = prng()*Math.PI*2, rad = prng()*12;
     fireSpots.push({ x: cx + Math.cos(a)*rad, y: 6, z: cz + Math.sin(a)*rad });
@@ -7442,10 +7444,12 @@ if (TIREFIRE) {
     const px = cx + Math.cos(th) * R, pz = cz + Math.sin(th) * R;
     const h = 1.2 + i * 1.05;
     PADS.push({ x: px, z: pz, r: PR, h });
-    // the column is a real solid: sides you cannot pass, top you land on. Radius 1.0
-    // (a hair under the ~1.85 m gap to the next pad centre, once the 0.75 m player
-    // radius is added) so neighbouring columns never eject you off the tier you stand on.
-    TIRECOLS.push({ x: px, z: pz, r: 1.0, top: h });
+    // the column is a real solid: sides you cannot pass, top you land on. Radius 0.9 so
+    // the push-out (0.9 + 0.75 player = 1.65) stays comfortably inside the pad top you're
+    // aiming for (PR = 1.7) — no thin dead ring where you're held off the column but not
+    // yet on the pad — and well under the ~1.85 m gap to the next pad, so neighbours never
+    // eject you off the tier you stand on.
+    TIRECOLS.push({ x: px, z: pz, r: 0.9, top: h });
     // the tyre column beneath it, and a worn cap you stand on
     for (let y = 0.5; y < h - 0.2; y += 0.85)
       tori.push(baked(torus, px, y, pz, Math.PI/2, 0, (i*13 + y*7) % 3));
@@ -7497,6 +7501,20 @@ if (TIREFIRE) {
     p.position.set(cx + sx, 2.75, TIREFIRE.z0 + 3); scene.add(p);
   }
   console.log(`tire climb: ${PADS.length} pads, summit at h ${top.h.toFixed(1)}`);
+
+  // Every heaped tyre in the yard is climbable too — not just the spiral. Each gets a
+  // generous pad on its top face so you stand on it instead of clipping in. Pads ONLY,
+  // no side columns: the heap is packed tight and overlapping, and a forest of column
+  // push-outs would shove you sideways off one tyre into the gap beside the next. With
+  // pads alone, padY simply lifts you onto the highest tyre within a step of your feet,
+  // and the big 1.9 m radius means the footprints overlap enough that there's always a
+  // pad underfoot — you can never be ejected into a hole and fall through the pile.
+  let heapTyres = 0;
+  if (TIREFIRE.heap) for (const t of TIREFIRE.heap) {
+    PADS.push({ x: t.x, z: t.z, r: 1.9, h: t.top });
+    heapTyres++;
+  }
+  console.log(`tire heap: ${heapTyres} climbable tyres`);
 }
 // A flame throws you off if you touch its column. Non-lethal — you tumble down and
 // climb again — because instant death on a platformer is just rage.
