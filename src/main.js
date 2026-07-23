@@ -4714,6 +4714,10 @@ function buildPlayerCar(type, color) {
   return grp;
 }
 const car = new THREE.Group(); scene.add(car);
+// YXZ so mid-air pitch (rotation.x) tips the nose whatever the heading — with the
+// default XYZ order the pitch axis is the world's, and a car heading along X rolls
+// instead. With x=0 the two orders compose identically, so nothing else moves.
+car.rotation.order = 'YXZ';
 let carRig = null, carType = 'convert';
 let riderSeat = null;                    // set once the rider is built (see seatRider)
 function setPlayerCar(type, color) {
@@ -4869,6 +4873,8 @@ let MAX_SPEED = 42, ACCEL = 32;
 const MAX_REV = -14, BRAKE = 66, DRAG = 12;
 let armorMul = 1, hasHorn = false;
 let carHealth = 100, shake = 0, coinCount = 0, smokeT = 0, exhaustT = 0, carVY = 0, drowning = 0;
+// stunt state: accumulated while the car is off the ground, banked on landing
+let airT = 0, airPeak = 0, airSpin = 0, airPrevHead = 0;
 
 const coinEl = document.getElementById('coins');
 function addCoins(n) {
@@ -4889,14 +4895,14 @@ function explode() {
   shake = 2.0; carHealth = 100; toast('OW! MY CAR!');
   clearHeat();
   car.position.set(SPAWN.x, surfaceY(SPAWN.x, SPAWN.z), SPAWN.z);
-  heading = SPAWN.heading; speed = 0; carVY = 0; drowning = 0;
+  heading = SPAWN.heading; speed = 0; carVY = 0; drowning = 0; airT = 0; airPeak = 0;
   car.rotation.set(0, heading, 0); camYaw = heading;
 }
 function resetAll() {
   missionEvent('reset');
   setPlayerCar('convert', 0xf07ab0);
   car.position.set(SPAWN.x, surfaceY(SPAWN.x, SPAWN.z), SPAWN.z);
-  heading = SPAWN.heading; speed = 0; carVY = 0; drowning = 0;
+  heading = SPAWN.heading; speed = 0; carVY = 0; drowning = 0; airT = 0; airPeak = 0;
   car.rotation.set(0, heading, 0); camYaw = heading;
   mode = 'car'; player.visible = false; rider.visible = true;
   playerRag.active = false; player.rotation.set(0,0,0); player.position.y = 0;
@@ -4970,12 +4976,22 @@ function updateCar(dt) {
   // altitude: ride the surface, and fall when there isn't one under you
   const gy = surfaceY(car.position.x, car.position.z);
   if (car.position.y > gy + 0.06) {
+    // airborne: the stunt clock runs. Spin is heading wound on mid-air — steering
+    // deliberately has no ground check, which is the whole trick system.
+    if (airT === 0) { airSpin = 0; airPrevHead = heading; airPeak = 0; }
+    airT += dt;
+    airPeak = Math.max(airPeak, car.position.y - gy);
+    airSpin += Math.abs(heading - airPrevHead); airPrevHead = heading;
+    // nose follows the arc — up on the launch, down into the landing
+    car.rotation.x += (THREE.MathUtils.clamp(-carVY*0.026, -0.42, 0.3) - car.rotation.x) * Math.min(1, dt*5);
     carVY -= 30*dt;
     car.position.y += carVY*dt;
-    if (car.position.y < gy) { car.position.y = gy; carVY = 0; }
+    if (car.position.y < gy) { car.position.y = gy; carVY = 0; landStunt(); }
   } else {
     car.position.y += (gy - car.position.y) * Math.min(1, dt*11);   // hug slopes
     carVY = 0;
+    if (airT > 0) landStunt();
+    if (car.rotation.x) car.rotation.x *= Math.max(0, 1 - dt*8);
   }
   if (drowning <= 0 && inWater(car.position.x, car.position.z) && car.position.y < WATER_Y + 1.2) {
     drowning = 1.5;
@@ -5448,6 +5464,40 @@ function bankCombo(bonus) {
   comboPts = 0; comboMult = 1; comboHits = 0;
 }
 
+// A landing banks a stunt. Air time and peak height pay flat points into the combo
+// (flat, not multiplied — the multiplier is for wrecking things); winding the wheel
+// mid-air pays a spin bonus per quarter turn. Kerb hops (under half a second, or
+// under knee height) are free, so ordinary driving never toasts.
+function landStunt() {
+  const t = airT, peak = airPeak, deg = airSpin * 180 / Math.PI;
+  airT = 0; airPeak = 0; airSpin = 0;
+  if (mode !== 'car' || drowning > 0) return;
+  if (t < 0.5 || peak < 0.8) return;
+  const spinB = Math.floor(deg / 90) * 45;
+  const pts = Math.round(t * 80 + peak * 14) + spinB;
+  let label = t >= 2.2 ? 'HUGE AIR!' : t >= 1.2 ? 'BIG AIR!' : 'NICE AIR';
+  if (deg >= 315) label = '360 ' + label;
+  else if (deg >= 150) label = 'SPIN + ' + label;
+  comboHits++;
+  if (comboHits % 3 === 0) comboMult = Math.min(8, comboMult + 1);
+  comboPts += pts;
+  comboT = COMBO_HOLD;
+  // a fraction of the heat a wreck of the same worth would draw — stunts are showing
+  // off, not crime, but the cops still notice a car doing 360s over the park
+  heat = Math.min(heat + Math.min(pts * 0.06, 8), STAR_AT[5] * 1.25);
+  cleanT = 0;
+  toast(label + '  +' + pts);
+  stuntSfx(t);
+}
+function stuntSfx(t) {
+  if (!sirenCtx) return;
+  const at = sirenCtx.currentTime, big = t >= 1.2;
+  tone(523, at, 0.06, 0.09, 'triangle');
+  tone(784, at + 0.07, 0.06, 0.09, 'triangle');
+  tone(1047, at + 0.14, big ? 0.16 : 0.09, 0.1, 'triangle');
+  if (big) tone(1568, at + 0.24, 0.18, 0.09, 'triangle');
+}
+
 // ---- police ----
 const cops = [];
 const copLight = instanced(BOX(1.7, 0.3, 0.55), new THREE.MeshBasicMaterial({ color: 0xffffff }), COP_MAX, false);
@@ -5723,7 +5773,7 @@ function busted() {
   clearHeat();
   shake = 1.8; carHealth = 100;
   car.position.set(SPAWN.x, surfaceY(SPAWN.x, SPAWN.z), SPAWN.z);
-  heading = SPAWN.heading; speed = 0; carVY = 0; drowning = 0;
+  heading = SPAWN.heading; speed = 0; carVY = 0; drowning = 0; airT = 0; airPeak = 0;
   car.rotation.set(0, heading, 0); camYaw = heading;
   // wherever they caught you, you restart in the car
   mode = 'car'; player.visible = false; rider.visible = true;
