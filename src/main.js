@@ -948,9 +948,11 @@ const CEIL_H = 4.6;
 const ROOMS = [];
 // Playable minigame sites, recorded by the fit-out pass as it builds the rooms:
 // PUTTS gets each Putt Paradise's real cup positions and a tee; BOWLS gets each
-// Strike City's first lane (its tee, direction and pin rack). The runtime systems
-// live in the MINIGAMES section.
-const PUTTS = [], BOWLS = [];
+// Strike City's first lane; RUSHES gets Bargain Barn's clear aisle spots; WHACKS
+// gets Pixel Palace's cabinets; DANCES gets Club Inferno's lit floor tiles;
+// PINTS gets the Rusty Mug's bar line. The runtime systems live in the
+// MINIGAMES section.
+const PUTTS = [], BOWLS = [], RUSHES = [], WHACKS = [], DANCES = [], PINTS = [];
 
 // The glazing band's opening, in building-local Y. Everything that stands in front of a
 // shop window — the shell wall, the room's own lining, the dark band the glass sits in —
@@ -1054,6 +1056,7 @@ const WALKIN = [];
 // Castle gets a gate and a hollow great hall, the stadium loses two segments to an
 // open gateway. Their parts are built solid first (identical RNG burns), then dropped.
 const CASTLE = { drop: [], col: null, cx: 0, cz: 0, w: 0, d: 0 };
+let TIREFIRE = null;
 const STADIUM = { gate: [], cx: 0, cz: 0, rx: 0, rz: 0 };
 const PRISON = { drop: [], col: null, gate: null, newCols: [] };
 
@@ -1775,6 +1778,8 @@ function fillTireFire(B) {
       cx + Math.cos(a)*rad, 0.6 + h, cz + Math.sin(a)*rad, Math.PI/2, 0, prng()*3));
   }
   addBox(cx, cz, 30, 30, 'fire');
+  TIREFIRE = { cx, cz, x0: r.x0, z0: r.z0, x1: r.x1, z1: r.z1,
+               col: colliders[colliders.length-1] };
   for (let k = 0; k < 5; k++) {
     const a = prng()*Math.PI*2, rad = prng()*12;
     fireSpots.push({ x: cx + Math.cos(a)*rad, y: 6, z: cz + Math.sin(a)*rad });
@@ -2053,6 +2058,11 @@ function furnishRoom(R, b, r, dx, dz, walls) {
         }
         for (let k = -1; k <= 1; k++) cyl(0x8c3f5e, s*(hu - 3.4), vb + k*len*0.3, 0.3, 0.55, 0);
         guy(s*(hu - 3.4), vb, s, 0, null, 'sit');      // a regular at the bar
+        // LAST ORDERS: the bar top is a shuffleboard — record its line, tap end first
+        { const [ax2, az2] = P(s*(hu - 2.4), vb - len/2 + 0.35);
+          const [bx2, bz2] = P(s*(hu - 2.4), vb + len/2 - 0.35);
+          PINTS.push({ A: { x: ax2, z: az2 }, B: { x: bx2, z: bz2 },
+                       len: Math.hypot(bx2 - ax2, bz2 - az2) }); }
       }
       table(-s*(hu*0.42), hv*0.42, 0x7d5a3c, 0x8c3f5e, 2);
       table(-s*(hu*0.48), -hv*0.3, 0x7d5a3c, 0x8c3f5e, 1);
@@ -2151,7 +2161,23 @@ function furnishRoom(R, b, r, dx, dz, walls) {
       // (no staff bowler on lane 0 any more — that tee is the player's)
       break;
     }
-    case 'BARGAIN BARN':        furnStore([0xd0392b, 0x2f6fc4, 0xf0b429, 0x8ad14f], 0xcfe6c8); break;
+    case 'BARGAIN BARN': {
+      furnStore([0xd0392b, 0x2f6fc4, 0xf0b429, 0x8ad14f], 0xcfe6c8);
+      // CRATE RUSH: record up to six clear aisle spots (post-furniture, so ok()
+      // knows what's standing) and a tee by the door
+      const spots = [];
+      for (const vv of [-hv*0.55, -hv*0.1, hv*0.35, hv*0.65])
+        for (const uu of [-hu*0.6, -hu*0.15, hu*0.3, hu*0.65]) {
+          if (spots.length >= 6 || !ok(uu, vv, 1.2, 1.2)) continue;
+          const [sx2, sz2] = P(uu, vv); spots.push({ x: sx2, z: sz2 });
+        }
+      if (spots.length >= 4) {
+        // the tee stands past the doorway's F-reach, or the door eats the keypress
+        const [tx2, tz2] = P(ud, Math.min(0, -hv + 5.2));
+        RUSHES.push({ spots, tee: { x: tx2, z: tz2 } });
+      }
+      break;
+    }
     case 'LEFTY’S':     furnStore([0x59c9a5, 0x2f6fc4, 0xe87ab0, 0xf0b429], 0x59c9a5); break;
     case 'ARMY SURPLUS': furnStore([0x2f6a52, 0x9a8f6a, 0x4a4f58, 0x6b5b45], 0x9a8f6a); break;
     case "TONY'S PIZZA":
@@ -2202,6 +2228,14 @@ function furnishRoom(R, b, r, dx, dz, walls) {
         solid(0, vI, rowLen, 2.0);
         guy(-rowLen/2 + 0.5, vI - 1.6, 0, 1, { style: 'spiky', shirt: 0x8ad14f });
         guy(rowLen/2 - 0.5, vI + 1.6, 0, -1, { shirt: 0xe87ab0 });
+        // WHACK-A-CABINET: every cabinet on the island is a target
+        const cabs = [];
+        for (let i = 0; i < n; i++) for (const r2 of [-1, 1]) {
+          const [wx2, wz2] = P(-rowLen/2 + 0.5 + i*1.05, vI + r2*0.5);
+          cabs.push({ x: wx2, z: wz2 });
+        }
+        const [tx2, tz2] = P(ud, Math.min(0, -hv + 5.2));   // past the door's F-reach
+        WHACKS.push({ cabs, tee: { x: tx2, z: tz2 } });
       }
       const um = ud - s*3.0;                           // change machine
       if (ok(um, -hv + 1.1, 0.9, 0.7)) {
@@ -2389,8 +2423,14 @@ function furnishRoom(R, b, r, dx, dz, walls) {
     case 'CLUB INFERNO': {
       const n = clamp(Math.floor(Math.min(2*hu - 3, 2*hv - 5)/1.1), 2, 4);
       const f0 = -(n*1.1)/2 + 0.55, fv = -hv*0.05;
-      for (let i = 0; i < n; i++) for (let j = 0; j < n; j++)   // the lit floor
+      const tiles = [];
+      for (let i = 0; i < n; i++) for (let j = 0; j < n; j++) { // the lit floor
         vis((i + j) % 2 ? 0xe87ab0 : 0x7fe0ff, f0 + i*1.1, fv + f0 + j*1.1, 1.06, 1.06, 0.08, 0.09);
+        const [dx2, dz2] = P(f0 + i*1.1, fv + f0 + j*1.1);
+        tiles.push({ x: dx2, z: dz2 });                        // DANCE FLOOR targets
+      }
+      { const [tx2, tz2] = P(0, fv - (n*1.1)/2 - 1.3);
+        DANCES.push({ tiles, tee: { x: tx2, z: tz2 } }); }
       sph(0xd8dde4, 0, fv, 0.5, CEIL_H - 1.15);        // mirror ball
       vis(0x8b929a, 0, fv, 0.05, 0.05, 0.55, CEIL_H - 0.6);
       if (counter(0, hv - 1.5, 2.8, 1.1, 0x7b4fa7, 0xf0b429)) {
@@ -3865,6 +3905,20 @@ function deckY(x, z) {
   }
   return best;
 }
+// Standing pads — the tire-fire climb. Each is a flat disc top at height h; step onto
+// its footprint and the altitude code lifts you there, same as a deck. Footprints never
+// overlap, so the single-valued surface stays well-defined: miss a pad and you are over
+// bare ground (or a lower pad) and you fall.
+const PADS = [];
+function padY(x, z) {
+  let best = 0;
+  for (const p of PADS) {
+    const dx = x - p.x, dz = z - p.z;
+    if (dx*dx + dz*dz > p.r*p.r) continue;
+    if (p.h > best) best = p.h;
+  }
+  return best;
+}
 function surfaceY(x, z) {
   const d = Math.abs(z - riverZ(x));
   if (d < RIVER_HW + 11) {
@@ -3872,7 +3926,8 @@ function surfaceY(x, z) {
     if (d <= RIVER_HW) return -6.4;               // riverbed
     return -6.4 + ((d - RIVER_HW) / 11) * 6.4;    // sloping bank
   }
-  return groundH(x, z) + (RAMPS.length ? rampY(x, z) : 0) + (DECKS.length ? deckY(x, z) : 0);
+  return groundH(x, z) + (RAMPS.length ? rampY(x, z) : 0) + (DECKS.length ? deckY(x, z) : 0)
+       + (PADS.length ? padY(x, z) : 0);
 }
 const inWater = (x, z) => Math.abs(z - riverZ(x)) < RIVER_HW && !onBridge(x, z);
 
@@ -4961,8 +5016,9 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyC') camIdx = (camIdx+1) % 3;
   if (e.code === 'KeyM') mapView = !mapView;
   if (e.code === 'KeyR') resetAll();
-  // ride, then gate, then doorway, then the bowling tee, then car — F is the one interact key
-  if (e.code === 'KeyF' && !tryRide() && !tryGate() && !tryDoor() && !tryBowl()) toggleVehicle();
+  // ride, gate, doorway, then the shop games, then car — F is the one interact key
+  if (e.code === 'KeyF' && !tryRide() && !tryGate() && !tryDoor() && !tryBowl() &&
+      !tryRush() && !tryWhack() && !tryDance() && !tryPint()) toggleVehicle();
   if (e.code === 'KeyH') honk();
   if (e.code === 'KeyN') setMuted(!muted);
   if (e.code.startsWith('Digit')) shopBuy(+e.code.slice(5) - 1);        // the garage menu
@@ -5512,6 +5568,7 @@ function punch() {
     }
   }
   hitCratesAt(px + fx*1.3, pz + fz*1.3, 1.5);        // a fist opens one too
+  whackTry();                                        // and scores at the arcade
   if (!best) return;
   const now = performance.now();
   best.combo = (now - (best.hitAt || 0) < 2500) ? (best.combo || 0) + 1 : 1;
@@ -5564,6 +5621,7 @@ function kick() {
   }
   hitCratesAt(ox, oz, 2.0);                          // the boot busts a crate open
   puttKick(fx, fz);                                  // and putts the mini-golf ball
+  whackTry();                                        // and counts at the arcade
   // chickens are fair game for the boot — Feather Frenzy runs on this counter
   for (const c of chickens) {
     if (c.dead > 0) continue;
@@ -7027,6 +7085,114 @@ let riding = null, rideExitCd = 0;
 }
 
 // =================================================================
+//  THE TIRE-FIRE CLIMB
+//  The eternal tire fire is now a vertical platforming puzzle: a spiral of
+//  tyre-stack platforms winding up out of a burning core, with flame jets to
+//  dodge and a trophy at the summit. Built here, after every audit and flush, so
+//  it is entirely free of the seeded stream — the pads, columns, flames and
+//  trophy are plain runtime objects.
+//
+//  The platforms are PADS, not colliders: each is a flat disc top the altitude
+//  code lifts you onto, so the ordinary on-foot jump does all the work. Miss one
+//  and you fall to the lot floor and climb again. Footprints never overlap, which
+//  is what keeps surfaceY single-valued.
+// =================================================================
+const flames = [];
+let summitTrophy = null;
+if (TIREFIRE) {
+  const { cx, cz } = TIREFIRE;
+  // open the lot: the 30x30 fire box kept you out. Swapped for nothing here (post-audit,
+  // post-tree, like the prison gate) so trees never grew inside and the audit stays clean.
+  const fi = colliders.indexOf(TIREFIRE.col); if (fi >= 0) colliders.splice(fi, 1);
+
+  // the climbing route — a spiral that tightens and rises. Radius shrinks monotonically
+  // so the helix never returns to the same (x,z); the angle step is small enough that
+  // consecutive pads are a running-jump apart, not a chasm.
+  const N = 13, PR = 1.7;
+  const tori = [], caps = [];
+  const torus = new THREE.TorusGeometry(1.3, 0.5, 6, 12);
+  for (let i = 0; i < N; i++) {
+    const th = i * 0.5, R = 7.6 - i * 0.34;
+    const px = cx + Math.cos(th) * R, pz = cz + Math.sin(th) * R;
+    const h = 1.2 + i * 1.05;
+    PADS.push({ x: px, z: pz, r: PR, h });
+    // the tyre column beneath it, and a worn cap you stand on
+    for (let y = 0.5; y < h - 0.2; y += 0.85)
+      tori.push(baked(torus, px, y, pz, Math.PI/2, 0, (i*13 + y*7) % 3));
+    caps.push(baked(new THREE.CylinderGeometry(PR, PR*0.92, 0.28, 16), px, h - 0.14, pz));
+  }
+  scene.add(new THREE.Mesh(merge(tori), toon(0x23252c)));
+  scene.add(new THREE.Mesh(merge(caps), toon(0x33353d)));
+
+  // the burning heart — a big central column you cannot cheese up the middle of, plus
+  // jets on the outer edge of a few pads so the safe footing is the inner side. Flames
+  // are always on: pure spatial avoidance, no timing. touch one and it flings you off.
+  flames.push({ x: cx, z: cz, y0: 0, h: 15, r: 3.2 });
+  for (const i of [2, 5, 8, 10]) {
+    const th = i * 0.5, R = 7.6 - i * 0.34, h = 1.2 + i * 1.05;
+    flames.push({ x: cx + Math.cos(th) * (R + 1.9), z: cz + Math.sin(th) * (R + 1.9),
+                  y0: h - 0.5, h: 2.4, r: 1.5 });
+  }
+  for (const f of flames) fireSpots.push({ x: f.x, y: f.y0 + 4, z: f.z });
+
+  // the summit: a wider platform over the top pad, and a trophy on it
+  const top = PADS[N - 1];
+  scene.add(new THREE.Mesh(new THREE.CylinderGeometry(2.6, 2.4, 0.4, 20).translate(top.x, top.h - 0.2, top.z), toon(0x3a3d47)));
+  PADS[N - 1] = { x: top.x, z: top.z, r: 2.6, h: top.h };
+  const tg = merge([
+    baked(new THREE.CylinderGeometry(0.5, 0.56, 0.16, 16), 0, 0.08, 0),
+    baked(new THREE.CylinderGeometry(0.12, 0.12, 0.4, 16), 0, 0.34, 0),
+    baked(new THREE.SphereGeometry(0.42, 16, 12).scale(1, 0.9, 1), 0, 0.9, 0),
+    baked(new THREE.TorusGeometry(0.4, 0.07, 8, 14).rotateY(Math.PI/2), -0.5, 0.86, 0),
+    baked(new THREE.TorusGeometry(0.4, 0.07, 8, 14).rotateY(Math.PI/2),  0.5, 0.86, 0),
+  ]);
+  const trophyM = new THREE.Mesh(tg, new THREE.MeshToonMaterial({ color: 0xffd23b, gradientMap: RAMP }));
+  trophyM.position.set(top.x, top.h + 0.1, top.z); scene.add(trophyM);
+  summitTrophy = { g: trophyM, x: top.x, z: top.z, y: top.h, got: false, spin: 0 };
+
+  const t = signTexture('TIRE FIRE CLIMB', '#2b2f38', '#ff7a2b', 512, 128);
+  const brd = new THREE.Mesh(new THREE.PlaneGeometry(14, 3.5),
+    new THREE.MeshBasicMaterial({ map: t, transparent: true, side: THREE.DoubleSide }));
+  brd.position.set(cx, 5.5, TIREFIRE.z0 + 3); brd.rotation.y = Math.PI; scene.add(brd);
+  for (const sx of [-6.4, 6.4]) {
+    const p = new THREE.Mesh(BOX(0.7, 5.5, 0.7), toon(0x6b6f76));
+    p.position.set(cx + sx, 2.75, TIREFIRE.z0 + 3); scene.add(p);
+  }
+  console.log(`tire climb: ${PADS.length} pads, summit at h ${top.h.toFixed(1)}`);
+}
+// A flame throws you off if you touch its column. Non-lethal — you tumble down and
+// climb again — because instant death on a platformer is just rage.
+function updateTireClimb(dt) {
+  if (summitTrophy && !summitTrophy.got) {
+    summitTrophy.spin += dt * 1.6;
+    summitTrophy.g.rotation.y = summitTrophy.spin;
+    summitTrophy.g.position.y = summitTrophy.y + 0.1 + Math.sin(summitTrophy.spin) * 0.08;
+    if (mode === 'foot' && !playerRag.active) {
+      const dx = summitTrophy.x - player.position.x, dz = summitTrophy.z - player.position.z;
+      if (dx*dx + dz*dz < 6 && Math.abs(player.position.y - summitTrophy.y) < 2.5) {
+        summitTrophy.got = true; summitTrophy.g.visible = false;
+        addCoins(300); coinSfx();
+        burst(summitTrophy.x, summitTrophy.y + 1, summitTrophy.z, 0xffd23b, 22);
+        banner('KING OF THE HILL', '+300 coins · you conquered the tyre fire');
+      }
+    }
+  }
+  if (mode !== 'foot' || playerRag.active || playerIFrames > 0) return;
+  for (const f of flames) {
+    const dx = player.position.x - f.x, dz = player.position.z - f.z;
+    if (dx*dx + dz*dz > f.r*f.r) continue;
+    if (player.position.y < f.y0 - 0.6 || player.position.y > f.y0 + f.h) continue;
+    // fling: outward from the flame, and up, so you clear the pad and drop
+    const d = Math.hypot(dx, dz) || 1;
+    applyRagdoll(player, playerRag, dx/d, dz/d, 11);
+    shake = Math.min(1.4, shake + 0.4);
+    burst(player.position.x, player.position.y + 0.5, player.position.z, 0xff7a2b, 10);
+    toast('OW! HOT!');
+    return;
+  }
+}
+
+// =================================================================
 //  THE FARM PEN
 //  Feather Frenzy's new home. The flock used to live in the Retirement Castle's
 //  great hall, which meant kicking chickens while being shoved off interior
@@ -7248,6 +7414,181 @@ function updateBowl(dt) {
       else if (n) { addCoins(n*4); coinSfx(); }
       bl.resetT = 2.0;
     }
+  }
+}
+
+// ---- the four shop games: crate rush, whack-a-cabinet, dance floor, last orders ----
+{
+  const crateGeo = merge([BOX(0.85, 0.8, 0.85).translate(0, 0.4, 0),
+                          BOX(0.95, 0.12, 0.95).translate(0, 0.86, 0)]);
+  for (const r of RUSHES) {
+    r.crates = r.spots.map(sp => {
+      const m = new THREE.Mesh(crateGeo, toon(0x9a6b3f));
+      m.position.set(sp.x, 0.1, sp.z); m.castShadow = true; m.visible = false; scene.add(m);
+      return m;
+    });
+    r.active = false; r.t = 0; r.got = 0;
+  }
+  for (const w of WHACKS) {
+    w.lamp = new THREE.Mesh(BOX(1.0, 0.5, 1.0),
+      new THREE.MeshBasicMaterial({ color: 0xffd23b, transparent: true, opacity: 0.85, depthWrite: false }));
+    w.lamp.visible = false; scene.add(w.lamp);
+    w.active = false; w.t = 0; w.lit = -1; w.litT = 0; w.hits = 0;
+  }
+  for (const d of DANCES) {
+    d.lamp = new THREE.Mesh(new THREE.PlaneGeometry(1.06, 1.06).rotateX(-Math.PI/2),
+      new THREE.MeshBasicMaterial({ color: 0xffffff, transparent: true, opacity: 0.9, depthWrite: false }));
+    d.lamp.visible = false; scene.add(d.lamp);
+    d.active = false; d.lit = -1; d.w = 0; d.streak = 0;
+  }
+  for (const p of PINTS) {
+    p.glass = new THREE.Group();
+    const body = new THREE.Mesh(new THREE.CylinderGeometry(0.09, 0.08, 0.22, 10), toon(0xd8891f));
+    body.position.y = 0.11; p.glass.add(body);
+    const foam = new THREE.Mesh(new THREE.CylinderGeometry(0.095, 0.095, 0.05, 10), toon(0xf6f3ea));
+    foam.position.y = 0.25; p.glass.add(foam);
+    p.glass.visible = false; scene.add(p.glass);
+    p.mat = new THREE.Mesh(new THREE.CircleGeometry(0.55, 20).rotateX(-Math.PI/2),
+      new THREE.MeshBasicMaterial({ color: 0xffd23b, transparent: true, opacity: 0.75, depthWrite: false }));
+    p.mat.visible = false; scene.add(p.mat);
+    p.state = 'idle'; p.pos = 0; p.target = 0; p.doneT = 0;
+  }
+}
+// one shared "stand here, press F" test for the round-based games
+function nearGameTee(list) {
+  if (mode !== 'foot' || playerRag.active) return null;
+  for (const r of list) {
+    if (r.active) continue;
+    if (Math.hypot(r.tee.x - player.position.x, r.tee.z - player.position.z) < 2.0) return r;
+  }
+  return null;
+}
+function tryRush() {
+  const r = nearGameTee(RUSHES); if (!r) return false;
+  r.active = true; r.t = 25; r.got = 0;
+  r.crates.forEach((m, i) => { m.visible = true; m.position.set(r.spots[i].x, 0.1, r.spots[i].z); });
+  banner('CRATE RUSH', 'run through all ' + r.crates.length + ' crates before the clock');
+  return true;
+}
+function whackNext(w) {
+  let i; do { i = (Math.random()*w.cabs.length)|0; } while (i === w.lit && w.cabs.length > 1);
+  w.lit = i; w.litT = 2.6;
+  w.lamp.visible = true;
+  w.lamp.position.set(w.cabs[i].x, 2.15, w.cabs[i].z);
+}
+function tryWhack() {
+  const w = nearGameTee(WHACKS); if (!w) return false;
+  w.active = true; w.t = 30; w.hits = 0; whackNext(w);
+  banner('WHACK-A-CABINET', 'punch the glowing cabinet — 30 seconds');
+  return true;
+}
+function whackTry() {                              // called from punch() and kick()
+  for (const w of WHACKS) {
+    if (!w.active || w.lit < 0) continue;
+    const c = w.cabs[w.lit];
+    if (Math.hypot(c.x - player.position.x, c.z - player.position.z) < 2.0) {
+      w.hits++; addCoins(2); coinSfx();
+      burst(c.x, 1.6, c.z, 0x7fe0ff, 6);
+      whackNext(w);
+      return true;
+    }
+  }
+  return false;
+}
+function danceNext(d, wMax) {
+  let i; do { i = (Math.random()*d.tiles.length)|0; } while (i === d.lit && d.tiles.length > 1);
+  d.lit = i; d.w = wMax;
+  d.lamp.visible = true;
+  d.lamp.position.set(d.tiles[i].x, 0.22, d.tiles[i].z);
+}
+function tryDance() {
+  const d = nearGameTee(DANCES); if (!d) return false;
+  d.active = true; d.streak = 0; danceNext(d, 3.0);
+  banner('DANCE FLOOR', 'step on the lit tile — keep the streak alive');
+  return true;
+}
+function tryPint() {
+  if (mode !== 'foot' || playerRag.active) return false;
+  for (const p of PINTS) {
+    if (p.state === 'slide') {                     // the second F is the whole skill
+      p.state = 'stopped'; p.doneT = 1.2;
+      if (Math.abs(p.pos - p.target) < 0.6) { addCoins(10); coinSfx(); toast('RIGHT ON THE MAT! +10'); }
+      else if (p.pos > p.target) toast('PAST THEM…');
+      else toast('SHORT…');
+      return true;
+    }
+    if (p.state !== 'idle') continue;
+    if (Math.hypot(p.A.x - player.position.x, p.A.z - player.position.z) > 2.2) continue;
+    p.state = 'slide'; p.pos = 0;
+    p.target = p.len * (0.4 + Math.random()*0.5);
+    p.glass.visible = true; p.mat.visible = true;
+    dingSfx();
+    return true;
+  }
+  return false;
+}
+function updateShopGames(dt) {
+  for (const r of RUSHES) {
+    if (!r.active) continue;
+    r.t -= dt;
+    for (const m of r.crates) {
+      if (!m.visible) continue;
+      if (Math.hypot(m.position.x - player.position.x, m.position.z - player.position.z) < 1.05) {
+        m.visible = false; r.got++;
+        burst(m.position.x, 0.8, m.position.z, 0xc98a3d, 10);
+        addCoins(3); coinSfx();
+        if (r.got >= r.crates.length) { addCoins(30); toast('CLEAN SWEEP! +30'); r.active = false; }
+      }
+    }
+    if (r.active && r.t <= 0) {
+      toast('TIME! ' + r.got + '/' + r.crates.length);
+      r.crates.forEach(m => m.visible = false); r.active = false;
+    }
+  }
+  for (const w of WHACKS) {
+    if (!w.active) continue;
+    w.t -= dt; w.litT -= dt;
+    w.lamp.material.opacity = 0.5 + 0.35*Math.sin(markerBob*6);
+    if (w.litT <= 0) whackNext(w);                 // too slow — it moves on
+    if (w.t <= 0) {
+      w.active = false; w.lamp.visible = false; w.lit = -1;
+      const pay = w.hits*3;
+      toast(w.hits ? w.hits + ' HITS +' + pay : 'NOT ONE…');
+      if (pay) { addCoins(pay); coinSfx(); }
+    }
+  }
+  for (const d of DANCES) {
+    if (!d.active) continue;
+    d.w -= dt;
+    d.lamp.material.opacity = 0.55 + 0.35*Math.sin(markerBob*7);
+    const t2 = d.tiles[d.lit];
+    if (mode === 'foot' && Math.hypot(t2.x - player.position.x, t2.z - player.position.z) < 0.8) {
+      d.streak++; addCoins(2);
+      if (sirenCtx) tone(392 + (d.streak % 8)*66, sirenCtx.currentTime, 0.08, 0.06, 'triangle');
+      danceNext(d, Math.max(1.2, 3.0 - d.streak*0.12));   // the floor speeds up
+    } else if (d.w <= 0) {
+      d.active = false; d.lamp.visible = false; d.lit = -1;
+      const pay = d.streak*4 + (d.streak >= 10 ? 20 : 0);
+      toast(d.streak ? d.streak + ' STEPS +' + pay : 'THE FLOOR WINS…');
+      if (pay) { addCoins(pay); coinSfx(); }
+    }
+  }
+  for (const p of PINTS) {
+    if (p.state === 'idle') continue;
+    const ux = (p.B.x - p.A.x)/p.len, uz = (p.B.z - p.A.z)/p.len;
+    if (p.state === 'slide') {
+      p.pos += 4.2*dt;
+      if (p.pos >= p.len) {                        // off the end of the bar
+        p.state = 'stopped'; p.doneT = 1.2; p.pos = p.len;
+        burst(p.B.x, 1.3, p.B.z, 0xf6f3ea, 8);
+        dingSfx(); toast('OFF THE END…');
+      }
+    } else {
+      p.doneT -= dt;
+      if (p.doneT <= 0) { p.state = 'idle'; p.glass.visible = false; p.mat.visible = false; continue; }
+    }
+    p.glass.position.set(p.A.x + ux*p.pos, 1.06, p.A.z + uz*p.pos);
+    p.mat.position.set(p.A.x + ux*p.target, 1.08, p.A.z + uz*p.target);
   }
 }
 
@@ -8072,6 +8413,9 @@ function updateRoundHUD() {
   if (MI && MI.stage === 1 && MI.id === 'feather') { t = MI.t; s = (MI.data.n || 0) + ' / 7 birds'; }
   if (MI && MI.stage === 1 && MI.id === 'soak') { t = MI.data.t; s = MI.data.soaked + ' soaked · ' + MI.data.esc + ' away'; }
   if (MI && MI.id === 'rampage') { t = MI.t; s = MI.data.n + ' / 6 launched'; }
+  for (const r of RUSHES) if (r.active) { t = r.t; s = r.got + ' / ' + r.crates.length + ' crates'; }
+  for (const w of WHACKS) if (w.active) { t = w.t; s = w.hits + ' hits'; }
+  for (const d of DANCES) if (d.active) { t = d.w; s = d.streak + ' steps'; }
   roundEl.style.display = t === null ? 'none' : 'block';
   if (t === null) return;
   roundClk.textContent = fmtT(t);
@@ -8798,8 +9142,14 @@ function updateHUD(dt) {
       promptEl.innerHTML = nr.waitFor
         ? 'The <b>MAPLE MOUSE</b> is out on the track\u2026'
         : 'Press <b>F</b> to ride the <b>' + nr.label + '</b>'; }
+    else if (PINTS.some(p => p.state === 'slide')) { promptEl.style.display='block'; promptEl.innerHTML = '<b>F</b>! stop it on the gold mat'; }
     else if (nearBowlTee()) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to bowl'; }
     else if (nearPuttBall()) { promptEl.style.display='block'; promptEl.innerHTML = '<b>R-click</b> to putt'; }
+    else if (nearGameTee(RUSHES)) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to start CRATE RUSH'; }
+    else if (nearGameTee(WHACKS)) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> for WHACK-A-CABINET'; }
+    else if (nearGameTee(DANCES)) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to hit the dance floor'; }
+    else if (PINTS.some(p => p.state === 'idle' && Math.hypot(p.A.x - player.position.x, p.A.z - player.position.z) < 2.2))
+      { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to slide a pint'; }
     else if (nearestJackable()) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to borrow this car'; }
     else if (car.position.distanceTo(player.position) < 7) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to get in'; }
     else promptEl.style.display = 'none';
@@ -9170,6 +9520,13 @@ tagNoInk(scene);
   if (drift.length) console.warn('CAR_JOB out of step with MISSION_DEFS:', drift);
 }
 
+window.__probe = { PADS, flames, summitTrophy, TIREFIRE, player, car, surfaceY, JUMP,
+  keys, camIdxSet:v=>{camIdx=v;}, look:(y,p)=>{camYaw=y;camPitch=p;},
+  tp:(x,z,y)=>{player.position.set(x,y||surfaceY(x,z),z);car.position.set(x+80,0,z+80);mode='foot';player.visible=true;rider.visible=false;playerVel.set(0,0,0);playerOnGround=true;},
+  where:()=>[+player.position.x.toFixed(2),+player.position.y.toFixed(2),+player.position.z.toFixed(2)],
+  key:(c,d)=>{keys[c]=d;},
+  gaps:()=>{ const g=[]; for(let i=1;i<PADS.length;i++){ const a=PADS[i-1],b=PADS[i];
+    g.push({h:+(b.h-a.h).toFixed(2), d:+Math.hypot(b.x-a.x,b.z-a.z).toFixed(2)}); } return g; } };
 const clock = new THREE.Clock();
 function animate() {
   requestAnimationFrame(animate);
@@ -9189,10 +9546,12 @@ function animate() {
   updateTraffic(dt);
   updatePeds(dt);
   updateChickens(dt);
+  updateTireClimb(dt);
   updateBombs(dt);
   updateRides(dt);
   updatePutt(dt);
   updateBowl(dt);
+  updateShopGames(dt);
   updatePets(dt);
   updateProps(dt);
   updateCoins(dt, sub);
