@@ -342,11 +342,18 @@ the thing that welds the job loop onto the chaos loop instead of competing with 
   in the car, and *stop* to drop her; she heckles en route.
 - **COLD ONE** (Thirsty Lou, by Town Hall) — on foot: walk into The Rusty Mug,
   grab a pint at the bar, walk it back. Makes the interiors matter.
-- **FEATHER FRENZY** (Nurse Mabel, at the Retirement Castle) — on foot only:
-  walk into the great hall and **kick** 7 chickens in 60 s. Kicks now connect
-  with chickens (feather burst, respawn timer, chaos) and the round counts the
+- **FEATHER FRENZY** (Nurse Mabel, at the **farm pen's gate**) — on foot only:
+  walk into the pen and **kick** 7 chickens in 60 s. Kicks connect with
+  chickens (feather burst, respawn timer, chaos) and the round counts the
   dedicated `chickenKicked` counter, so running birds over with the car doesn't
-  score — the boot is the whole game.
+  score — the boot is the whole game. The flock **moved out of the Retirement
+  Castle** (kicking birds while being shoved off interior walls was the
+  complaint) and into a purpose-built **farm pen** (`PEN`, sited by `findGreen`):
+  a 36×28 m green with a low white rail fence in collider chunks, a 6 m gate
+  gap, a little red barn, hay bales and a MAPLE FARM board. The chicken AI is
+  unchanged — `flockHome()` returns the pen, with the castle hall as fallback
+  if the pen ever fails to find a site. The castle stands empty (its gate and
+  hall remain).
 - **YARD SOAKER — SHELVED.** The prison-break minigame (orange-jumpsuit runners
   planting wall charges, blown breaches, the super soaker with reticule, water
   jet and depleting tank bar) is fully built but **spiked by design decision**:
@@ -477,6 +484,27 @@ behind a partition. A doorway is treated as a hole, not a wall, so standing just
 shallow shop the camera sits out in the street and looks in through the door, which is
 what it should do. `roomT` ramps the camera distance in across the threshold.
 
+### Minigames in the shops: putt & bowl
+The fit-out pass records real play sites as it builds the rooms, and two shops
+became playable (`PUTTS`/`BOWLS`, the MINIGAMES section). Free play paid in
+coins, like Gus's garage — not missions.
+
+- **Putt Paradise has real holes.** The black cups the fit-out was already
+  drawing are recorded in world space, and a ball waits at a tee by the door.
+  **R-click (the kick) putts it** along your facing; it rolls with friction,
+  bounces off the room and the furniture (axis-aligned reflect off the same
+  `walls` boxes the audit uses), and **drops when it dies near a cup** — HOLE!
+  +8, COURSE CLEAR when you've sunk them all, ball respawns at the tee.
+- **Strike City's first lane is live.** That lane skips its baked pins and gets
+  a real rack of six (meshes that tip over, not vanish), a tee where the staff
+  bowler used to stand, and a ball. **F at the tee bowls**; your facing leans
+  the shot off the centreline (blended, not rotated — a blend cannot get a
+  sign wrong), so squaring up matters: STRIKE! pays 40, pins pay 4 each, and a
+  wild aim is a GUTTER…. Pins reset after a couple of seconds.
+
+Both copies of each shop get the treatment (SHOP_NAMES cycles), so there are
+two courses and two lanes in town.
+
 ### Coins in shapes
 The block loop drops a handful of coins into every landmark and yard, which is fine but
 reads as confetti — nothing about where a coin sits tells you anything. Two structured
@@ -552,8 +580,21 @@ Three rides on a real fairground — striped-canopy **carousel** with eight bobb
 horses (clockwise; and note the group-rotation trap below), **THE MAPLE MOUSE** — a
 closed-loop coaster, 64×44 m with crests at ~13 m, paced by gravity (quick through the
 dips, laboured over the crests, a floor under the speed so it can never stall on a
-hill) — and a walled **bumper car** arena with six cars that drive themselves — under a
-MAPLEWOOD FAIR board.
+hill) — and a walled **bumper car** arena — under a MAPLEWOOD FAIR board.
+
+**The bumper arena is 44×32 m** (doubled) with **eight cars, and every cart but
+one has a rider in it** — a seated passenger merged into ~4 meshes per colour
+(thighs folded, arms on the wheel), built from `pickLook`'s palettes. Boarding
+always puts you in the free cart (`freeSeat`), never in somebody's lap.
+
+**The coaster rails are continuous tubes** — a closed CatmullRom through offset
+samples of the track curve, swept as `TubeGeometry`. They used to be chains of
+straight boxes, which from the front seat read as exactly that. Ties and posts
+are still boxes; only the rails needed to be seamless. And **the station has
+stairs now**: the platform used to be a solid collider nobody could climb. It
+is a walking surface instead — a `DECKS` entry raises `surfaceY` over the
+boards, a rising wedge does the stairs (same philosophy as the ramps: part of
+the ground, never a collider), with treads and handrails as visuals.
 
 **The coaster runs a schedule.** A platform with a canopy stands beside the track at
 t=0 — both hill terms are zero there on purpose, so the train arrives at platform
@@ -605,6 +646,12 @@ colliders** — a ramp is a wedge that raises `surfaceY` over its footprint (see
 the slope, and the instant it runs off the lip `surfaceY` drops away, `carVY` takes
 over and it is genuinely airborne, landing on the heightfield like any other drop.
 Making them colliders instead would just give you four walls to crash into.
+
+**The lip throws you now.** The slope the car was just climbing, times its
+speed, becomes its vertical velocity the moment the ground drops away
+(`groundSlope`/`lastGy` in the altitude block, capped at 24 m/s). Before this,
+`carVY` started at 0 off every lip, so "air" was just falling from ramp height
+— the reason ramps never felt like they gave any.
 
 **Air pays now.** While the car is off the ground a stunt clock runs (`airT`/
 `airPeak`/`airSpin` in `updateCar`, banked by `landStunt`): air time and peak

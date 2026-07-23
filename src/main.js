@@ -946,6 +946,11 @@ const DOOR_W = 2.2, DOOR_H = 3.6;      // shop doorway; 742 has its own, narrowe
 const WALL_T = 0.8;                    // visible wall thickness, and the collider's
 const CEIL_H = 4.6;
 const ROOMS = [];
+// Playable minigame sites, recorded by the fit-out pass as it builds the rooms:
+// PUTTS gets each Putt Paradise's real cup positions and a tee; BOWLS gets each
+// Strike City's first lane (its tee, direction and pin rack). The runtime systems
+// live in the MINIGAMES section.
+const PUTTS = [], BOWLS = [];
 
 // The glazing band's opening, in building-local Y. Everything that stands in front of a
 // shop window — the shell wall, the room's own lining, the dark band the glass sits in —
@@ -2119,6 +2124,17 @@ function furnishRoom(R, b, r, dx, dz, walls) {
         if (Math.abs(uL) + 0.95 > hu - M) continue;
         vis(0xe8d8a8, uL, vTop - lLen/2, 1.5, lLen, 0.06, 0.09);
         for (const g of [-0.85, 0.85]) vis(0x4a4f58, uL + g, vTop - lLen/2, 0.18, lLen, 0.12, 0.09);
+        if (i === 0) {
+          // the first lane is PLAYABLE: no baked pins — the minigame owns a live
+          // rack there instead. Record the tee, the roll direction and the pins.
+          const [tx, tz] = P(uL, vTop - lLen - 0.7);
+          const [ex, ez] = P(uL, vTop);
+          const dl = Math.hypot(ex - tx, ez - tz) || 1;
+          BOWLS.push({ tee: { x: tx, z: tz }, dx: (ex - tx)/dl, dz: (ez - tz)/dl, len: dl,
+            pins: [[0, 0], [-0.2, 0.28], [0.2, 0.28], [-0.4, 0.56], [0, 0.56], [0.4, 0.56]]
+              .map(([pu, pv]) => { const [px, pz] = P(uL + pu, vTop + 0.55 + pv); return { x: px, z: pz }; }) });
+          continue;
+        }
         for (const [pu, pv] of [[0, 0], [-0.2, 0.28], [0.2, 0.28], [-0.4, 0.56], [0, 0.56], [0.4, 0.56]])
           cyl(0xf6f3ea, uL + pu, vTop + 0.55 + pv, 0.08, 0.4, 0.15);
       }
@@ -2132,7 +2148,7 @@ function furnishRoom(R, b, r, dx, dz, walls) {
       if (counter(ud - s*3.0, -hv + 1.8, 2.2, 1.0, 0x4f7d8c, 0xe8e3d3) ||
           counter(ud + s*3.0, -hv + 1.8, 2.2, 1.0, 0x4f7d8c, 0xe8e3d3))
         guy(ud - s*3.0, -hv + 2.8, 0, -1, { shirt: 0xd0392b, pants: 0x4a4f58 });
-      guy(s*(hu - M - 1.1), vTop - lLen - 0.6, 0, 1, { shirt: 0xe87ab0 });
+      // (no staff bowler on lane 0 any more — that tee is the player's)
       break;
     }
     case 'BARGAIN BARN':        furnStore([0xd0392b, 0x2f6fc4, 0xf0b429, 0x8ad14f], 0xcfe6c8); break;
@@ -2259,6 +2275,9 @@ function furnishRoom(R, b, r, dx, dz, walls) {
       break;
     case 'PUTT PARADISE': {
       const gw = clamp(hu*0.75, 1.8, 4), gd = clamp(hv*0.7, 1.8, 4.5);
+      // the cups are REAL: their positions are recorded and the minigame drops a
+      // ball you can actually putt into them (see the MINIGAMES section)
+      const putt = { holes: [], tee: null, rect: r, walls, sunk: 0 };
       const g1u = -s*(hu*0.45), g1v = hv*0.4;
       if (ok(g1u, g1v, gw, gd)) {                      // the windmill green
         vis(0x3f9f3a, g1u, g1v, gw, gd, 0.06, 0.09);
@@ -2271,6 +2290,7 @@ function furnishRoom(R, b, r, dx, dz, walls) {
         cyl(0x2b2f38, g1u, g1v - gd/2 + 0.5, 0.11, 0.03, 0.15);
         vis(0x8b929a, g1u + 0.15, g1v - gd/2 + 0.5, 0.05, 0.05, 0.9, 0.15);
         vis(0xd0392b, g1u + 0.35, g1v - gd/2 + 0.5, 0.4, 0.04, 0.22, 0.85);
+        { const [hx, hz] = P(g1u, g1v - gd/2 + 0.5); putt.holes.push({ x: hx, z: hz }); }
       }
       const g2u = s*(hu*0.45), g2v = -hv*0.15;
       if (ok(g2u, g2v, gw, gd*0.8)) {                  // a mound to putt over
@@ -2279,6 +2299,12 @@ function furnishRoom(R, b, r, dx, dz, walls) {
         cyl(0x2b2f38, g2u + gw*0.25, g2v, 0.11, 0.03, 0.15);
         vis(0x8b929a, g2u + gw*0.25 + 0.15, g2v, 0.05, 0.05, 0.9, 0.15);
         vis(0x2f6fc4, g2u + gw*0.25 + 0.35, g2v, 0.4, 0.04, 0.22, 0.85);
+        { const [hx, hz] = P(g2u + gw*0.25, g2v); putt.holes.push({ x: hx, z: hz }); }
+      }
+      if (putt.holes.length) {
+        const [tx, tz] = P(ud, Math.min(0, -hv + 2.6));
+        putt.tee = { x: tx, z: tz };
+        PUTTS.push(putt);
       }
       if (counter(ud - s*2.9, -hv + 1.7, 2.2, 1.0, 0x8ad14f, 0xe8e3d3)) {
         guy(ud - s*2.9, -hv + 2.7, 0, -1, { shirt: 0x8ad14f, pants: 0x6b5b45 });
@@ -3818,6 +3844,27 @@ function rampY(x, z) {
   }
   return best;
 }
+// Raised walking surfaces — the coaster's station platform and its stairs. Same
+// philosophy as the ramps: part of the ground, never a collider, so you walk up
+// the stairs and onto the deck with the ordinary altitude code. A `rise` axis
+// makes an entry a wedge (stairs); without one it is a flat deck.
+const DECKS = [];
+function deckY(x, z) {
+  let best = 0;
+  for (const d of DECKS) {
+    if (x < d.x0 || x > d.x1 || z < d.z0 || z > d.z1) continue;
+    let h = d.h;
+    if (d.rise) {
+      const t = d.rise === 'x+' ? (x - d.x0) / (d.x1 - d.x0)
+              : d.rise === 'x-' ? (d.x1 - x) / (d.x1 - d.x0)
+              : d.rise === 'z+' ? (z - d.z0) / (d.z1 - d.z0)
+              :                   (d.z1 - z) / (d.z1 - d.z0);
+      h *= t;
+    }
+    if (h > best) best = h;
+  }
+  return best;
+}
 function surfaceY(x, z) {
   const d = Math.abs(z - riverZ(x));
   if (d < RIVER_HW + 11) {
@@ -3825,7 +3872,7 @@ function surfaceY(x, z) {
     if (d <= RIVER_HW) return -6.4;               // riverbed
     return -6.4 + ((d - RIVER_HW) / 11) * 6.4;    // sloping bank
   }
-  return groundH(x, z) + (RAMPS.length ? rampY(x, z) : 0);
+  return groundH(x, z) + (RAMPS.length ? rampY(x, z) : 0) + (DECKS.length ? deckY(x, z) : 0);
 }
 const inWater = (x, z) => Math.abs(z - riverZ(x)) < RIVER_HW && !onBridge(x, z);
 
@@ -4914,8 +4961,8 @@ addEventListener('keydown', e => {
   if (e.code === 'KeyC') camIdx = (camIdx+1) % 3;
   if (e.code === 'KeyM') mapView = !mapView;
   if (e.code === 'KeyR') resetAll();
-  // ride, then gate, then doorway, then car — F is the one interact key
-  if (e.code === 'KeyF' && !tryRide() && !tryGate() && !tryDoor()) toggleVehicle();
+  // ride, then gate, then doorway, then the bowling tee, then car — F is the one interact key
+  if (e.code === 'KeyF' && !tryRide() && !tryGate() && !tryDoor() && !tryBowl()) toggleVehicle();
   if (e.code === 'KeyH') honk();
   if (e.code === 'KeyN') setMuted(!muted);
   if (e.code.startsWith('Digit')) shopBuy(+e.code.slice(5) - 1);        // the garage menu
@@ -4965,6 +5012,9 @@ let armorMul = 1, hasHorn = false;
 let carHealth = 100, shake = 0, coinCount = 0, smokeT = 0, exhaustT = 0, carVY = 0, drowning = 0;
 // stunt state: accumulated while the car is off the ground, banked on landing
 let airT = 0, airPeak = 0, airSpin = 0, airPrevHead = 0;
+// the ground's rise per metre under the car, remembered frame to frame — leaving
+// the ground turns it into launch velocity (see the altitude block)
+let lastGy = 0, groundSlope = 0;
 
 const coinEl = document.getElementById('coins');
 function addCoins(n) {
@@ -5073,7 +5123,14 @@ function updateCar(dt) {
   if (car.position.y > gy + 0.06) {
     // airborne: the stunt clock runs. Spin is heading wound on mid-air — steering
     // deliberately has no ground check, which is the whole trick system.
-    if (airT === 0) { airSpin = 0; airPrevHead = heading; airPeak = 0; }
+    if (airT === 0) {
+      airSpin = 0; airPrevHead = heading; airPeak = 0;
+      // The lip throws you now: the slope the car was just climbing, times its
+      // speed, is its vertical velocity at the moment the ground drops away.
+      // Before this, carVY started at 0 and "air" was falling from lip height.
+      if (groundSlope > 0.04) carVY = Math.min(24, Math.abs(speed) * groundSlope);
+      groundSlope = 0;
+    }
     airT += dt;
     airPeak = Math.max(airPeak, car.position.y - gy);
     airSpin += Math.abs(heading - airPrevHead); airPrevHead = heading;
@@ -5083,11 +5140,14 @@ function updateCar(dt) {
     car.position.y += carVY*dt;
     if (car.position.y < gy) { car.position.y = gy; carVY = 0; landStunt(); }
   } else {
+    const run = Math.abs(speed) * dt;                              // rise per metre travelled
+    if (run > 0.01) groundSlope = THREE.MathUtils.clamp((gy - lastGy) / run, -1, 1);
     car.position.y += (gy - car.position.y) * Math.min(1, dt*11);   // hug slopes
     carVY = 0;
     if (airT > 0) landStunt();
     if (car.rotation.x) car.rotation.x *= Math.max(0, 1 - dt*8);
   }
+  lastGy = gy;
   if (drowning <= 0 && inWater(car.position.x, car.position.z) && car.position.y < WATER_Y + 1.2) {
     drowning = 1.5;
     for (let k = 0; k < 26; k++)
@@ -5503,6 +5563,7 @@ function kick() {
     }
   }
   hitCratesAt(ox, oz, 2.0);                          // the boot busts a crate open
+  puttKick(fx, fz);                                  // and putts the mini-golf ball
   // chickens are fair game for the boot — Feather Frenzy runs on this counter
   for (const c of chickens) {
     if (c.dead > 0) continue;
@@ -6042,16 +6103,19 @@ const chickens = [];
   if (cBody.instanceColor) cBody.instanceColor.needsUpdate = true;
   chickens.mesh = cBody; chickens.trim = cTrim;
 }
+// The flock lives in the farm pen now (open ground, low fence); the castle hall
+// is only the fallback if the pen found no site, so the mission always works.
+const flockHome = () => PEN.inner || CASTLE.inner;
 function chickenSpot(c) {
-  const r = CASTLE.inner;
+  const r = flockHome();
   c.x = rnd(r.x0 + 2.4, r.x1 - 2.4); c.z = rnd(r.z0 + 2.4, r.z1 - 2.4);
 }
 let chickensPlaced = false, chickensDowned = 0, chickenKicked = 0;
 function updateChickens(dt) {
-  if (!CASTLE.inner) return;
+  if (!flockHome()) return;
   if (!chickensPlaced) { for (const c of chickens) chickenSpot(c); chickensPlaced = true; }
   const sub = mode === 'car' ? car.position : player.position;
-  const r = CASTLE.inner;
+  const r = flockHome();
   let i = 0;
   for (const c of chickens) {
     if (c.dead > 0) {
@@ -6083,7 +6147,8 @@ function updateChickens(dt) {
       c.yaw = Math.atan2(mx - c.x, mz - c.z) + rnd(-0.3, 0.3);
     const sp = c.fled > 0 ? c.speed : Math.min(c.speed, 1.4);
     if (sp > 0) {
-      const res = collideCircle(c.x + Math.sin(c.yaw)*sp*dt, c.z + Math.cos(c.yaw)*sp*dt, 0.3, CASTLE.walls || colliders);
+      const res = collideCircle(c.x + Math.sin(c.yaw)*sp*dt, c.z + Math.cos(c.yaw)*sp*dt, 0.3,
+        PEN.inner ? PEN.walls : (CASTLE.walls || colliders));
       if (res.hit) c.yaw += 1.4;
       c.x = res.x; c.z = res.z;
       c.phase += dt * (c.fled > 0 ? 26 : 10);
@@ -6416,8 +6481,8 @@ let addJobMarker = null;
   { const b = BLOCKS.find(b2 => b2.zone === 'civic');
     if (b) marker(b.cx + 10, b.cz + 8,
       'THIRSTY LOU', "I'm barred from the Rusty Mug. Fetch me a cold one?", 'mug'); }
-  if (CASTLE.inner) marker(CASTLE.cx + 6, CASTLE.cz - CASTLE.d/2 - 7,
-    'NURSE MABEL', 'Those chickens have taken the great hall. Boot them out!', 'feather');
+  // Nurse Mabel moved to the farm pen with the flock — her marker is placed from
+  // the pen block via addJobMarker, since the pen picks its site with findGreen.
   marker(STADIUM.cx, STADIUM.cz + STADIUM.rz + 9,
     'CRUSHER', 'Three rigs. One arena. Last one rolling wins.', 'derby');
   // The Yard Soaker is SHELVED for now (design didn't land). The giver stays
@@ -6679,8 +6744,9 @@ let riding = null, rideExitCd = 0;
   if (site) {
     const cx = site.x, cz = site.z;
     // carousel and bumper cars stacked on the west side, the doubled coaster loop
-    // taking the whole east two-thirds
-    const at = k => k < 0 ? [cx - 51, cz - 13] : [cx + 22, cz];
+    // taking the whole east two-thirds. The carousel sits further north than it
+    // used to — the doubled bumper arena needed the room.
+    const at = k => k < 0 ? [cx - 51, cz - 19] : [cx + 22, cz];
     const mesh = (geo, col, x, y, z) => {
       const m = new THREE.Mesh(geo, typeof col === 'number' ? toon(col) : col);
       m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true;
@@ -6742,24 +6808,34 @@ let riding = null, rideExitCd = 0;
       const P = t => [ ox + Math.cos(t)*RX,
                        BASE + 7.2*(0.5 - 0.5*Math.cos(2*t)) + 3.4*(0.5 - 0.5*Math.cos(3*t)),
                        oz + Math.sin(t)*RZ ];
-      const N = 160, rails = [], ties = [], posts = [];
+      // The rails are continuous tubes now, not chains of straight boxes — from the
+      // front seat the box segments read as exactly what they were. A closed
+      // CatmullRom through offset samples, swept as a TubeGeometry, has no seams.
+      const N = 160, ties = [], posts = [];
       const v0 = new THREE.Vector3(), v1 = new THREE.Vector3(), up = new THREE.Vector3(0,1,0);
+      const railCurve = (sgn) => {
+        const pts = [];
+        for (let i = 0; i < 120; i++) {
+          const t = i/120*Math.PI*2;
+          v0.set(...P(t)); v1.set(...P(t + 0.01));
+          const dir = v1.sub(v0).normalize();
+          const side = new THREE.Vector3().crossVectors(dir, up).normalize();
+          pts.push(new THREE.Vector3(v0.x + side.x*sgn*0.52, v0.y + 0.16, v0.z + side.z*sgn*0.52));
+        }
+        return new THREE.CatmullRomCurve3(pts, true);
+      };
+      for (const sgn of [-1, 1])
+        mesh(new THREE.TubeGeometry(railCurve(sgn), 360, 0.09, 10, true), 0xd0392b, 0, 0, 0);
       for (let i = 0; i < N; i++) {
         const t0 = i/N*Math.PI*2, t1 = (i+1)/N*Math.PI*2;
         v0.set(...P(t0)); v1.set(...P(t1));
-        const mid = v0.clone().lerp(v1, 0.5), len = v0.distanceTo(v1);
+        const mid = v0.clone().lerp(v1, 0.5);
         const dir = v1.clone().sub(v0).normalize();
-        const side = new THREE.Vector3().crossVectors(dir, up).normalize();
         const yaw = Math.atan2(dir.x, dir.z), pitch = -Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
-        for (const sgn of [-1, 1]) {
-          const p = mid.clone().addScaledVector(side, sgn*0.52);
-          rails.push(baked(BOX(0.1, 0.12, len*1.06), p.x, p.y + 0.16, p.z, pitch, yaw, 0));
-        }
         if (i % 2 === 0) ties.push(baked(BOX(1.5, 0.09, 0.28), mid.x, mid.y + 0.05, mid.z, pitch, yaw, 0));
         if (i % 8 === 0 && mid.y > 0.6)
           posts.push(baked(BOX(0.34, mid.y, 0.34), mid.x, mid.y/2, mid.z));
       }
-      mesh(merge(rails), 0xd0392b, 0, 0, 0);
       mesh(merge(ties), 0x8c6a44, 0, 0, 0);
       mesh(merge(posts), 0x6b6f76, 0, 0, 0);
       const cart = new THREE.Group();
@@ -6782,7 +6858,27 @@ let riding = null, rideExitCd = 0;
       for (const sz of [-3.6, 3.6])                                            // canopy posts
         mesh(BOX(0.3, 3.4, 0.3), 0x6b6f76, stx + 3.4, deckH + 1.7, stz + sz);
       mesh(BOX(6.4, 0.26, 9.6), 0xd0392b, stx + 3.4, deckH + 3.5, stz);        // canopy
-      colliders.push({ minX: stx + 0.7, maxX: stx + 6.1, minZ: stz - 4.25, maxZ: stz + 4.25 });
+      // The platform is a walking surface, not an obstacle: a DECKS entry raises
+      // surfaceY over the boards, and the stairs on the south end are a rising
+      // wedge, so you climb up and board from the platform like you should.
+      // (It used to be a collider, which is why nobody could get up here.)
+      const deckTop = deckH + 0.22;
+      DECKS.push({ x0: stx + 0.7, x1: stx + 6.1, z0: stz - 4.25, z1: stz + 4.25, h: deckTop });
+      {
+        const sx0 = stx + 2.2, sx1 = stx + 4.6, sz0 = stz + 4.25, sz1 = stz + 8.1;
+        const STEPS = 6;
+        for (let k = 0; k < STEPS; k++)                                        // the treads
+          mesh(BOX(sx1 - sx0, deckTop*(k + 1)/STEPS, (sz1 - sz0)/STEPS),
+            0x8c6a44, (sx0 + sx1)/2, deckTop*(k + 1)/STEPS/2, sz1 - (k + 0.5)*(sz1 - sz0)/STEPS);
+        DECKS.push({ x0: sx0, x1: sx1, z0: sz0, z1: sz1, h: deckTop, rise: 'z-' });
+        for (const rx of [sx0 + 0.1, sx1 - 0.1]) {                             // handrails
+          const rail = new THREE.Mesh(
+            BOX(0.08, 0.08, Math.hypot(sz1 - sz0, deckTop) + 0.4), toon(0xf6f3ea));
+          rail.position.set(rx, deckTop/2 + 0.95, (sz0 + sz1)/2);
+          rail.rotation.x = Math.atan2(deckTop, sz1 - sz0);
+          scene.add(rail);
+        }
+      }
       FAIR.push({ kind: 'coaster', label: 'MAPLE MOUSE', x: stx + 3.4, z: stz, r: 7,
                   P, cart, t: 0, wait: 10, cx: ox, cz: oz });
       const sign = new THREE.Mesh(new THREE.PlaneGeometry(11, 2.8),
@@ -6793,8 +6889,11 @@ let riding = null, rideExitCd = 0;
 
     // ---- the bumper cars ----------------------------------------------
     {
-      const [bx, bz] = [cx - 51, cz + 16];
-      const HW = 11, HD = 8;
+      // Twice the arena it was — 44x32 m — with eight cars, and every cart but
+      // yours has a rider in it. The free cart is index 0; boarding always puts
+      // you there rather than cycling through occupied seats.
+      const [bx, bz] = [cx - 44, cz + 12];
+      const HW = 22, HD = 16;
       mesh(BOX(HW*2, 0.16, HD*2), 0x4a4f58, bx, 0.08, bz);            // the steel floor
       // A low wall all the way round with one gap to walk in by. The wall segments are
       // real colliders, which is what keeps the cars — and you — inside.
@@ -6808,10 +6907,28 @@ let riding = null, rideExitCd = 0;
       const half = (HW*2 + 0.6 - GAP)/2;                               // front, split for the way in
       wall(-(GAP/2 + half/2), -HD, half, 0.5);
       wall( (GAP/2 + half/2), -HD, half, 0.5);
-      const CARS = 6, cars = [];
+      // a seated passenger, merged into one mesh per colour so seven riders cost
+      // ~4 draw calls each instead of a full buildPerson's dozen
+      const rider = (g) => {
+        const lk = pickLook();
+        const mk = (col, geos) => { const m = new THREE.Mesh(merge(geos), toon(col.getHex ? col.getHex() : col));
+          m.castShadow = true; g.add(m); return m; };
+        mk(lk.pants, [ baked(BOX(0.24, 0.5, 0.24), -0.16, 0.62, 0.22, -1.35),   // thighs, folded
+                       baked(BOX(0.24, 0.5, 0.24),  0.16, 0.62, 0.22, -1.35),
+                       baked(BOX(0.2, 0.4, 0.2), -0.16, 0.42, 0.48),            // shins down
+                       baked(BOX(0.2, 0.4, 0.2),  0.16, 0.42, 0.48) ]);
+        mk(lk.shirt, [ baked(BOX(0.62, 0.72, 0.4), 0, 1.02, 0),                 // torso
+                       baked(BOX(0.16, 0.5, 0.16), -0.42, 1.08, 0.18, -0.9),    // arms reaching the wheel
+                       baked(BOX(0.16, 0.5, 0.16),  0.42, 1.08, 0.18, -0.9) ]);
+        mk(lk.skin,  [ baked(new THREE.SphereGeometry(0.26, 14, 10), 0, 1.62, 0),
+                       baked(BOX(0.12, 0.12, 0.12), -0.42, 1.3, 0.42),
+                       baked(BOX(0.12, 0.12, 0.12),  0.42, 1.3, 0.42) ]);
+        mk(lk.hair,  [ baked(BOX(0.4, 0.14, 0.4), 0, 1.84, -0.02) ]);
+      };
+      const CARS = 8, cars = [];
       for (let k = 0; k < CARS; k++) {
         const g = new THREE.Group();
-        const col = [0xd0392b, 0x2f6fc4, 0x8ad14f, 0xf0b429, 0x7b4fa7, 0x59c9a5][k];
+        const col = [0xd0392b, 0x2f6fc4, 0x8ad14f, 0xf0b429, 0x7b4fa7, 0x59c9a5, 0xe87ab0, 0x3fa9d8][k];
         const shell = new THREE.Mesh(new THREE.CylinderGeometry(1.05, 0.95, 0.75, 16), toon(col));
         shell.position.y = 0.5; shell.castShadow = true; g.add(shell);
         const rim = new THREE.Mesh(new THREE.TorusGeometry(1.08, 0.16, 8, 18).rotateX(Math.PI/2), toon(0x2b2f38));
@@ -6820,13 +6937,14 @@ let riding = null, rideExitCd = 0;
         seat.position.set(0, 1.1, -0.45); g.add(seat);
         const mast = new THREE.Mesh(new THREE.CylinderGeometry(0.05, 0.05, 2.2, 8), toon(0x8b929a));
         mast.position.set(0, 1.95, -0.6); g.add(mast);
+        if (k > 0) rider(g);                          // cart 0 stays free — that one's yours
         scene.add(g);
         const a = k*Math.PI*2/CARS;
-        cars.push({ g, x: bx + Math.cos(a)*6, z: bz + Math.sin(a)*4.5,
+        cars.push({ g, x: bx + Math.cos(a)*12, z: bz + Math.sin(a)*9,
                     yaw: a, spd: 3 + Math.random()*2, turn: 0, bump: 0 });
       }
       FAIR.push({ kind: 'bumper', label: 'BUMPER CARS', x: bx, z: bz - HD - 2.5, r: 6,
-                   cars, HW, HD, bx, bz, seat: 0, cx: bx, cz: bz });
+                   cars, HW, HD, bx, bz, seat: 0, freeSeat: 0, cx: bx, cz: bz });
     }
 
     // one board on the way in
@@ -6842,6 +6960,231 @@ let riding = null, rideExitCd = 0;
     if (addJobMarker) addJobMarker(sx0 - 8, sz0 - 8,
       'INSPECTOR PRU', 'Safety inspection day. Ride all three and tell me they hold.', 'fairjob');
     console.log(`fair: ${FAIR.length} rides at ${cx|0},${cz|0}`);
+  }
+}
+
+// =================================================================
+//  THE FARM PEN
+//  Feather Frenzy's new home. The flock used to live in the Retirement Castle's
+//  great hall, which meant kicking chickens while being shoved off interior
+//  walls; a pen on open ground has a low rail fence, a wide gate, and room to
+//  swing a boot. The castle keeps its gate and stands empty.
+// =================================================================
+const PEN = { inner: null, walls: [] };
+{
+  const site = findGreen(42, 34);
+  if (site) {
+    const cx = site.x, cz = site.z, W = 36, D = 28, GATE = 6;
+    PEN.inner = { x0: cx - W/2, x1: cx + W/2, z0: cz - D/2, z1: cz + D/2, cx, cz };
+    // white rail fence in short chunks — posts plus two rails, gate gap mid-south.
+    // Chunks are colliders (for the player and the flock both), pen is axis-aligned
+    // so the AABBs are exact.
+    const parts = [];
+    const post = (x, z) => parts.push(baked(BOX(0.18, 1.0, 0.18), x, 0.5, z));
+    const rail = (x, z, w, d) => {
+      for (const h of [0.42, 0.86]) parts.push(baked(BOX(w || 0.1, 0.09, d || 0.1), x, h, z));
+      const b = { minX: x - (w || 0.1)/2, maxX: x + (w || 0.1)/2,
+                  minZ: z - (d || 0.1)/2, maxZ: z + (d || 0.1)/2 };
+      colliders.push(b); PEN.walls.push(b);
+    };
+    for (let x = -W/2; x <= W/2; x += 3.6) { post(cx + x, cz - D/2); post(cx + x, cz + D/2); }
+    for (let z = -D/2; z <= D/2; z += 3.5) { post(cx - W/2, cz + z); post(cx + W/2, cz + z); }
+    for (let x = -W/2 + 1.8; x <= W/2 - 1.8; x += 3.6) {
+      if (Math.abs(x) < GATE/2 + 1.2) { rail(cx + x, cz + D/2, 3.6, 0.12); continue; } // gate side stays open
+      rail(cx + x, cz - D/2, 3.6, 0.12); rail(cx + x, cz + D/2, 3.6, 0.12);
+    }
+    for (let z = -D/2 + 1.75; z <= D/2 - 1.75; z += 3.5) {
+      rail(cx - W/2, cz + z, 0.12, 3.5); rail(cx + W/2, cz + z, 0.12, 3.5);
+    }
+    const fence = new THREE.Mesh(merge(parts), toon(0xf6f3ea));
+    fence.castShadow = true; scene.add(fence);
+    // a little red barn in the north-east corner, solid
+    {
+      const bxp = cx + W/2 - 5.4, bzp = cz + D/2 - 4.6, BW = 7, BD = 5.4, BH = 3.4;
+      const body = new THREE.Mesh(BOX(BW, BH, BD), toon(0xb03a2e));
+      body.position.set(bxp, BH/2, bzp); body.castShadow = true; scene.add(body);
+      // a 4-sided cone rotated 45° is an axis-aligned pyramid; stretch it to the plan
+      const roof = new THREE.Mesh(
+        new THREE.ConeGeometry(BD * 0.75, 2.2, 4).rotateY(Math.PI/4).scale(BW / (BD * 1.06), 1, 1),
+        toon(0x6a4a2f));
+      roof.position.set(bxp, BH + 1.1, bzp); roof.castShadow = true; scene.add(roof);
+      const doorm = new THREE.Mesh(BOX(2.2, 2.6, 0.15), toon(0x5a3d1e));
+      doorm.position.set(bxp, 1.3, bzp - BD/2 - 0.05); scene.add(doorm);
+      const b = { minX: bxp - BW/2, maxX: bxp + BW/2, minZ: bzp - BD/2, maxZ: bzp + BD/2 };
+      colliders.push(b); PEN.walls.push(b);
+    }
+    // hay bales, visual only
+    for (const [hx, hz] of [[cx - W/2 + 4, cz + D/2 - 3.4], [cx - W/2 + 6.6, cz + D/2 - 4.2]]) {
+      const bale = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 1.7, 14).rotateZ(Math.PI/2), toon(0xd8b44a));
+      bale.position.set(hx, 1.0, hz); bale.castShadow = true; scene.add(bale);
+    }
+    // the sign over the gate, facing the way in
+    const brd = new THREE.Mesh(new THREE.PlaneGeometry(9, 2.3),
+      new THREE.MeshBasicMaterial({ map: signTexture('MAPLE FARM', '#6a4a2f', '#ffd23b', 512, 128),
+                                    transparent: true, side: THREE.DoubleSide }));
+    brd.position.set(cx, 4.6, cz + D/2 + 0.4); scene.add(brd);
+    for (const sx of [-4.2, 4.2]) {
+      const p = new THREE.Mesh(BOX(0.5, 4.6, 0.5), toon(0x6b6f76));
+      p.position.set(cx + sx, 2.3, cz + D/2 + 0.4); scene.add(p);
+    }
+    if (addJobMarker) addJobMarker(cx, cz + D/2 + 9,
+      'NURSE MABEL', "The flock's gone feral down at the farm. Boot me seven of them!", 'feather');
+    console.log(`farm pen at ${cx|0},${cz|0}`);
+  }
+}
+
+// =================================================================
+//  MINIGAMES: PUTT & BOWL
+//  The fit-out pass recorded real cup positions in every Putt Paradise and the
+//  first lane of every Strike City. Here they become playable: a ball at the
+//  putt tee you kick toward the cups, and a bowling ball you send down the lane
+//  with F to scatter a live pin rack. Free play, paid in coins — like Gus's
+//  garage, not like a mission.
+// =================================================================
+{
+  const geo = new THREE.SphereGeometry(0.14, 12, 10);
+  for (const p of PUTTS) {
+    p.ball = new THREE.Mesh(geo, toon(0xf6f3ea));
+    p.ball.castShadow = true;
+    p.ball.position.set(p.tee.x, 0.2, p.tee.z);
+    scene.add(p.ball);
+    p.vx = 0; p.vz = 0; p.respawn = 0;
+  }
+  const pinGeo = new THREE.CylinderGeometry(0.09, 0.075, 0.42, 10);
+  const ballGeo = new THREE.SphereGeometry(0.17, 14, 12);
+  for (const bl of BOWLS) {
+    bl.pinMs = bl.pins.map(pp => {
+      const m = new THREE.Mesh(pinGeo, toon(0xf6f3ea));
+      m.position.set(pp.x, 0.36, pp.z); m.castShadow = true; scene.add(m);
+      return m;
+    });
+    bl.down = bl.pins.map(() => 0);
+    bl.ball = new THREE.Mesh(ballGeo, toon(0xb03a2e));
+    bl.ball.visible = false; scene.add(bl.ball);
+    bl.rolling = false; bl.resetT = 0; bl.travel = 0;
+    bl.bx = 0; bl.bz = 0; bl.bvx = 0; bl.bvz = 0;
+  }
+}
+function nearPuttBall() {
+  if (mode !== 'foot' || playerRag.active) return null;
+  for (const p of PUTTS) {
+    if (!p.ball || p.respawn > 0) continue;
+    if (Math.hypot(p.ball.position.x - player.position.x, p.ball.position.z - player.position.z) < 2.2)
+      return p;
+  }
+  return null;
+}
+function puttKick(fx, fz) {                       // called from kick()
+  const p = nearPuttBall(); if (!p) return false;
+  p.vx = fx * 9; p.vz = fz * 9;
+  dingSfx();
+  return true;
+}
+function updatePutt(dt) {
+  for (const p of PUTTS) {
+    const b = p.ball; if (!b) continue;
+    if (p.respawn > 0) {
+      p.respawn -= dt;
+      if (p.respawn <= 0) { b.visible = true; b.position.set(p.tee.x, 0.2, p.tee.z); p.vx = p.vz = 0; }
+      continue;
+    }
+    if (!p.vx && !p.vz) continue;
+    let nx = b.position.x + p.vx*dt, nz = b.position.z + p.vz*dt;
+    const r = p.rect, R2 = 0.14;
+    if (nx < r.x0 + R2) { nx = r.x0 + R2; p.vx = Math.abs(p.vx)*0.7; }
+    if (nx > r.x1 - R2) { nx = r.x1 - R2; p.vx = -Math.abs(p.vx)*0.7; }
+    if (nz < r.z0 + R2) { nz = r.z0 + R2; p.vz = Math.abs(p.vz)*0.7; }
+    if (nz > r.z1 - R2) { nz = r.z1 - R2; p.vz = -Math.abs(p.vz)*0.7; }
+    for (const w of p.walls) {                    // the furniture bounces it back
+      if (nx > w.minX - R2 && nx < w.maxX + R2 && nz > w.minZ - R2 && nz < w.maxZ + R2) {
+        const pl = nx - (w.minX - R2), pr = (w.maxX + R2) - nx;
+        const pt = nz - (w.minZ - R2), pb = (w.maxZ + R2) - nz;
+        const m = Math.min(pl, pr, pt, pb);
+        if (m === pl) { nx = w.minX - R2; p.vx = -Math.abs(p.vx)*0.7; }
+        else if (m === pr) { nx = w.maxX + R2; p.vx = Math.abs(p.vx)*0.7; }
+        else if (m === pt) { nz = w.minZ - R2; p.vz = -Math.abs(p.vz)*0.7; }
+        else { nz = w.maxZ + R2; p.vz = Math.abs(p.vz)*0.7; }
+      }
+    }
+    b.position.x = nx; b.position.z = nz;
+    const f = 1 - Math.min(1, dt*0.9);
+    p.vx *= f; p.vz *= f;
+    if (Math.hypot(p.vx, p.vz) < 0.08) { p.vx = p.vz = 0; }
+    for (const h of p.holes) {                    // close and slow drops in
+      if (Math.hypot(nx - h.x, nz - h.z) < 0.32 && Math.hypot(p.vx, p.vz) < 7) {
+        b.visible = false; p.respawn = 1.6; p.vx = p.vz = 0;
+        p.sunk++;
+        coinSfx(); addCoins(8);
+        if (p.sunk >= p.holes.length) { toast('COURSE CLEAR! +8'); p.sunk = 0; }
+        else toast('HOLE! +8');
+        break;
+      }
+    }
+  }
+}
+function nearBowlTee() {
+  if (mode !== 'foot' || playerRag.active) return null;
+  for (const bl of BOWLS) {
+    if (bl.rolling || bl.resetT > 0) continue;
+    if (Math.hypot(bl.tee.x - player.position.x, bl.tee.z - player.position.z) < 2.0) return bl;
+  }
+  return null;
+}
+function tryBowl() {
+  const bl = nearBowlTee(); if (!bl) return false;
+  // your facing leans the shot off the lane's centreline, so aim matters —
+  // blended rather than rotated, which cannot get a sign wrong
+  const fx = Math.sin(player.rotation.y), fz = Math.cos(player.rotation.y);
+  let ax = bl.dx + fx*0.35, az = bl.dz + fz*0.35;
+  const al = Math.hypot(ax, az) || 1; ax /= al; az /= al;
+  bl.rolling = true; bl.travel = 0;
+  bl.bx = bl.tee.x + ax*0.4; bl.bz = bl.tee.z + az*0.4;
+  bl.bvx = ax*10.5; bl.bvz = az*10.5;
+  bl.ball.visible = true;
+  dingSfx();
+  return true;
+}
+function updateBowl(dt) {
+  for (const bl of BOWLS) {
+    bl.down.forEach((v, i) => {                   // pins tip over, don't vanish
+      if (v > 0 && v < 1) {
+        bl.down[i] = Math.min(1, v + dt*3.5);
+        const m = bl.pinMs[i];
+        m.rotation.z = bl.down[i] * 1.5;
+        m.position.y = 0.36 - bl.down[i]*0.22;
+      }
+    });
+    if (bl.resetT > 0) {
+      bl.resetT -= dt;
+      if (bl.resetT <= 0) {
+        bl.down.fill(0);
+        bl.pinMs.forEach((m, i) => { m.rotation.z = 0; m.position.set(bl.pins[i].x, 0.36, bl.pins[i].z); });
+      }
+      continue;
+    }
+    if (!bl.rolling) continue;
+    bl.bx += bl.bvx*dt; bl.bz += bl.bvz*dt;
+    bl.travel += Math.hypot(bl.bvx, bl.bvz)*dt;
+    bl.ball.position.set(bl.bx, 0.32, bl.bz);
+    bl.pins.forEach((pp, i) => {
+      if (bl.down[i]) return;
+      if (Math.hypot(bl.bx - pp.x, bl.bz - pp.z) < 0.42) {
+        bl.down[i] = 0.01; dingSfx();
+        bl.pins.forEach((qq, j) => {              // a falling pin can take a neighbour
+          if (!bl.down[j] && Math.hypot(pp.x - qq.x, pp.z - qq.z) < 0.5 && Math.random() < 0.5)
+            bl.down[j] = 0.01;
+        });
+      }
+    });
+    if (bl.travel > bl.len + 2.2) {
+      bl.rolling = false; bl.ball.visible = false;
+      const n = bl.down.filter(v => v > 0).length;
+      const strike = n >= bl.pins.length;
+      toast(strike ? 'STRIKE! +40' : n ? n + ' PINS +' + n*4 : 'GUTTER…');
+      if (strike) { addCoins(40); coinSfx(); chaosHit(6); }
+      else if (n) { addCoins(n*4); coinSfx(); }
+      bl.resetT = 2.0;
+    }
   }
 }
 
@@ -6965,7 +7308,7 @@ function tryRide() {
     const dx = R.x - player.position.x, dz = R.z - player.position.z;
     if (dx*dx + dz*dz > R.r*R.r) continue;
     if (R.kind === 'coaster' && R.wait <= 0) continue;   // the cart is out on the track
-    if (R.kind === 'bumper') R.seat = (R.seat + 1) % R.cars.length;
+    if (R.kind === 'bumper') R.seat = R.freeSeat || 0;   // the one cart without a rider
     else if (R.kind === 'carousel') R.seat = (R.seat + 1) % R.horses.length;
     riding = R; player.visible = false; camYaw = 0; camPitch = 0;   // look starts dead ahead
     toast('ENJOY THE RIDE');
@@ -7813,9 +8156,9 @@ const MISSION_DEFS = {
   feather: {
     title: 'FEATHER FRENZY', late: 'the flock outlasted you',
     start(m) {
-      const r = CASTLE.inner;
-      m.timed = true; m.t = driveTime(m.giver.x, m.giver.z, CASTLE.cx, CASTLE.cz, 13) + 30;
-      setTarget((r.x0 + r.x1)/2, (r.z0 + r.z1)/2, 9, 'get into the great hall on foot');
+      const r = PEN.inner || CASTLE.inner;
+      m.timed = true; m.t = driveTime(m.giver.x, m.giver.z, r.cx || (r.x0+r.x1)/2, r.cz || (r.z0+r.z1)/2, 13) + 30;
+      setTarget((r.x0 + r.x1)/2, (r.z0 + r.z1)/2, 10, 'get into the pen on foot');
     },
     update(m, dt, sub) {
       if (m.stage === 0) {
@@ -7826,7 +8169,7 @@ const MISSION_DEFS = {
         }
       } else {
         m.data.n = chickenKicked - m.data.base;
-        if (m.data.n >= 7) winMission(150, 'the hall is yours');
+        if (m.data.n >= 7) winMission(150, 'the pen is yours');
       }
     },
     hud(m) { return m.stage ? 'kick the flock · <b>' + (m.data.n || 0) + '/7</b>' : null; },
@@ -8380,6 +8723,8 @@ function updateHUD(dt) {
       promptEl.innerHTML = nr.waitFor
         ? 'The <b>MAPLE MOUSE</b> is out on the track\u2026'
         : 'Press <b>F</b> to ride the <b>' + nr.label + '</b>'; }
+    else if (nearBowlTee()) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to bowl'; }
+    else if (nearPuttBall()) { promptEl.style.display='block'; promptEl.innerHTML = '<b>R-click</b> to putt'; }
     else if (nearestJackable()) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to borrow this car'; }
     else if (car.position.distanceTo(player.position) < 7) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to get in'; }
     else promptEl.style.display = 'none';
@@ -8771,6 +9116,8 @@ function animate() {
   updateChickens(dt);
   updateBombs(dt);
   updateRides(dt);
+  updatePutt(dt);
+  updateBowl(dt);
   updatePets(dt);
   updateProps(dt);
   updateCoins(dt, sub);
