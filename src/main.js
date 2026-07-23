@@ -9817,7 +9817,6 @@ tagNoInk(scene);
   if (drift.length) console.warn('CAR_JOB out of step with MISSION_DEFS:', drift);
 }
 
-window.__probe = { rivals, player, car, rivalHit, carHP:()=>carHealth };
 const clock = new THREE.Clock();
 function animate() {
   requestAnimationFrame(animate);

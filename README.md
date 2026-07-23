@@ -932,6 +932,16 @@ are bucketed by colour and merged, so the whole town is a few dozen draw calls.
   that includes **you on foot**. The player isn't in `pedGrid`, so for a long time
   cars simply shoved you down the road instead of braking; stepping out in front of
   one is now a carjack rather than a mugging
+- **Free-roam rivals.** Three named menaces — SPIKE, NITRO and MAULER — live in the
+  traffic. They cruise the road graph like anyone else until you are in a car within
+  ~74 m, then they leave the graph, hunt you and ram (no heat, no arrest — pure
+  aggravation), taunting as they go. A mood-coloured chevron floats over each so you can
+  pick them out (amber cruising, red hunting). Ram one back hard enough — ~62 HP of
+  impact, roughly two solid hits — and it wrecks for a bonus (70 coins + chaos), gets
+  flung, and a fresh one rolls in from across town eight seconds later. They ride the
+  same knock/rejoin physics and instanced meshes as ordinary traffic, so they cost
+  almost nothing; the only per-rival draw is the chevron. They are excluded from the
+  civilian-density slider so the tuning panel can't cull them.
 - **Nobody walks the ring highway.** `pickNext` is shared with the cars and happily
   turns a walker onto a spur, so peds route through `pedNext`, which refuses highway
   edges and turns around at a highway-only junction. `attachPed` falls back to the
