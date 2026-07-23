@@ -7124,16 +7124,24 @@ if (TIREFIRE) {
   scene.add(new THREE.Mesh(merge(tori), toon(0x23252c)));
   scene.add(new THREE.Mesh(merge(caps), toon(0x33353d)));
 
-  // the burning heart — a big central column you cannot cheese up the middle of, plus
-  // jets on the outer edge of a few pads so the safe footing is the inner side. Flames
-  // are always on: pure spatial avoidance, no timing. touch one and it flings you off.
-  flames.push({ x: cx, z: cz, y0: 0, h: 15, r: 3.2 });
-  for (const i of [2, 5, 8, 10]) {
-    const th = i * 0.5, R = 7.6 - i * 0.34, h = 1.2 + i * 1.05;
-    flames.push({ x: cx + Math.cos(th) * (R + 1.9), z: cz + Math.sin(th) * (R + 1.9),
-                  y0: h - 0.5, h: 2.4, r: 1.5 });
+  // The burning heart: the spiral winds *around* it (pads stay >3 m out) and it only
+  // reaches h 9, so the upper pads and the summit clear it — it is the centrepiece you
+  // climb past, roaring smoke, not a wall. Flames are always on: pure spatial avoidance,
+  // no timing. Touch one and it flings you off to tumble down and climb again.
+  const padAt = i => { const th = i*0.5, R = 7.6 - i*0.34;
+    return { x: cx + Math.cos(th)*R, z: cz + Math.sin(th)*R, h: 1.2 + i*1.05 }; };
+  flames.push({ x: cx, z: cz, y0: 0, h: 9, r: 3.0, big: true });
+  // jets in the gaps between certain pads, nudged outward — a jump that goes wide hits
+  // one, so you learn to hop tight along the inner line. Each still leaves the pad
+  // itself a safe place to stand and aim.
+  for (const i of [1, 4, 6, 9]) {
+    const a = padAt(i), b = padAt(i + 1);
+    const mx = (a.x + b.x)/2, mz = (a.z + b.z)/2;
+    const outx = mx - cx, outz = mz - cz, ol = Math.hypot(outx, outz) || 1;
+    flames.push({ x: mx + outx/ol*1.5, z: mz + outz/ol*1.5,
+                  y0: Math.min(a.h, b.h) - 0.4, h: 2.6, r: 1.35 });
   }
-  for (const f of flames) fireSpots.push({ x: f.x, y: f.y0 + 4, z: f.z });
+  for (const f of flames) fireSpots.push({ x: f.x, y: f.y0 + (f.big ? 5 : 1.5), z: f.z });
 
   // the summit: a wider platform over the top pad, and a trophy on it
   const top = PADS[N - 1];
@@ -9520,13 +9528,6 @@ tagNoInk(scene);
   if (drift.length) console.warn('CAR_JOB out of step with MISSION_DEFS:', drift);
 }
 
-window.__probe = { PADS, flames, summitTrophy, TIREFIRE, player, car, surfaceY, JUMP,
-  keys, camIdxSet:v=>{camIdx=v;}, look:(y,p)=>{camYaw=y;camPitch=p;},
-  tp:(x,z,y)=>{player.position.set(x,y||surfaceY(x,z),z);car.position.set(x+80,0,z+80);mode='foot';player.visible=true;rider.visible=false;playerVel.set(0,0,0);playerOnGround=true;},
-  where:()=>[+player.position.x.toFixed(2),+player.position.y.toFixed(2),+player.position.z.toFixed(2)],
-  key:(c,d)=>{keys[c]=d;},
-  gaps:()=>{ const g=[]; for(let i=1;i<PADS.length;i++){ const a=PADS[i-1],b=PADS[i];
-    g.push({h:+(b.h-a.h).toFixed(2), d:+Math.hypot(b.x-a.x,b.z-a.z).toFixed(2)}); } return g; } };
 const clock = new THREE.Clock();
 function animate() {
   requestAnimationFrame(animate);

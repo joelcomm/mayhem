@@ -203,7 +203,7 @@ First Church · Town Hall and the Police Station · Victory Stadium · Golden Br
 the Retirement Castle — now with a gated, drivable great hall and a flock of
 chickens that scatter from the car and burst into feathers under it · Victory
 Stadium's south gate is open too: drive between the pillars onto the infield ·
-Maplewood Elementary · the eternal tire fire · water tower ·
+Maplewood Elementary · the tyre-fire climbing puzzle · water tower ·
 MAPLEWOOD on the hillside · the brewery blimp · the giant donut · the Burger Baron
 head.
 
@@ -653,6 +653,22 @@ every planted tree, plus the road and river tests, scanned for the most central
 rectangle that is genuinely empty; whatever it hands out is reserved so two set pieces
 cannot land on the same green. The stunt park is back (4 ramps) and the fair sits on
 the next-best open ground.
+
+### The tyre-fire climb
+The eternal tyre fire is a **vertical platforming puzzle**: a spiral of tyre-stack
+platforms winding up out of a burning core, flame jets to dodge, and a trophy at the
+summit worth 300 coins (`KING OF THE HILL`). The platforms are **PADS**, not colliders —
+each is a flat disc top the altitude code lifts you onto, so the ordinary on-foot jump
+(`JUMP`/`GRAV`, max height ~1.7 m) does all the work; miss one and you fall to the lot
+floor and climb again. Footprints never overlap, which keeps `surfaceY` single-valued.
+The spiral's radius shrinks monotonically so the helix never returns to the same
+`(x,z)`, and steps are 1.05 m up / under 3.7 m across — a running-jump apart. The central
+inferno only reaches h 9 so the upper pads and the summit clear it; the hazard jets sit
+in the gaps between pads, nudged outward, so a wide jump gets flung off ("OW! HOT!",
+non-lethal — you tumble down, not die). Built after every audit and flush, so it is free
+of the seeded stream. Opening the lot (the old 30×30 fire collider is removed
+post-audit, like the prison gate) let nothing grow inside because the trees were already
+placed.
 
 ### The stunt park
 The biggest open green in town has four orange kickers in it. They are **not
