@@ -1242,6 +1242,16 @@ function signTexture(text, bg, fg, wpx, hpx) {
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace; t.anisotropy = 8;
   return t;
 }
+// A sign as a thin SOLID panel rather than a bare plane: the art sits on the front face
+// only, with a plain dark board on the back and edges. A double-sided plane shows the
+// mirror-image of the text from behind — this reads forwards from the front and is just a
+// solid board from the back. Front is the +z face, so an existing sign's rotation.y still
+// aims it the same way.
+function signPanel(w, h, tex, back = 0x20242c, depth = 0.3) {
+  const solid = new THREE.MeshBasicMaterial({ color: back });
+  const front = new THREE.MeshBasicMaterial({ map: tex });
+  return new THREE.Mesh(new THREE.BoxGeometry(w, h, depth), [solid, solid, solid, solid, front, solid]);
+}
 
 // =================================================================
 //  BLOCK CONTENTS
@@ -2786,8 +2796,7 @@ const OPENING_DOOR = (() => {
 {
   for (const s of signs) {
     const t = signTexture(s.text, s.bg || '#ffffff', s.fg || '#e8532f', 512, 128);
-    const p = new THREE.Mesh(new THREE.PlaneGeometry(s.w, s.w*0.25),
-      new THREE.MeshBasicMaterial({ map: t, transparent: true, side: THREE.DoubleSide }));
+    const p = signPanel(s.w, s.w*0.25, t);
     p.position.set(s.x, s.y, s.z); p.rotation.y = s.yaw; scene.add(p);
   }
   const BILL = [['GOLDEN BREW','#e8b53f','#c0392b'], ['FIZZ COLA','#e8532f','#ffffff'],
@@ -3299,7 +3308,7 @@ const blimps = [];
     const hx = -TOWN*0.35, hz = -TOWN - 300;
     const t = signTexture('MAPLEWOOD', 'rgba(0,0,0,0)', '#f2f2ee', 1024, 200);
     const board = new THREE.Mesh(new THREE.PlaneGeometry(220, 43),
-      new THREE.MeshBasicMaterial({ map: t, transparent: true, side: THREE.DoubleSide }));
+      new THREE.MeshBasicMaterial({ map: t, transparent: true, side: THREE.FrontSide }));
     board.position.set(hx, 46, hz); board.rotation.x = -0.18; scene.add(board);
   }
 
@@ -6898,11 +6907,9 @@ let addJobMarker = null;
         { color: 0x5ed85e, transparent: true, opacity: 0.65, depthWrite: false }));
       disc.position.set(s.x, 0.07, s.z); disc.scale.setScalar(1.5); scene.add(disc);
       const bd = signTexture('GUS\'S GARAGE', '#2f3550', '#ffd23b', 512, 128);
-      const brd = new THREE.Mesh(new THREE.PlaneGeometry(9, 2.25),
-        new THREE.MeshBasicMaterial({ map: bd, transparent: true, side: THREE.DoubleSide }));
-      // faces -z, the way the forecourt is approached from the street; without this
-      // the DoubleSide plane shows you its back and the name reads mirrored
-      // on the front fascia, not floating mid-canopy where the roof hides it
+      const brd = signPanel(9, 2.25, bd);
+      // faces -z, the way the forecourt is approached from the street; a solid back so it
+      // never shows the name mirrored, on the front fascia where the roof doesn't hide it
       brd.position.set(s.x, 6.5, s.z - 13/2 - 0.55); brd.rotation.y = Math.PI; scene.add(brd);
       GARAGE.board = brd;
 
@@ -7108,8 +7115,7 @@ function findAirfield(w, d) {
     }
     if (RAMPS.length) {
       const t = signTexture('STUNT PARK', '#2f3550', '#ffd23b', 512, 128);
-      const brd = new THREE.Mesh(new THREE.PlaneGeometry(14, 3.5),
-        new THREE.MeshBasicMaterial({ map: t, transparent: true, side: THREE.DoubleSide }));
+      const brd = signPanel(14, 3.5, t);
       brd.position.set(cx, 6.5, cz - 27); brd.rotation.y = Math.PI; scene.add(brd);
       for (const sx of [-6.4, 6.4]) {
         const p = new THREE.Mesh(BOX(0.7, 6.5, 0.7), toon(0x6b6f76));
@@ -7266,9 +7272,7 @@ let riding = null, rideExitCd = 0;
           if (!onRoad(sx0, sz0 + s2*dz, 4)) { sz0 = sz0 + s2*dz; placed = true; break; }
         }
     }
-    const brd = new THREE.Mesh(new THREE.PlaneGeometry(16, 4),
-      new THREE.MeshBasicMaterial({ map: signTexture('MAPLEWOOD FAIR', '#7b4fa7', '#ffd23b', 512, 128),
-                                    transparent: true, side: THREE.DoubleSide }));
+    const brd = signPanel(16, 4, signTexture('MAPLEWOOD FAIR', '#7b4fa7', '#ffd23b', 512, 128));
     brd.position.set(sx0, 7, sz0); brd.rotation.y = Math.PI; scene.add(brd);   // faces the way in
     for (const dxp of [-7.4, 7.4]) {
       const p = new THREE.Mesh(BOX(0.6, 7, 0.6), toon(0x6b6f76));
@@ -7295,28 +7299,39 @@ let riding = null, rideExitCd = 0;
 //  the carriageway the old reserved-rectangle siting let it clip.
 // =================================================================
 {
-  const B = 2.6, TOP = 40;
+  const B = 2.6, TOP = 46;
   const CTRL = [
-    [-22, B, -40], [2, B, -40], [26, B, -40],          // the flat station run (board here)
-    [48, B + 8, -33], [60, B + 22, -14],               // the chain lift, slow and steady
-    [66, TOP - 5, 6], [58, TOP, 26],                   // ... up to a tall crest, pulled over the top
-    [50, TOP - 8, 36],                                 // the lip
-    [43, 6, 41],                                       // THE DROP — a steep near-vertical plunge
-    [33, 21, 36],                                      // straight into a big airtime hill
-    [22, 5, 30],                                       // valley floor
-    [10, 18, 40], [-3, 6, 31], [-15, 17, 41],          // a run of camelbacks and S-bends
-    [-30, 8, 40],
-    [-47, 12, 36], [-60, 9, 22], [-56, 7, 7],          // into the circle, coming in high
-    [-43, 6, 4], [-31, 6.5, 16], [-35, 6, 31],         // round and round, closing under the way in
-    [-49, 7, 40],                                      // breaking out along the top
-    [-62, 14, 24], [-60, 19, 4], [-47, 5, -10],        // up and over a hill
-    [-54, 16, -24], [-40, 5, -33],                     // one more hill
-    [-30, B, -40],                                     // brake run, flatten home
+    // --- station + a dead-straight chain lift (no turns) up to a tall crest ---
+    [-64, B,  -22], [-50, B,  -22],        // the flat station run (board here)
+    [-38, 14, -22], [-26, 30, -22],        // the lift: straight, no turns, climbing steadily
+    [-14, TOP, -22],                       // the crest, high over everything
+    // --- the first drop: straight down the far side, near-vertical ---
+    [-2,  40, -22],                        // pulled over the top
+    [10,  7,  -22],                        // THE DROP — the bottom of a steep plunge
+    // --- out leg: a train of camelback airtime hills ---
+    [22,  31, -22], [34, 6, -22],          // big airtime hill into the valley
+    [46,  23, -22],                        // second hill
+    // --- far turnaround: 180°, banked, carried up high ---
+    [58,  14, -20], [66, 13, -8],
+    [68,  13, 4],                          // outer apex of the turn
+    [64,  12, 16], [54, 12, 24],
+    // --- the run home along the parallel straight, more airtime hills ---
+    [40,  21, 24], [26, 7, 24],
+    [12,  18, 24], [-2, 7, 24],
+    [-16, 16, 24], [-30, 7, 24],
+    [-42, 12, 22],
+    // --- near turnaround, dropping into the brake run and home to the station ---
+    [-54, 11, 16], [-62, 9, 6],
+    [-66, 8, -4],                          // outer apex
+    [-62, 6, -14],                         // the brakes bite on the descent
+    [-64, B, -20],                         // level off and roll home
   ];
-  // Bigger than before now that there's room: a taller lift and a steeper drop, scaled so
-  // the whole loop still validates on the fair's green beside the carousel. Uniform scale
-  // about the station height keeps every slope identical, just larger.
-  const S = 0.56;
+  // Modelled on a classic out-and-back hyper-coaster (à la Magnum XL-200): one tall,
+  // dead-straight lift, a steep first drop, then a run of camelback airtime hills out to a
+  // banked turnaround and a matching train of hills back — no impossible knots, no helix
+  // threading itself. Big, now that the fair has the room. Uniform scale about the station
+  // height keeps every slope identical, just larger.
+  const S = 0.75;
   const curve = new THREE.CatmullRomCurve3(
     CTRL.map(c => new THREE.Vector3(c[0]*S, B + (c[1]-B)*S, c[2]*S)), true);
   const SAMPLES = curve.getSpacedPoints(260);
@@ -7344,8 +7359,8 @@ let riding = null, rideExitCd = 0;
   // a road clipping one edge that findGreen's coarse grid missed), so a direct scan is
   // what actually finds the room that is there.
   let site = null, bestD = Infinity;
-  for (let sx = plot[0] - 58; sx <= plot[0] + 58; sx += 4)
-    for (let sz = plot[1] - 22; sz <= plot[1] + 22; sz += 4) {
+  for (let sx = plot[0] - 92; sx <= plot[0] + 92; sx += 4)
+    for (let sz = plot[1] - 50; sz <= plot[1] + 50; sz += 4) {
       const d = (sx - fairAt[0])**2 + (sz - fairAt[1])**2;
       if (d >= bestD) continue;
       if (pathOK(sx, sz)) { bestD = d; site = { x: sx, z: sz }; }
@@ -7364,7 +7379,7 @@ let riding = null, rideExitCd = 0;
   }
   if (site) {
     const cx = site.x, cz = site.z;
-    TAKEN.push({ x: cx, z: cz, w: 140*S, d: 100*S });
+    TAKEN.push({ x: cx, z: cz, w: 160*S, d: 80*S });
     const mesh2 = (geo, col, x, y, z) => {
       const m = new THREE.Mesh(geo, toon(col));
       m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true;
@@ -7379,7 +7394,7 @@ let riding = null, rideExitCd = 0;
     };
     let crestU = 0, crestY = 0;
     SAMPLES.forEach((p, i) => { if (p.y > crestY) { crestY = p.y; crestU = i / (SAMPLES.length - 1); } });
-    const stopU = uNear(2*S, -40*S), brakeU = uNear(-40*S, -34*S);
+    const stopU = uNear(-57*S, -22*S), brakeU = uNear(-62*S, -14*S);
     // rails: two offset tubes, ties, posts down to the ground
     const up = new THREE.Vector3(0, 1, 0);
     const railCurve = (sgn) => {
@@ -7418,8 +7433,9 @@ let riding = null, rideExitCd = 0;
       w.position.set(sx*0.6, 0.22, sz*0.7); cart.add(w);
     }
     scene.add(cart);
-    // the station: platform beside the flat run, stairs up, all walking surface
-    const stx = cx + 2*S, stz = cz - 40*S - 2.6, deckH = B - 0.3, deckTop = deckH + 0.22;
+    // the station: platform beside the flat run, stairs up, all walking surface. The flat
+    // run is the local z=-22 straight (centre x=-57); the platform sits just outside it.
+    const stx = cx - 57*S, stz = cz - 22*S - 2.6, deckH = B - 0.3, deckTop = deckH + 0.22;
     mesh2(BOX(9.5, deckH, 5.4), 0x8c6a44, stx, deckH/2, stz);
     mesh2(BOX(9.9, 0.22, 5.8), 0xa8845c, stx, deckH + 0.11, stz);
     for (const sxp of [-4, 4]) mesh2(BOX(0.3, 3.4, 0.3), 0x6b6f76, stx + sxp, deckH + 1.7, stz);
@@ -7445,10 +7461,8 @@ let riding = null, rideExitCd = 0;
         scene.add(rail);
       }
     }
-    const sign = new THREE.Mesh(new THREE.PlaneGeometry(11, 2.8),
-      new THREE.MeshBasicMaterial({ map: signTexture('THE MAPLE MOUSE', '#2f3550', '#ffd23b', 512, 128),
-                                    transparent: true, side: THREE.DoubleSide }));
-    sign.position.set(stx, 6.6, stz - 3.4); scene.add(sign);
+    const sign = signPanel(12, 3, signTexture('THE MAPLE MOUSE', '#2f3550', '#ffd23b', 512, 128));
+    sign.position.set(stx, 7, stz - 3.6); sign.rotation.y = Math.PI; scene.add(sign);   // faces the way in
     FAIR.push({ kind: 'coaster', label: 'MAPLE MOUSE', x: stx, z: stz, r: 8,
                 P: world, cart, t: stopU, wait: 10, phase: 'lift', wrapped: false,
                 stopU, crestU, brakeU, topY: crestY, len: LEN, cx, cz });
@@ -7540,8 +7554,7 @@ if (TIREFIRE) {
   summitTrophy = { g: trophyM, x: top.x, z: top.z, y: top.h, got: false, spin: 0 };
 
   const t = signTexture('TIRE FIRE CLIMB', '#2b2f38', '#ff7a2b', 512, 128);
-  const brd = new THREE.Mesh(new THREE.PlaneGeometry(14, 3.5),
-    new THREE.MeshBasicMaterial({ map: t, transparent: true, side: THREE.DoubleSide }));
+  const brd = signPanel(14, 3.5, t);
   brd.position.set(cx, 5.5, TIREFIRE.z0 + 3); brd.rotation.y = Math.PI; scene.add(brd);
   for (const sx of [-6.4, 6.4]) {
     const p = new THREE.Mesh(BOX(0.7, 5.5, 0.7), toon(0x6b6f76));
@@ -7650,10 +7663,8 @@ const PEN = { inner: null, walls: [] };
       const bale = new THREE.Mesh(new THREE.CylinderGeometry(1.0, 1.0, 1.7, 14).rotateZ(Math.PI/2), toon(0xd8b44a));
       bale.position.set(hx, 1.0, hz); bale.castShadow = true; scene.add(bale);
     }
-    // the sign over the gate, facing the way in
-    const brd = new THREE.Mesh(new THREE.PlaneGeometry(9, 2.3),
-      new THREE.MeshBasicMaterial({ map: signTexture('MAPLE FARM', '#6a4a2f', '#ffd23b', 512, 128),
-                                    transparent: true, side: THREE.DoubleSide }));
+    // the sign over the gate, facing the way in (+z)
+    const brd = signPanel(9, 2.3, signTexture('MAPLE FARM', '#6a4a2f', '#ffd23b', 512, 128));
     brd.position.set(cx, 4.6, cz + D/2 + 0.4); scene.add(brd);
     for (const sx of [-4.2, 4.2]) {
       const p = new THREE.Mesh(BOX(0.5, 4.6, 0.5), toon(0x6b6f76));
@@ -7802,9 +7813,8 @@ if (AIRPORT) {
   {
     const t = signTexture('MAPLEWOOD REGIONAL', '#20242c', '#63b8ec', 512, 96);
     const bz = apZ + inward*16;
-    const brd = new THREE.Mesh(new THREE.PlaneGeometry(20, 3.75),
-      new THREE.MeshBasicMaterial({ map: t, transparent: true, side: THREE.DoubleSide }));
-    brd.position.set(apx, 6.5, bz); scene.add(brd);
+    const brd = signPanel(20, 3.75, t);
+    brd.position.set(apx, 6.5, bz); brd.rotation.y = inward < 0 ? Math.PI : 0; scene.add(brd);   // face the town side
     for (const sx of [-9, 9]) { const p = new THREE.Mesh(BOX(0.6, 6.5, 0.6), toon(0x6b6f76)); p.position.set(apx + sx, 3.25, bz); scene.add(p); }
   }
 
