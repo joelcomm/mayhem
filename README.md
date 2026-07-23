@@ -576,11 +576,26 @@ The HUD keeps a 🏆 count under the chaos score. One InstancedMesh, like the co
 built well after the tree stage so it costs nothing seeded.
 
 ### The fair
-Three rides on a real fairground — striped-canopy **carousel** with eight bobbing
-horses (clockwise; and note the group-rotation trap below), **THE MAPLE MOUSE** — a
-closed-loop coaster, 64×44 m with crests at ~13 m, paced by gravity (quick through the
-dips, laboured over the crests, a floor under the speed so it can never stall on a
-hill) — and a walled **bumper car** arena — under a MAPLEWOOD FAIR board.
+Three rides — striped-canopy **carousel** with eight bobbing horses (clockwise;
+and note the group-rotation trap below) and a walled **bumper car** arena under
+the MAPLEWOOD FAIR board, plus **THE MAPLE MOUSE**, which outgrew the fairground
+and stands on its own ground nearby.
+
+**THE MAPLE MOUSE is a real coaster now** (its own block, after the fair): a
+~480 m closed CatmullRom track on a ~124×86 m footprint with a **traditional
+profile** — a flat station run, a slow chain lift all the way to a 26 m crest,
+then gravity owns it: the big drop, a slalom of twists, a **full circle that
+passes under its own way in**, two more hills, and a braked run home. The cart
+runs three regimes (`phase` in `updateRides`): the chain hauls at 3.6 m/s,
+coast speed comes from energy (√(2g·(top−y)), floored so it can't stall), and
+brakes bleed it to walking pace into the platform. **The site is chosen by
+validating the track's own plan path, not by clearing a rectangle**
+(`pathOK`): the loop's interior keeps its trees — the track flies over — but
+every sample under 14 m must clear roads (5 m margin), water, buildings and
+colliders. That is what actually got it off the carriageway that the old
+reserved-rectangle siting let it clip. Candidates spiral out from the fair, so
+it lands as close as the town allows. This seed parks it around First Church,
+which is zoning nobody planned and nobody is going to fix.
 
 **The bumper arena is 44×32 m** (doubled) with **eight cars, and every cart but
 one has a rider in it** — a seated passenger merged into ~4 meshes per colour

@@ -6798,95 +6798,6 @@ let riding = null, rideExitCd = 0;
       colliders.push({ minX: mx-7.2, maxX: mx+7.2, minZ: mz-7.2, maxZ: mz+7.2 });
     }
 
-    // ---- the coaster --------------------------------------------------
-    {
-      const [ox, oz] = at(1);
-      // Twice the loop it was: 64x44 m footprint, crests up to ~13 m. Both hill terms
-      // are zero at t=0 on purpose — that is where the station platform stands, and a
-      // train should arrive at platform level, not a metre above it.
-      const RX = 32, RZ = 22, BASE = 2.6;
-      const P = t => [ ox + Math.cos(t)*RX,
-                       BASE + 7.2*(0.5 - 0.5*Math.cos(2*t)) + 3.4*(0.5 - 0.5*Math.cos(3*t)),
-                       oz + Math.sin(t)*RZ ];
-      // The rails are continuous tubes now, not chains of straight boxes — from the
-      // front seat the box segments read as exactly what they were. A closed
-      // CatmullRom through offset samples, swept as a TubeGeometry, has no seams.
-      const N = 160, ties = [], posts = [];
-      const v0 = new THREE.Vector3(), v1 = new THREE.Vector3(), up = new THREE.Vector3(0,1,0);
-      const railCurve = (sgn) => {
-        const pts = [];
-        for (let i = 0; i < 120; i++) {
-          const t = i/120*Math.PI*2;
-          v0.set(...P(t)); v1.set(...P(t + 0.01));
-          const dir = v1.sub(v0).normalize();
-          const side = new THREE.Vector3().crossVectors(dir, up).normalize();
-          pts.push(new THREE.Vector3(v0.x + side.x*sgn*0.52, v0.y + 0.16, v0.z + side.z*sgn*0.52));
-        }
-        return new THREE.CatmullRomCurve3(pts, true);
-      };
-      for (const sgn of [-1, 1])
-        mesh(new THREE.TubeGeometry(railCurve(sgn), 360, 0.09, 10, true), 0xd0392b, 0, 0, 0);
-      for (let i = 0; i < N; i++) {
-        const t0 = i/N*Math.PI*2, t1 = (i+1)/N*Math.PI*2;
-        v0.set(...P(t0)); v1.set(...P(t1));
-        const mid = v0.clone().lerp(v1, 0.5);
-        const dir = v1.clone().sub(v0).normalize();
-        const yaw = Math.atan2(dir.x, dir.z), pitch = -Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
-        if (i % 2 === 0) ties.push(baked(BOX(1.5, 0.09, 0.28), mid.x, mid.y + 0.05, mid.z, pitch, yaw, 0));
-        if (i % 8 === 0 && mid.y > 0.6)
-          posts.push(baked(BOX(0.34, mid.y, 0.34), mid.x, mid.y/2, mid.z));
-      }
-      mesh(merge(ties), 0x8c6a44, 0, 0, 0);
-      mesh(merge(posts), 0x6b6f76, 0, 0, 0);
-      const cart = new THREE.Group();
-      const cb = new THREE.Mesh(BOX(1.3, 0.7, 2.0), toon(0xf0b429));
-      cb.position.y = 0.55; cb.castShadow = true; cart.add(cb);
-      const cn = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.9, 12), toon(0xd0392b));
-      cn.position.set(0, 0.55, 1.4); cn.rotation.x = Math.PI/2; cart.add(cn);
-      for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
-        const w = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.14, 12).rotateZ(Math.PI/2), toon(0x2b2f38));
-        w.position.set(sx*0.6, 0.22, sz*0.7); cart.add(w);
-      }
-      scene.add(cart);
-      // The station: a platform beside the track at t=0, on the loop's east side. The
-      // cart starts here, waits ten seconds, does a lap, and pulls in again — and the
-      // ride point sits ON the platform, so boarding only ever happens here.
-      const stx = ox + RX, stz = oz;
-      const deckH = BASE - 0.3;
-      mesh(BOX(5.4, deckH, 8.5), 0x8c6a44, stx + 3.4, deckH/2, stz);           // platform
-      mesh(BOX(5.8, 0.22, 8.9), 0xa8845c, stx + 3.4, deckH + 0.11, stz);       // boards
-      for (const sz of [-3.6, 3.6])                                            // canopy posts
-        mesh(BOX(0.3, 3.4, 0.3), 0x6b6f76, stx + 3.4, deckH + 1.7, stz + sz);
-      mesh(BOX(6.4, 0.26, 9.6), 0xd0392b, stx + 3.4, deckH + 3.5, stz);        // canopy
-      // The platform is a walking surface, not an obstacle: a DECKS entry raises
-      // surfaceY over the boards, and the stairs on the south end are a rising
-      // wedge, so you climb up and board from the platform like you should.
-      // (It used to be a collider, which is why nobody could get up here.)
-      const deckTop = deckH + 0.22;
-      DECKS.push({ x0: stx + 0.7, x1: stx + 6.1, z0: stz - 4.25, z1: stz + 4.25, h: deckTop });
-      {
-        const sx0 = stx + 2.2, sx1 = stx + 4.6, sz0 = stz + 4.25, sz1 = stz + 8.1;
-        const STEPS = 6;
-        for (let k = 0; k < STEPS; k++)                                        // the treads
-          mesh(BOX(sx1 - sx0, deckTop*(k + 1)/STEPS, (sz1 - sz0)/STEPS),
-            0x8c6a44, (sx0 + sx1)/2, deckTop*(k + 1)/STEPS/2, sz1 - (k + 0.5)*(sz1 - sz0)/STEPS);
-        DECKS.push({ x0: sx0, x1: sx1, z0: sz0, z1: sz1, h: deckTop, rise: 'z-' });
-        for (const rx of [sx0 + 0.1, sx1 - 0.1]) {                             // handrails
-          const rail = new THREE.Mesh(
-            BOX(0.08, 0.08, Math.hypot(sz1 - sz0, deckTop) + 0.4), toon(0xf6f3ea));
-          rail.position.set(rx, deckTop/2 + 0.95, (sz0 + sz1)/2);
-          rail.rotation.x = Math.atan2(deckTop, sz1 - sz0);
-          scene.add(rail);
-        }
-      }
-      FAIR.push({ kind: 'coaster', label: 'MAPLE MOUSE', x: stx + 3.4, z: stz, r: 7,
-                  P, cart, t: 0, wait: 10, cx: ox, cz: oz });
-      const sign = new THREE.Mesh(new THREE.PlaneGeometry(11, 2.8),
-        new THREE.MeshBasicMaterial({ map: signTexture('THE MAPLE MOUSE', '#2f3550', '#ffd23b', 512, 128),
-                                      transparent: true, side: THREE.DoubleSide }));
-      sign.position.set(stx + 3.4, 6.6, stz - 5.6); sign.rotation.y = Math.PI; scene.add(sign);
-    }
-
     // ---- the bumper cars ----------------------------------------------
     {
       // Twice the arena it was — 44x32 m — with eight cars, and every cart but
@@ -6959,7 +6870,159 @@ let riding = null, rideExitCd = 0;
     }
     if (addJobMarker) addJobMarker(sx0 - 8, sz0 - 8,
       'INSPECTOR PRU', 'Safety inspection day. Ride all three and tell me they hold.', 'fairjob');
-    console.log(`fair: ${FAIR.length} rides at ${cx|0},${cz|0}`);
+    FAIR.at0 = [cx, cz];               // the coaster block logs the ride count once it's in
+  }
+}
+
+// =================================================================
+//  THE MAPLE MOUSE, REBUILT
+//  Twice the coaster, on its own ground, with a traditional profile: a flat
+//  station run, a slow chain lift all the way up, then gravity owns it — the
+//  big drop, a slalom of twists, a full circle that passes under its own way
+//  in, two more hills, and a braked run back into the station.
+//
+//  The track is an authored closed CatmullRom rather than an analytic ellipse,
+//  and the SITE is chosen by validating the track's own plan path rather than
+//  clearing a whole rectangle: the loop's interior may keep its trees — the
+//  track flies over — but every low stretch (under 14 m) must be clear of
+//  roads, water, buildings and colliders. That is what actually gets it off
+//  the carriageway the old reserved-rectangle siting let it clip.
+// =================================================================
+{
+  const B = 2.6, TOP = 26;
+  const CTRL = [
+    [-20, B, -40], [2, B, -40], [24, B, -40],          // the flat station run
+    [46, B + 5, -34], [58, B + 13, -16],               // the chain lift, slow and steady
+    [62, TOP - 3, 4], [56, TOP, 24],                   // ... to the crest
+    [42, 6, 38],                                       // THE DROP
+    [26, 10, 28], [12, 14, 40], [-2, 8, 30],           // twists
+    [-18, 12, 40],                                     // into the circle, coming in high
+    [-34, 11, 38],
+    [-52, 10, 34], [-58, 8.5, 22], [-50, 7, 11],       // round...
+    [-38, 6, 10], [-29, 5.5, 20], [-31, 5, 32],        // ...and round...
+    [-36, 4.8, 36],                                    // ...closing it under the way in
+    [-50, 5.5, 42],                                    // breaking out along the top
+    [-62, 9, 28], [-58, 12, 8], [-48, 4.5, -10],       // hill
+    [-54, 10, -24], [-40, 4, -34],                     // hill
+    [-28, B, -40],                                     // and flatten home
+  ];
+  const curve = new THREE.CatmullRomCurve3(CTRL.map(c => new THREE.Vector3(c[0], c[1], c[2])), true);
+  const SAMPLES = curve.getSpacedPoints(260);
+  // site: candidates spiral out from the fair, first one whose path validates wins
+  const fairAt = FAIR.at0 || [0, 0];
+  const pathOK = (sx, sz) => {
+    for (const p of SAMPLES) {
+      const px = sx + p.x, pz = sz + p.z;
+      if (onRoad(px, pz, 5) || overRiver(px, pz, 10)) return false;
+      if (p.y < 14) {
+        if (OCC.has(occKey(px, pz)) || pointBlocked(px, pz, 2.5)) return false;
+        for (const tk of TAKEN) {
+          if (Math.hypot(tk.x - fairAt[0], tk.z - fairAt[1]) < 20) continue;  // the fair itself is fine to abut
+          if (Math.abs(px - tk.x) < tk.w/2 + 3 && Math.abs(pz - tk.z) < tk.d/2 + 3) return false;
+        }
+      }
+    }
+    return true;
+  };
+  let site = null;
+  outer:
+  for (let r = 0; r <= 420 && !site; r += 16) {
+    const steps = Math.max(1, Math.round(r/10));
+    for (let k = 0; k < steps; k++) {
+      const a = k/steps*Math.PI*2;
+      const sx = fairAt[0] + Math.cos(a)*r, sz = fairAt[1] + Math.sin(a)*r;
+      if (Math.abs(sx) > TOWN - 80 || Math.abs(sz) > TOWN - 80) continue;
+      if (pathOK(sx, sz)) { site = { x: sx, z: sz }; break outer; }
+    }
+  }
+  if (site) {
+    const cx = site.x, cz = site.z;
+    TAKEN.push({ x: cx, z: cz, w: 140, d: 100 });
+    const mesh2 = (geo, col, x, y, z) => {
+      const m = new THREE.Mesh(geo, toon(col));
+      m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true;
+      scene.add(m); return m;
+    };
+    const world = u => { const p = curve.getPointAt(((u % 1) + 1) % 1); return [cx + p.x, p.y, cz + p.z]; };
+    const LEN = curve.getLength();
+    const uNear = (lx, lz) => {                        // arc param of the sample nearest a plan point
+      let bi = 0, bd = Infinity;
+      SAMPLES.forEach((p, i) => { const d = (p.x - lx)**2 + (p.z - lz)**2; if (d < bd) { bd = d; bi = i; } });
+      return bi / (SAMPLES.length - 1);
+    };
+    let crestU = 0, crestY = 0;
+    SAMPLES.forEach((p, i) => { if (p.y > crestY) { crestY = p.y; crestU = i / (SAMPLES.length - 1); } });
+    const stopU = uNear(2, -40), brakeU = uNear(-40, -34);
+    // rails: two offset tubes, ties, posts down to the ground
+    const up = new THREE.Vector3(0, 1, 0);
+    const railCurve = (sgn) => {
+      const pts = [];
+      for (let i = 0; i < 220; i++) {
+        const t = i / 220;
+        const p = curve.getPointAt(t), q = curve.getPointAt((t + 0.002) % 1);
+        const dir = q.clone().sub(p).normalize();
+        const side = new THREE.Vector3().crossVectors(dir, up).normalize();
+        pts.push(new THREE.Vector3(cx + p.x + side.x*sgn*0.52, p.y + 0.16, cz + p.z + side.z*sgn*0.52));
+      }
+      return new THREE.CatmullRomCurve3(pts, true);
+    };
+    for (const sgn of [-1, 1])
+      mesh2(new THREE.TubeGeometry(railCurve(sgn), 640, 0.09, 10, true), 0xd0392b, 0, 0, 0);
+    const ties = [], posts = [];
+    const NT = Math.round(LEN / 3);
+    for (let i = 0; i < NT; i++) {
+      const t = i / NT;
+      const p = curve.getPointAt(t), q = curve.getPointAt((t + 0.002) % 1);
+      const dir = q.clone().sub(p).normalize();
+      const yaw = Math.atan2(dir.x, dir.z), pitch = -Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
+      ties.push(baked(BOX(1.5, 0.09, 0.28), cx + p.x, p.y + 0.05, cz + p.z, pitch, yaw, 0));
+      if (i % 4 === 0 && p.y > 1.2)
+        posts.push(baked(BOX(0.34, p.y, 0.34), cx + p.x, p.y/2, cz + p.z));
+    }
+    mesh2(merge(ties), 0x8c6a44, 0, 0, 0);
+    mesh2(merge(posts), 0x6b6f76, 0, 0, 0);
+    const cart = new THREE.Group();
+    const cb = new THREE.Mesh(BOX(1.3, 0.7, 2.0), toon(0xf0b429));
+    cb.position.y = 0.55; cb.castShadow = true; cart.add(cb);
+    const cn = new THREE.Mesh(new THREE.ConeGeometry(0.5, 0.9, 12), toon(0xd0392b));
+    cn.position.set(0, 0.55, 1.4); cn.rotation.x = Math.PI/2; cart.add(cn);
+    for (const sx of [-1, 1]) for (const sz of [-1, 1]) {
+      const w = new THREE.Mesh(new THREE.CylinderGeometry(0.22, 0.22, 0.14, 12).rotateZ(Math.PI/2), toon(0x2b2f38));
+      w.position.set(sx*0.6, 0.22, sz*0.7); cart.add(w);
+    }
+    scene.add(cart);
+    // the station: platform beside the flat run, stairs up, all walking surface
+    const stx = cx + 2, stz = cz - 43.4, deckH = B - 0.3, deckTop = deckH + 0.22;
+    mesh2(BOX(9.5, deckH, 5.4), 0x8c6a44, stx, deckH/2, stz);
+    mesh2(BOX(9.9, 0.22, 5.8), 0xa8845c, stx, deckH + 0.11, stz);
+    for (const sxp of [-4, 4]) mesh2(BOX(0.3, 3.4, 0.3), 0x6b6f76, stx + sxp, deckH + 1.7, stz);
+    mesh2(BOX(10.6, 0.26, 6.4), 0xd0392b, stx, deckH + 3.5, stz);
+    DECKS.push({ x0: stx - 4.75, x1: stx + 4.75, z0: stz - 2.7, z1: stz + 2.7, h: deckTop });
+    {
+      const sz0 = stz - 2.7, sx0 = stx - 8.4, sx1 = stx - 4.75;   // stairs off the west end
+      const z0 = stz - 1.2, z1 = stz + 1.2, STEPS = 6;
+      for (let k = 0; k < STEPS; k++)
+        mesh2(BOX((sx1 - sx0)/STEPS, deckTop*(k + 1)/STEPS, z1 - z0),
+          0x8c6a44, sx0 + (STEPS - k - 0.5)*(sx1 - sx0)/STEPS, deckTop*(k + 1)/STEPS/2, (z0 + z1)/2);
+      DECKS.push({ x0: sx0, x1: sx1, z0, z1, h: deckTop, rise: 'x+' });
+      for (const rz of [z0 + 0.1, z1 - 0.1]) {
+        const rail = new THREE.Mesh(BOX(Math.hypot(sx1 - sx0, deckTop) + 0.4, 0.08, 0.08), toon(0xf6f3ea));
+        rail.position.set((sx0 + sx1)/2, deckTop/2 + 0.95, rz);
+        rail.rotation.z = -Math.atan2(deckTop, sx1 - sx0);
+        scene.add(rail);
+      }
+    }
+    const sign = new THREE.Mesh(new THREE.PlaneGeometry(11, 2.8),
+      new THREE.MeshBasicMaterial({ map: signTexture('THE MAPLE MOUSE', '#2f3550', '#ffd23b', 512, 128),
+                                    transparent: true, side: THREE.DoubleSide }));
+    sign.position.set(stx, 6.6, stz - 3.4); scene.add(sign);
+    FAIR.push({ kind: 'coaster', label: 'MAPLE MOUSE', x: stx, z: stz, r: 8,
+                P: world, cart, t: stopU, wait: 10, phase: 'lift', wrapped: false,
+                stopU, crestU, brakeU, topY: crestY, len: LEN, cx, cz });
+    console.log(`fair: ${FAIR.length} rides at ${FAIR.at0 ? FAIR.at0[0]|0 : 0},${FAIR.at0 ? FAIR.at0[1]|0 : 0} · coaster at ${cx|0},${cz|0} (${LEN|0} m of track)`);
+  } else {
+    console.warn('coaster: no clear site found');
+    console.log(`fair: ${FAIR.length} rides`);
   }
 }
 
@@ -7203,7 +7266,7 @@ const rideSeat = (R) => {
              yaw: -a };                                   // tangent: the way round you go
   }
   if (R.kind === 'coaster') {
-    const [x, y, z] = R.P(R.t), [x2, , z2] = R.P(R.t + 0.05);
+    const [x, y, z] = R.P(R.t), [x2, , z2] = R.P(R.t + 0.0025);
     const yaw = Math.atan2(x2 - x, z2 - z);
     // Sat at the front of the cart, not in the middle of it. At the cart's own origin
     // the camera is inside the nose cone and the screen is a red octagon; a metre back
@@ -7225,18 +7288,30 @@ function updateRides(dt) {
       if (R.wait > 0) {
         // in the station. The clock runs whether anyone is aboard or not — it is a
         // fairground ride on a schedule, not a taxi waiting for you.
-        R.wait -= dt; R.t = 0;
+        R.wait -= dt; R.t = R.stopU; R.phase = 'lift'; R.wrapped = false;
       } else {
-        // gravity does the pacing: quick through the dips, laboured over the crests,
-        // with a floor under the speed so it can never stall on top of a hill. Linear
-        // speed over the mean radius gives the angular rate — sized for a ~20 s lap.
-        const y = R.P(R.t)[1];
-        const v = Math.sqrt(Math.max(12, 2*9.8*(13.2 - y)));
-        const t2 = R.t + (v/27)*dt;
-        if (t2 >= Math.PI*2) { R.t = 0; R.wait = 10; }   // pulls into the station
+        // Three regimes, like a real coaster: the chain hauls you up at walking
+        // pace, gravity owns everything from the crest (quick in the dips,
+        // laboured over the hills, a floor so it can never stall), and brakes
+        // bring it home to the platform.
+        let v;
+        if (R.phase === 'lift') {
+          v = 3.6;
+          if (R.t >= R.crestU) R.phase = 'coast';
+        } else if (R.phase === 'coast') {
+          const y = R.P(R.t)[1];
+          v = Math.sqrt(Math.max(40, 2*9.8*(R.topY + 1.5 - y)));
+          if (R.t >= R.brakeU) { R.phase = 'brake'; R.v = v; }
+        } else {
+          R.v = Math.max(3.4, R.v - 14*dt);            // the brake run bleeds it off
+          v = R.v;
+        }
+        let t2 = R.t + (v / R.len) * dt;
+        if (t2 >= 1) { t2 -= 1; R.wrapped = true; }
+        if (R.phase === 'brake' && R.wrapped && t2 >= R.stopU) { R.t = R.stopU; R.wait = 10; }
         else R.t = t2;
       }
-      const [x, cy, z] = R.P(R.t), [x2, y2, z2] = R.P(R.t + 0.04);
+      const [x, cy, z] = R.P(R.t), [x2, y2, z2] = R.P(R.t + 0.0025);
       R.cart.position.set(x, cy + 0.32, z);
       R.cart.rotation.set(-Math.asin(THREE.MathUtils.clamp((y2 - cy)/Math.max(0.001, Math.hypot(x2-x, y2-cy, z2-z)), -1, 1)),
                           Math.atan2(x2 - x, z2 - z), 0, 'YXZ');
