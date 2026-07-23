@@ -7916,8 +7916,8 @@ function updatePlane(dt) {
   // yaw: A = turn left, D = turn right. Car-like on the ground (steering scales with
   // speed, none when stopped); a steady flat turn once flying.
   const yawIn = (K('KeyD') ? 1 : 0) - (K('KeyA') ? 1 : 0);
-  if (flying) planeHeading += yawIn * YAW_RATE * dt;
-  else planeHeading += yawIn * GROUND_STEER * THREE.MathUtils.clamp(planeSpeed/12, 0, 1) * dt;
+  if (flying) planeHeading -= yawIn * YAW_RATE * dt;
+  else planeHeading -= yawIn * GROUND_STEER * THREE.MathUtils.clamp(planeSpeed/12, 0, 1) * dt;
 
   // pitch: Space = nose up, Ctrl = nose down. Flat while taxiing. In the air, hands-off,
   // the nose SAGS — gently under power (holds near level) but hard toward a dive with the
@@ -7938,7 +7938,7 @@ function updatePlane(dt) {
   // roll: Q = bank left, E = bank right — and the bank now matches the way it turns, a
   // banked wing slipping the nose round the same direction it dips (Q left, E right).
   const rIn = (K('KeyQ') ? 1 : 0) - (K('KeyE') ? 1 : 0);
-  if (flying) { planeRoll += rIn * ROLL_RATE * dt; if (!rIn) planeRoll += (0 - planeRoll) * Math.min(1, dt*1.5); planeHeading -= planeRoll * 0.5 * dt; }
+  if (flying) { planeRoll += rIn * ROLL_RATE * dt; if (!rIn) planeRoll += (0 - planeRoll) * Math.min(1, dt*1.5); planeHeading += planeRoll * 0.5 * dt; }
   else planeRoll += (0 - planeRoll) * Math.min(1, dt*6);
   planeRoll = THREE.MathUtils.clamp(planeRoll, -ROLL_MAX, ROLL_MAX);
 
@@ -9930,7 +9930,11 @@ function updateCamera(dt, now) {
   const eye = inPlane ? 3.0 : inCar ? 2.0 : 1.7;
   // pull in as you step inside, so a room doesn't put the camera out in the street
   const planeDists = [17, 26, 11];
-  let dist = THREE.MathUtils.lerp((inPlane ? planeDists : inCar ? carDists : footDists)[camIdx], 3.2, roomT);
+  // a plane flying over town keeps its own position on the player (for the radar/coins),
+  // which would otherwise trip the "you walked into a shop" room camera every time you
+  // passed a signed building. Ignore rooms entirely while flying — the view stays put.
+  const rt = inPlane ? 0 : roomT, rc = inPlane ? 0 : roomCross;
+  let dist = THREE.MathUtils.lerp((inPlane ? planeDists : inCar ? carDists : footDists)[camIdx], 3.2, rt);
   dist += inPlane ? planeSpeed/PLANE_MAX * 4 : Math.abs(speed)/MAX_SPEED * 2.4 * (inCar ? 1 : 0);
   // swing back behind whatever you're piloting when you stop steering the camera
   if (inCar && Math.abs(speed) > 3 && now - lastMouse > 1100)
@@ -9940,9 +9944,9 @@ function updateCamera(dt, now) {
   const cp = Math.cos(camPitch), sp = Math.sin(camPitch);
   const dx = Math.sin(camYaw)*cp, dy = sp, dz = Math.cos(camYaw)*cp;
   desired.set(subject.x - dx*dist, subject.y + eye - dy*dist, subject.z - dz*dist);
-  clampCameraToRoom(desired);
+  if (!inPlane) clampCameraToRoom(desired);
   if (desired.y < 1.0) desired.y = 1.0;
-  camera.position.lerp(desired, camSettled ? Math.min(1, dt*(9 + 30*roomCross)) : 1);
+  camera.position.lerp(desired, camSettled ? Math.min(1, dt*(9 + 30*rc)) : 1);
   camSettled = true;
   if (shake > 0) {
     shake = Math.max(0, shake - dt*2.6);
