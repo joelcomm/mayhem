@@ -9878,19 +9878,14 @@ function clampCameraToRoom(desired) {
   desired.set(ox + dx*t, oy + dy*t, oz + dz*t);
 }
 
-// Open the run on foot, facing the opening door, with the car parked on the street
-// behind you. Runs after the car physics block, which set the in-car start.
-if (OPENING_DOOR) {
-  const e = OPENING_DOOR, face = Math.atan2(-e.fx, -e.fz);
-  // just inside the prompt radius, with the camera swung off-axis so the opening frame
-  // shows the storefront, the sign and the street rather than a wall of door
-  const px = e.x + e.fx*4.2, pz = e.z + e.fz*4.2;
-  player.position.set(px, surfaceY(px, pz), pz);
-  player.rotation.set(0, face, 0);
-  player.visible = true; rider.visible = false;
-  playerVel.set(0,0,0); playerOnGround = true;
-  mode = 'foot';
-  camYaw = face + 0.6; camPitch = -0.26; camSettled = false;
+// Open the run in the car, parked on the street by a store — behind the wheel and ready
+// to drive, rather than on foot at the storefront. The spawn is still chosen next to the
+// opening door (see SPAWN), so you start right outside a shop, just already in the car.
+{
+  car.position.set(SPAWN.x, surfaceY(SPAWN.x, SPAWN.z), SPAWN.z);
+  heading = SPAWN.heading; car.rotation.set(0, heading, 0);
+  mode = 'car'; player.visible = false; rider.visible = true;
+  camYaw = SPAWN.heading; camPitch = -0.14; camSettled = false;
 }
 
 // =================================================================
