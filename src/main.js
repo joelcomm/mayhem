@@ -5148,7 +5148,7 @@ addEventListener('keydown', e => {
   // ride, gate, doorway, then the shop games, then car — F is the one interact key
   if (e.code === 'KeyF' && !tryRide() && !tryGate() && !tryDoor() && !tryBowl() &&
       !tryRush() && !tryWhack() && !tryDance() && !tryPint() &&
-      !tryHeist() && !tryKoi() && !tryOwl()) toggleVehicle();
+      !tryHeist() && !tryKoi() && !tryOwl() && !tryPlane()) toggleVehicle();
   if (e.code === 'KeyH') honk();
   if (e.code === 'KeyN') setMuted(!muted);
   if (e.code.startsWith('Digit')) shopBuy(+e.code.slice(5) - 1);        // the garage menu
@@ -5233,6 +5233,7 @@ function resetAll() {
   mode = 'car'; player.visible = false; rider.visible = true;
   playerRag.active = false; player.rotation.set(0,0,0); player.position.y = 0;
   carHealth = 100;
+  if (typeof planeHome === 'function') planeHome();     // park the plane back on the apron
 }
 function updateCar(dt) {
   const driving = mode === 'car' && drowning <= 0;
@@ -6924,8 +6925,11 @@ function updateMarkers(dt, sub) {
         // rather than handing you a delivery you cannot possibly make
         const def = MISSION_DEFS[m.mission];
         if (def && def.needsCar && mode !== 'car') {
-          m.nagT = (m.nagT || 0) - dt;
-          if (m.nagT <= 0) { toast('YOU NEED TO BE IN A CAR'); m.nagT = 3; }
+          if (mode === 'foot') { m.nagT = (m.nagT || 0) - dt;
+            if (m.nagT <= 0) { toast('YOU NEED TO BE IN A CAR'); m.nagT = 3; } }
+        } else if (def && def.needsPlane && mode !== 'plane') {
+          if (mode === 'foot') { m.nagT = (m.nagT || 0) - dt;
+            if (m.nagT <= 0) { toast('GET IN THE PLANE FIRST'); m.nagT = 3; } }
         } else if (!MI) startMission(m.mission, m);
       } else {
         m.done = true;
@@ -7586,6 +7590,255 @@ function setPenGate(open) {
     g.block.minX = PEN.inner.cx - 3; g.block.maxX = PEN.inner.cx + 3;
     g.block.minZ = g.cz - 0.2; g.block.maxZ = g.cz + 0.2;
   }
+}
+
+// =================================================================
+//  MAPLEWOOD REGIONAL AIRPORT  +  FLYING
+//  An open-ground airfield sited by findGreen (so it lands on the biggest clear
+//  parcel out past the blocks but well inside the ring road), with a real runway
+//  you take off from in a cartoon prop plane. Built here, long after every audit,
+//  tree pass and flush, so it is free of the seeded stream: plain runtime meshes,
+//  colliders pushed straight in, no prng() draws. Runway and apron are flat tarmac
+//  (never colliders — you taxi on them like any flat ground); only the terminal,
+//  tower and hangar are solid. Flight itself is the car's airborne block made
+//  permanent and pilot-controlled — throttle, pitch, bank-to-turn, lift above a
+//  takeoff speed, gravity when you stall.
+// =================================================================
+const RAMP_GLASS = new THREE.MeshToonMaterial({ color: 0x243049, gradientMap: RAMP });
+let planeSpeed = 0, planePitch = 0, planeRoll = 0, planeHeading = 0;
+const PLANE_SPAWN = { x: 0, z: 0, heading: 0 };
+const plane = new THREE.Group(); plane.rotation.order = 'YXZ'; plane.visible = false; scene.add(plane);
+let planeShadow = null;
+const SKYRINGS = [], skyRingMeshes = [];
+// flight tuning
+const PLANE_MAX = 58, PLANE_ACCEL = 20, PLANE_DECEL = 24, PLANE_DRAG = 5, PLANE_BRAKE = 40,
+      PLANE_TAKEOFF = 24, PITCH_RATE = 1.0, PITCH_MAX = 0.55, ROLL_MAX = 0.7, TURN_RATE = 1.25,
+      SINK = 11, CRASH_VY = 18;
+
+function buildPlane() {
+  const g = new THREE.Group();
+  const body = toon(0xe8532f), white = toon(0xf2efe7), dark = toon(0x2b2f38);
+  // fuselage + tail boom, one merged shell
+  const shell = new THREE.Mesh(merge([ baked(BOX(1.5, 1.4, 6.2), 0, 1.3, 0),
+                                       baked(BOX(0.95, 0.95, 2.4), 0, 1.55, -3.7) ]), body);
+  shell.castShadow = true; g.add(shell);
+  const nose = new THREE.Mesh(new THREE.ConeGeometry(0.75, 1.2, 16).rotateX(Math.PI/2), body);
+  nose.position.set(0, 1.3, 3.5); nose.castShadow = true; g.add(nose);
+  const wing = new THREE.Mesh(BOX(10, 0.28, 1.9), white); wing.position.set(0, 1.02, 0.4); wing.castShadow = true; g.add(wing);
+  const tail = new THREE.Mesh(BOX(3.8, 0.24, 1.1), white); tail.position.set(0, 1.85, -4.3); g.add(tail);
+  const fin  = new THREE.Mesh(BOX(0.26, 1.6, 1.5), white); fin.position.set(0, 2.55, -4.3); g.add(fin);
+  const cock = new THREE.Mesh(BOX(1.15, 0.85, 1.7), RAMP_GLASS); cock.position.set(0, 2.02, 0.9); g.add(cock);
+  for (const wx of [-2.7, 2.7]) {
+    const w = new THREE.Mesh(new THREE.CylinderGeometry(0.4, 0.4, 0.3, 12).rotateZ(Math.PI/2), dark);
+    w.position.set(wx, 0.4, 0.6); g.add(w);
+  }
+  const tw = new THREE.Mesh(new THREE.CylinderGeometry(0.28, 0.28, 0.24, 10).rotateZ(Math.PI/2), dark);
+  tw.position.set(0, 0.3, -3.5); g.add(tw);
+  const prop = new THREE.Group();
+  prop.add(new THREE.Mesh(BOX(0.18, 3.1, 0.12), dark));
+  prop.add(new THREE.Mesh(BOX(3.1, 0.18, 0.12), dark));
+  prop.position.set(0, 1.3, 4.15); g.add(prop);
+  g.userData.prop = prop;
+  return g;
+}
+
+const AIRPORT = findGreen(132, 54);
+if (AIRPORT) {
+  const ax = AIRPORT.x, az = AIRPORT.z;
+  const RWL = 116, RWW = 18;
+  // runway tarmac + markings (flat, not colliders — you taxi on it)
+  const rw = new THREE.Mesh(BOX(RWL, 0.12, RWW), toon(0x33353d)); rw.position.set(ax, 0.06, az); scene.add(rw);
+  for (let x = -RWL/2 + 8; x <= RWL/2 - 8; x += 10) {
+    const d = new THREE.Mesh(BOX(4, 0.02, 0.5), toon(0xf0ede6)); d.position.set(ax + x, 0.14, az); scene.add(d);
+  }
+  for (const end of [-1, 1]) for (let k = -3; k <= 3; k++) {
+    const s = new THREE.Mesh(BOX(3, 0.02, 1.1), toon(0xf0ede6));
+    s.position.set(ax + end*(RWL/2 - 4), 0.14, az + k*2.2); scene.add(s);
+  }
+  // apron off the north edge, where the plane, terminal, tower and hangar live
+  const apZ = az + RWW/2 + 17, apx = ax - RWL/2 + 26;
+  const ap = new THREE.Mesh(BOX(46, 0.12, 28), toon(0x3a3d47)); ap.position.set(apx, 0.06, apZ); scene.add(ap);
+  // taxiway linking apron to runway
+  const tx = new THREE.Mesh(BOX(7, 0.12, 18), toon(0x3a3d47)); tx.position.set(apx, 0.05, az + RWW/2 + 4); scene.add(tx);
+
+  const solid = (cx, cz, w, d) => colliders.push({ minX: cx - w/2, maxX: cx + w/2, minZ: cz - d/2, maxZ: cz + d/2 });
+  // terminal
+  {
+    const tz = apZ + 9;
+    const m = new THREE.Mesh(merge([ baked(BOX(26, 7, 12), 0, 3.5, 0), baked(BOX(28, 1, 14), 0, 7.3, 0) ]), toon(0xcdd6de));
+    m.castShadow = true; m.position.set(apx, 0, tz); scene.add(m);
+    const glz = new THREE.Mesh(BOX(24, 3, 0.3), RAMP_GLASS); glz.position.set(apx, 3, tz - 6.1); scene.add(glz);
+    solid(apx, tz, 26, 12);
+  }
+  // control tower
+  {
+    const twx = apx + 20, twz = apZ + 8;
+    const shaft = new THREE.Mesh(BOX(4.4, 15, 4.4), toon(0xb9c2cb)); shaft.castShadow = true; shaft.position.set(twx, 7.5, twz); scene.add(shaft);
+    const cab = new THREE.Mesh(BOX(6.4, 3.4, 6.4), RAMP_GLASS); cab.position.set(twx, 16.5, twz); scene.add(cab);
+    const cap = new THREE.Mesh(BOX(7, 0.6, 7), toon(0x2b2f38)); cap.position.set(twx, 18.4, twz); scene.add(cap);
+    solid(twx, twz, 4.4, 4.4);
+  }
+  // hangar — a rounded shed, open toward the apron
+  {
+    const hx = apx - 20, hz = apZ + 7;
+    const walls = new THREE.Mesh(merge([ baked(BOX(1, 9, 18), -10, 4.5, 0), baked(BOX(1, 9, 18), 10, 4.5, 0),
+                                         baked(BOX(21, 1, 18), 0, 9, 0) ]), toon(0x9aa6b0));
+    walls.castShadow = true; walls.position.set(hx, 0, hz); scene.add(walls);
+    const roof = new THREE.Mesh(new THREE.CylinderGeometry(10.5, 10.5, 18, 20, 1, false, 0, Math.PI).rotateZ(-Math.PI/2), toon(0x7d8892));
+    roof.rotation.y = Math.PI/2; roof.position.set(hx, 9, hz); scene.add(roof);
+    solid(hx - 10, hz, 2, 18); solid(hx + 10, hz, 2, 18); solid(hx, hz + 9, 21, 2);
+  }
+  // windsock
+  {
+    const wsx = ax + RWL/2 - 10, wsz = az + RWW/2 + 5;
+    const pole = new THREE.Mesh(BOX(0.3, 6, 0.3), toon(0xd7dbe0)); pole.position.set(wsx, 3, wsz); scene.add(pole);
+    const sock = new THREE.Mesh(new THREE.ConeGeometry(0.7, 2.4, 12).rotateZ(-Math.PI/2), toon(0xff7a2b));
+    sock.position.set(wsx + 1.6, 5.6, wsz); scene.add(sock);
+  }
+  // entrance billboard
+  {
+    const t = signTexture('MAPLEWOOD REGIONAL', '#20242c', '#63b8ec', 512, 96);
+    const brd = new THREE.Mesh(new THREE.PlaneGeometry(20, 3.75),
+      new THREE.MeshBasicMaterial({ map: t, transparent: true, side: THREE.DoubleSide }));
+    brd.position.set(apx, 6.5, apZ - 15); scene.add(brd);
+    for (const sx of [-9, 9]) { const p = new THREE.Mesh(BOX(0.6, 6.5, 0.6), toon(0x6b6f76)); p.position.set(apx + sx, 3.25, apZ - 15); scene.add(p); }
+  }
+
+  // park the plane on the apron, nose pointing down the runway (+x)
+  const pRig = buildPlane(); plane.add(pRig);
+  PLANE_SPAWN.x = apx + 6; PLANE_SPAWN.z = apZ - 4; PLANE_SPAWN.heading = Math.PI/2;   // +x
+  plane.position.set(PLANE_SPAWN.x, 0, PLANE_SPAWN.z);
+  planeHeading = PLANE_SPAWN.heading; plane.rotation.set(0, planeHeading, 0);
+  plane.visible = true;
+  planeShadow = blobShadow(9);
+
+  // the sky-ring course — a scenic loop of gates at altitude, all inside the ring road
+  const RC = 8;
+  for (let i = 0; i < RC; i++) {
+    const a = (i / RC) * Math.PI * 2 + 0.4;
+    const R = 340 + (i % 2) * 80;
+    SKYRINGS.push({ x: Math.cos(a) * R, z: Math.sin(a) * R, y: 24 + (i % 3) * 10, r: 8 });
+  }
+  const ringGeo = new THREE.TorusGeometry(8, 0.7, 10, 28);
+  for (let i = 0; i < SKYRINGS.length; i++) {
+    const s = SKYRINGS[i], nx = SKYRINGS[(i + 1) % SKYRINGS.length];
+    const m = new THREE.Mesh(ringGeo, new THREE.MeshBasicMaterial({ color: 0xffd23b, transparent: true, opacity: 0.85 }));
+    m.position.set(s.x, s.y, s.z); m.lookAt(nx.x, nx.y, nx.z);   // hole faces the next gate
+    m.visible = false; m.renderOrder = 4; scene.add(m); skyRingMeshes.push(m);
+  }
+  // Pilot Pete, right beside the plane so boarding starts the run
+  if (addJobMarker) addJobMarker(PLANE_SPAWN.x - 3, PLANE_SPAWN.z - 3,
+    'PILOT PETE', 'Take her up and thread every ring before the fuel runs dry!', 'skyrings');
+  console.log(`airport at ${ax|0},${az|0} · runway ${RWL}m · ${SKYRINGS.length} sky rings`);
+} else {
+  plane.position.set(1e6, 0, 1e6);   // no room found — keep it off-world, unboardable
+  console.log('airport: no clear parcel found');
+}
+
+function nearPlane() {
+  return mode === 'foot' && !playerRag.active && AIRPORT &&
+    (plane.position.x - player.position.x)**2 + (plane.position.z - player.position.z)**2 < 49;
+}
+function highlightRing(i) {
+  for (let k = 0; k < skyRingMeshes.length; k++) {
+    const cur = k === i;
+    skyRingMeshes[k].material.color.setHex(cur ? 0x7ef0a0 : 0xffd23b);
+    skyRingMeshes[k].material.opacity = cur ? 0.95 : 0.5;
+    skyRingMeshes[k].scale.setScalar(cur ? 1 : 0.9);
+  }
+}
+function planeHome() {
+  if (!AIRPORT) return;
+  plane.position.set(PLANE_SPAWN.x, surfaceY(PLANE_SPAWN.x, PLANE_SPAWN.z), PLANE_SPAWN.z);
+  planeHeading = PLANE_SPAWN.heading; planeSpeed = 0; planePitch = 0; planeRoll = 0;
+  plane.rotation.set(0, planeHeading, 0);
+}
+function planeCrash() {
+  burst(plane.position.x, plane.position.y + 0.6, plane.position.z, 0xff7a2b, 22);
+  burst(plane.position.x, plane.position.y + 0.6, plane.position.z, 0x40424a, 14);
+  shake = 2.0; toast('CRASH! back to the apron');
+  missionEvent('reset');                       // fails BARNSTORMER if it was on
+  planeHome();
+  mode = 'foot'; player.visible = true; rider.visible = false;
+  player.position.set(PLANE_SPAWN.x + 4, 0, PLANE_SPAWN.z);
+  player.rotation.set(0, PLANE_SPAWN.heading, 0);
+  playerVel.set(0, 0, 0); playerOnGround = true;
+}
+function tryPlane() {
+  if (mode === 'plane') {
+    const gy = surfaceY(plane.position.x, plane.position.z);
+    if (plane.position.y > gy + 1.2 || planeSpeed > 8) { toast('LAND FIRST — ease off the throttle'); return true; }
+    mode = 'foot'; player.visible = true; rider.visible = false;
+    const sx = Math.cos(planeHeading), sz = -Math.sin(planeHeading);   // step off a wing
+    player.position.set(plane.position.x + sx*4, gy, plane.position.z + sz*4);
+    player.rotation.set(0, planeHeading, 0);
+    playerVel.set(0, 0, 0); playerOnGround = true; planeSpeed = 0;
+    return true;
+  }
+  if (!nearPlane()) return false;
+  mode = 'plane'; player.visible = false; rider.visible = false;
+  planeSpeed = 0; planePitch = 0; planeRoll = 0; camYaw = planeHeading;
+  toast('TAKE OFF!  W throttle · ↑↓ pitch · A/D bank · Space brake');
+  return true;
+}
+function updatePlane(dt) {
+  if (mode !== 'plane' || !AIRPORT) return;
+  // Controls: throttle W/S, pitch ↑/↓ (nose up = climb), bank A/D, Space air-brakes.
+  const on = !paused;
+  const rl = on && keys.KeyA ? 1 : 0, rr = on && keys.KeyD ? 1 : 0;
+  const gy = surfaceY(plane.position.x, plane.position.z);
+  const grounded = plane.position.y <= gy + 0.06;
+
+  // throttle
+  if (on && keys.KeyW) planeSpeed += PLANE_ACCEL*dt;
+  else if (on && keys.KeyS) planeSpeed -= PLANE_DECEL*dt;
+  else planeSpeed -= PLANE_DRAG*dt;
+  if (on && keys.Space) planeSpeed -= PLANE_BRAKE*dt;         // air-brake
+  planeSpeed = THREE.MathUtils.clamp(planeSpeed, 0, PLANE_MAX);
+
+  // pitch (arrow up = nose up = climb), auto-levels with no input
+  const pIn = on ? ((keys.ArrowUp ? 1 : 0) - (keys.ArrowDown ? 1 : 0)) : 0;
+  if (grounded && planeSpeed < PLANE_TAKEOFF) planePitch += (0 - planePitch) * Math.min(1, dt*6);
+  else { planePitch += pIn * PITCH_RATE * dt; if (!pIn) planePitch += (0 - planePitch) * Math.min(1, dt*1.2); }
+  planePitch = THREE.MathUtils.clamp(planePitch, -PITCH_MAX, PITCH_MAX);
+
+  // roll / bank turn
+  const rIn = rr - rl;
+  planeRoll += (rIn*ROLL_MAX - planeRoll) * Math.min(1, dt*3);
+  const lift = THREE.MathUtils.clamp(planeSpeed / PLANE_TAKEOFF, 0, 1);
+  planeHeading -= planeRoll * TURN_RATE * lift * dt;
+
+  // vertical: climb from airspeed×nose-up when there's lift, sink when stalled
+  let vy;
+  if (grounded && planeSpeed < PLANE_TAKEOFF) vy = 0;
+  else vy = planeSpeed * Math.sin(planePitch) * lift - SINK * (1 - lift);
+
+  const fx = Math.sin(planeHeading), fz = Math.cos(planeHeading);
+  const horiz = planeSpeed * Math.cos(planePitch);
+  let nx = plane.position.x + fx*horiz*dt, nz = plane.position.z + fz*horiz*dt;
+  const ny = plane.position.y + vy*dt;
+  // buildings are solid only down low (taxi / low pass); up high you fly clean over town
+  if (ny < gy + 5) {
+    const rc = collideCircle(nx, nz, 2.6, colliders);
+    if (rc.hit) { if (planeSpeed > 8) { shake = Math.min(1.2, shake + 0.2); crashSfx(planeSpeed); } planeSpeed *= 0.5; }
+    nx = rc.x; nz = rc.z;
+  }
+  nx = THREE.MathUtils.clamp(nx, -TOWN-900, TOWN+900);
+  nz = THREE.MathUtils.clamp(nz, -TOWN-900, TOWN+900);
+  const gy2 = surfaceY(nx, nz);
+  plane.position.x = nx; plane.position.z = nz;
+  if (ny <= gy2) {                                   // touching down
+    const steep = Math.abs(planePitch) > 0.5 || Math.abs(planeRoll) > 0.55;
+    if ((-vy > CRASH_VY || steep) && planeSpeed > 12) { planeCrash(); return; }
+    plane.position.y = gy2; planePitch = 0;
+  } else plane.position.y = ny;
+  if (inWater(plane.position.x, plane.position.z) && plane.position.y < WATER_Y + 2.2) { planeCrash(); return; }
+
+  plane.rotation.set(-planePitch, planeHeading, -planeRoll);
+  if (plane.userData) { const pr = plane.children[0] && plane.children[0].userData.prop; if (pr) pr.rotation.z += (6 + planeSpeed*0.6)*dt; }
+  planeShadow.position.set(plane.position.x, gy2 + 0.09, plane.position.z);
+  planeShadow.rotation.z = -planeHeading;
+  player.position.set(plane.position.x, 0, plane.position.z);   // keep radar/coins/traffic on us
 }
 
 // =================================================================
@@ -9223,6 +9476,42 @@ const MISSION_DEFS = {
         Math.round(Math.hypot(tg.x - sub.x, tg.z - sub.z)) + 'm · lap ' + fmtT(m.data.lapT);
     },
   },
+  skyrings: {
+    needsPlane: true,
+    title: 'BARNSTORMER', late: 'ran out of fuel',
+    start(m) {
+      m.data.i = 0; m.timed = true;
+      let per = 0;
+      for (let k = 0; k < SKYRINGS.length; k++) {
+        const a = SKYRINGS[k], b = SKYRINGS[(k + 1) % SKYRINGS.length];
+        per += Math.hypot(b.x - a.x, b.z - a.z);
+      }
+      m.data.par = per/26 + 26; m.t = m.data.par;
+      for (const r of skyRingMeshes) r.visible = true;
+      highlightRing(0);
+      setTarget(SKYRINGS[0].x, SKYRINGS[0].z, 60, 'fly through the rings');
+    },
+    update(m, dt, sub) {
+      if (mode !== 'plane') { failMission('you left the plane'); return; }
+      const ring = SKYRINGS[m.data.i];
+      const dx = plane.position.x - ring.x, dy = plane.position.y - ring.y, dz = plane.position.z - ring.z;
+      if (dx*dx + dy*dy + dz*dz < (ring.r + 2)*(ring.r + 2)) {
+        coinSfx(); burst(ring.x, ring.y, ring.z, 0xffd23b, 16);
+        m.data.i++;
+        if (m.data.i >= SKYRINGS.length) {
+          winMission(180 + Math.round(m.t*9), SKYRINGS.length + ' rings · ' + fmtT(m.data.par - m.t) + ' left ' + fmtT(m.t));
+          return;
+        }
+        highlightRing(m.data.i);
+        const nr = SKYRINGS[m.data.i];
+        setTarget(nr.x, nr.z, 60, null);
+      }
+    },
+    hud(m) {
+      return 'ring <b>' + (m.data.i + 1) + '/' + SKYRINGS.length + '</b> · alt ' + Math.max(0, Math.round(plane.position.y)) + 'm';
+    },
+    cleanup(m, won) { for (const r of skyRingMeshes) r.visible = false; },
+  },
   getaway: {
     needsCar: true,
     title: 'THE GETAWAY', late: 'the buyer walked',
@@ -9526,13 +9815,18 @@ function updateCamera(dt, now) {
     return;
   }
   const inCar = mode === 'car';
-  const subject = inCar ? car.position : player.position;
-  const eye = inCar ? 2.0 : 1.7;
+  const inPlane = mode === 'plane';
+  const subject = inPlane ? plane.position : inCar ? car.position : player.position;
+  const eye = inPlane ? 3.0 : inCar ? 2.0 : 1.7;
   // pull in as you step inside, so a room doesn't put the camera out in the street
-  let dist = THREE.MathUtils.lerp((inCar ? carDists : footDists)[camIdx], 3.2, roomT);
-  dist += Math.abs(speed)/MAX_SPEED * 2.4 * (inCar ? 1 : 0);
+  const planeDists = [17, 26, 11];
+  let dist = THREE.MathUtils.lerp((inPlane ? planeDists : inCar ? carDists : footDists)[camIdx], 3.2, roomT);
+  dist += inPlane ? planeSpeed/PLANE_MAX * 4 : Math.abs(speed)/MAX_SPEED * 2.4 * (inCar ? 1 : 0);
+  // swing back behind whatever you're piloting when you stop steering the camera
   if (inCar && Math.abs(speed) > 3 && now - lastMouse > 1100)
     camYaw = lerpAngle(camYaw, heading, 1 - Math.exp(-dt*2.4));
+  if (inPlane && now - lastMouse > 900)
+    camYaw = lerpAngle(camYaw, planeHeading, 1 - Math.exp(-dt*2.0));
   const cp = Math.cos(camPitch), sp = Math.sin(camPitch);
   const dx = Math.sin(camYaw)*cp, dy = sp, dz = Math.cos(camYaw)*cp;
   desired.set(subject.x - dx*dist, subject.y + eye - dy*dist, subject.z - dz*dist);
@@ -9547,7 +9841,7 @@ function updateCamera(dt, now) {
   }
   camTarget.set(subject.x + dx*2, subject.y + eye + dy*2, subject.z + dz*2);
   camera.lookAt(camTarget);
-  const targetFov = 60 + (inCar ? Math.abs(speed)/MAX_SPEED*11 : 0);
+  const targetFov = 60 + (inPlane ? planeSpeed/PLANE_MAX*13 : inCar ? Math.abs(speed)/MAX_SPEED*11 : 0);
   camera.fov += (targetFov - camera.fov) * Math.min(1, dt*4);
   camera.updateProjectionMatrix();
 }
@@ -9582,7 +9876,8 @@ let shownScore = -1, shownStars = -1;
 const objEl = document.getElementById('objective');
 const rd = document.querySelector('#radar canvas').getContext('2d');
 function updateHUD(dt) {
-  speedEl.textContent = mode === 'car' ? Math.round(Math.abs(speed)*1.7) : '—';
+  speedEl.textContent = mode === 'car' ? Math.round(Math.abs(speed)*1.7)
+                      : mode === 'plane' ? Math.round(planeSpeed*1.7) : '—';
   healthEl.style.width = carHealth + '%';
   healthEl.style.background = carHealth > 50 ? '#5ed85e' : carHealth > 20 ? '#ffd23b' : '#f0503c';
 
@@ -9617,9 +9912,14 @@ function updateHUD(dt) {
       { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to grab a plate — gold pays best'; }
     else if (PINTS.some(p => p.state === 'idle' && Math.hypot(p.A.x - player.position.x, p.A.z - player.position.z) < 2.2))
       { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to slide a pint'; }
+    else if (nearPlane()) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to fly the plane'; }
     else if (nearestJackable()) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to borrow this car'; }
     else if (car.position.distanceTo(player.position) < 7) { promptEl.style.display='block'; promptEl.innerHTML = 'Press <b>F</b> to get in'; }
     else promptEl.style.display = 'none';
+  } else if (mode === 'plane') {
+    promptEl.style.display = 'block';
+    const alt = Math.max(0, Math.round(plane.position.y));
+    promptEl.innerHTML = 'ALT <b>' + alt + 'm</b> · land &amp; slow, then <b>F</b> to hop out';
   } else promptEl.style.display = 'none';
 
   if (shownScore !== chaosScore) {
@@ -9992,13 +10292,14 @@ function animate() {
   requestAnimationFrame(animate);
   const dt = paused ? 0 : Math.min(clock.getDelta(), 0.05);
   const now = performance.now();
-  const sub = mode === 'car' ? car.position : player.position;
+  const sub = mode === 'car' ? car.position : mode === 'plane' ? plane.position : player.position;
 
   updateLights(dt);
   updateSky(dt);
   if (riverWater) riverWater.uniforms.uTime.value += dt;
   updateHeadlights();
   updateCar(dt);
+  updatePlane(dt);
   updatePlayer(dt);
   updateRoomState(dt);
   updateDoors(dt);
