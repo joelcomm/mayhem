@@ -7299,42 +7299,75 @@ let riding = null, rideExitCd = 0;
 //  the carriageway the old reserved-rectangle siting let it clip.
 // =================================================================
 {
-  const B = 2.6, TOP = 46;
+  const B = 2.6, TOP = 48;
   const CTRL = [
     // --- station + a dead-straight chain lift (no turns) up to a tall crest ---
-    [-64, B,  -22], [-50, B,  -22],        // the flat station run (board here)
-    [-38, 14, -22], [-26, 30, -22],        // the lift: straight, no turns, climbing steadily
-    [-14, TOP, -22],                       // the crest, high over everything
+    [-70, B,  -24], [-56, B, -24],         // the flat station run (board here)
+    [-44, 15, -24], [-32, 31, -24],        // the lift: straight, no turns, climbing steadily
+    [-20, TOP, -24],                       // the crest, high over everything
     // --- the first drop: straight down the far side, near-vertical ---
-    [-2,  40, -22],                        // pulled over the top
-    [10,  7,  -22],                        // THE DROP — the bottom of a steep plunge
-    // --- out leg: a train of camelback airtime hills ---
-    [22,  31, -22], [34, 6, -22],          // big airtime hill into the valley
-    [46,  23, -22],                        // second hill
+    [-9,  41, -24], [1, 6, -24],           // THE DROP
+    // --- the VERTICAL LOOP: up, inverted over the top, back down. It drifts a little in z
+    //     so the entry and exit sit side by side instead of on top of each other ---
+    [12,  6,  -24],                        // race at the loop
+    [22,  6,  -24],                        // loop bottom — enter
+    [34,  18, -22],                        // up the near wall
+    [22,  31, -19],                        // over the top, upside down
+    [10,  18, -16],                        // down the far wall
+    [22,  6,  -13],                        // loop bottom — exit
+    // --- a big airtime hill out of the loop ---
+    [36,  24, -12], [48, 8, -10],
     // --- far turnaround: 180°, banked, carried up high ---
-    [58,  14, -20], [66, 13, -8],
-    [68,  13, 4],                          // outer apex of the turn
-    [64,  12, 16], [54, 12, 24],
-    // --- the run home along the parallel straight, more airtime hills ---
-    [40,  21, 24], [26, 7, 24],
-    [12,  18, 24], [-2, 7, 24],
-    [-16, 16, 24], [-30, 7, 24],
-    [-42, 12, 22],
-    // --- near turnaround, dropping into the brake run and home to the station ---
-    [-54, 11, 16], [-62, 9, 6],
-    [-66, 8, -4],                          // outer apex
-    [-62, 6, -14],                         // the brakes bite on the descent
-    [-64, B, -20],                         // level off and roll home
+    [60,  13, -4], [66, 12, 8],
+    [63,  12, 20], [52, 12, 29],
+    // --- return airtime hills, heading back ---
+    [38,  21, 29], [24, 7, 29],
+    [10,  18, 29], [-4, 8, 29],
+    // --- a descending HELIX: the turns that loop around, spiralling down over their own
+    //     inbound path ---
+    [-18, 14, 27], [-30, 12, 19],
+    [-35, 11, 7],  [-30, 10, -3],
+    [-19, 10, -1], [-14, 9, 11],
+    [-20, 8,  22],
+    // --- swing out and roll the long, flat brake run home to the station ---
+    [-36, 7, 22],  [-52, 6, 12],
+    [-66, 5, -2],  [-74, B, -14],
+    [-76, B, -22], [-72, B, -24],
   ];
-  // Modelled on a classic out-and-back hyper-coaster (à la Magnum XL-200): one tall,
-  // dead-straight lift, a steep first drop, then a run of camelback airtime hills out to a
-  // banked turnaround and a matching train of hills back — no impossible knots, no helix
-  // threading itself. Big, now that the fair has the room. Uniform scale about the station
-  // height keeps every slope identical, just larger.
-  const S = 0.75;
+  // A proper thrill coaster now that the fair has the room: one tall, dead-straight lift,
+  // a steep first drop straight into a VERTICAL LOOP, a big airtime hill, a banked
+  // turnaround, a train of return hills, then a descending helix that spirals over its own
+  // path and rolls out onto a long flat brake run. The track is carried on a
+  // rotation-minimising frame (see below), so the rails and the car follow it cleanly
+  // through the inversion instead of tearing. Uniform scale about the station height.
+  const S = 0.7;
   const curve = new THREE.CatmullRomCurve3(
     CTRL.map(c => new THREE.Vector3(c[0]*S, B + (c[1]-B)*S, c[2]*S)), true);
   const SAMPLES = curve.getSpacedPoints(260);
+  // Rotation-minimising frame: an up-vector carried along the track by parallel transport
+  // from world-up at the station. On the flats it stays up; through the loop it rolls with
+  // the track so the car goes properly upside-down and the rails wrap the inversion instead
+  // of collapsing (crossing the tangent with a fixed world-up degenerates where the track
+  // points straight up). Sampled uniformly in arc length, so round(t*FRAMES) matches the
+  // ride's own t.
+  const FRAMES = 600, frameTan = [], frameUp = [];
+  {
+    for (let i = 0; i <= FRAMES; i++) frameTan[i] = curve.getTangentAt(i / FRAMES).normalize();
+    let u = new THREE.Vector3(0, 1, 0);
+    u.addScaledVector(frameTan[0], -u.dot(frameTan[0]));
+    if (u.lengthSq() < 1e-6) u.set(1, 0, 0).addScaledVector(frameTan[0], -frameTan[0].x);
+    frameUp[0] = u.normalize().clone();
+    const axis = new THREE.Vector3();
+    for (let i = 1; i <= FRAMES; i++) {
+      const t0 = frameTan[i - 1], t1 = frameTan[i];
+      axis.crossVectors(t0, t1);
+      const s = axis.length(), u2 = frameUp[i - 1].clone();
+      if (s > 1e-7) { axis.multiplyScalar(1 / s); u2.applyAxisAngle(axis, Math.atan2(s, t0.dot(t1))); }
+      u2.addScaledVector(t1, -u2.dot(t1));           // keep it perpendicular to the tangent
+      frameUp[i] = u2.normalize();
+    }
+  }
+  const frameAt = t => { const i = Math.round((((t % 1) + 1) % 1) * FRAMES); return [frameTan[i], frameUp[i]]; };
   // site: candidates spiral out from the CAROUSEL — the user wants the coaster right
   // across the street from it, not off on its own ground.
   const fairAt = FAIR.carousel || FAIR.at0 || [0, 0];
@@ -7394,31 +7427,33 @@ let riding = null, rideExitCd = 0;
     };
     let crestU = 0, crestY = 0;
     SAMPLES.forEach((p, i) => { if (p.y > crestY) { crestY = p.y; crestU = i / (SAMPLES.length - 1); } });
-    const stopU = uNear(-57*S, -22*S), brakeU = uNear(-62*S, -14*S);
-    // rails: two offset tubes, ties, posts down to the ground
-    const up = new THREE.Vector3(0, 1, 0);
+    const stopU = uNear(-63*S, -24*S), brakeU = uNear(-66*S, -2*S);
+    // rails: two tubes offset ACROSS the track on the frame (so they roll through the loop
+    // instead of pinching), lifted just above the ties along the frame's up
     const railCurve = (sgn) => {
-      const pts = [];
-      for (let i = 0; i < 220; i++) {
-        const t = i / 220;
-        const p = curve.getPointAt(t), q = curve.getPointAt((t + 0.002) % 1);
-        const dir = q.clone().sub(p).normalize();
-        const side = new THREE.Vector3().crossVectors(dir, up).normalize();
-        pts.push(new THREE.Vector3(cx + p.x + side.x*sgn*0.52, p.y + 0.16, cz + p.z + side.z*sgn*0.52));
+      const pts = [], side = new THREE.Vector3();
+      for (let i = 0; i < 300; i++) {
+        const t = i / 300, p = curve.getPointAt(t), [T, U] = frameAt(t);
+        side.crossVectors(T, U).normalize();
+        pts.push(new THREE.Vector3(cx + p.x + side.x*sgn*0.52 + U.x*0.16,
+                                        p.y + side.y*sgn*0.52 + U.y*0.16,
+                                   cz + p.z + side.z*sgn*0.52 + U.z*0.16));
       }
       return new THREE.CatmullRomCurve3(pts, true);
     };
     for (const sgn of [-1, 1])
-      mesh2(new THREE.TubeGeometry(railCurve(sgn), 640, 0.09, 10, true), 0xd0392b, 0, 0, 0);
+      mesh2(new THREE.TubeGeometry(railCurve(sgn), 720, 0.09, 10, true), 0xd0392b, 0, 0, 0);
     const ties = [], posts = [];
     const NT = Math.round(LEN / 3);
     for (let i = 0; i < NT; i++) {
-      const t = i / NT;
-      const p = curve.getPointAt(t), q = curve.getPointAt((t + 0.002) % 1);
-      const dir = q.clone().sub(p).normalize();
-      const yaw = Math.atan2(dir.x, dir.z), pitch = -Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
-      ties.push(baked(BOX(1.5, 0.09, 0.28), cx + p.x, p.y + 0.05, cz + p.z, pitch, yaw, 0));
-      if (i % 4 === 0 && p.y > 1.2)
+      const t = i / NT, p = curve.getPointAt(t), [T, U] = frameAt(t);
+      // ties on the flatter, upright track only — on the steep/inverted loop the rails
+      // carry the read and cross-ties would splay out at odd angles
+      if (Math.abs(T.y) < 0.5 && U.y > 0.4) {
+        const yaw = Math.atan2(T.x, T.z), pitch = -Math.asin(THREE.MathUtils.clamp(T.y, -1, 1));
+        ties.push(baked(BOX(1.5, 0.09, 0.28), cx + p.x, p.y + 0.05, cz + p.z, pitch, yaw, 0));
+      }
+      if (i % 4 === 0 && p.y > 1.2 && p.y < 16 && U.y > 0.55)       // support posts under the low, upright track
         posts.push(baked(BOX(0.34, p.y, 0.34), cx + p.x, p.y/2, cz + p.z));
     }
     mesh2(merge(ties), 0x8c6a44, 0, 0, 0);
@@ -7434,8 +7469,8 @@ let riding = null, rideExitCd = 0;
     }
     scene.add(cart);
     // the station: platform beside the flat run, stairs up, all walking surface. The flat
-    // run is the local z=-22 straight (centre x=-57); the platform sits just outside it.
-    const stx = cx - 57*S, stz = cz - 22*S - 2.6, deckH = B - 0.3, deckTop = deckH + 0.22;
+    // run is the local z=-24 straight (centre x=-63); the platform sits just outside it.
+    const stx = cx - 63*S, stz = cz - 24*S - 2.6, deckH = B - 0.3, deckTop = deckH + 0.22;
     mesh2(BOX(9.5, deckH, 5.4), 0x8c6a44, stx, deckH/2, stz);
     mesh2(BOX(9.9, 0.22, 5.8), 0xa8845c, stx, deckH + 0.11, stz);
     for (const sxp of [-4, 4]) mesh2(BOX(0.3, 3.4, 0.3), 0x6b6f76, stx + sxp, deckH + 1.7, stz);
@@ -7465,7 +7500,8 @@ let riding = null, rideExitCd = 0;
     sign.position.set(stx, 7, stz - 3.6); sign.rotation.y = Math.PI; scene.add(sign);   // faces the way in
     FAIR.push({ kind: 'coaster', label: 'MAPLE MOUSE', x: stx, z: stz, r: 8,
                 P: world, cart, t: stopU, wait: 10, phase: 'lift', wrapped: false,
-                stopU, crestU, brakeU, topY: crestY, len: LEN, cx, cz });
+                stopU, crestU, brakeU, topY: crestY, len: LEN, cx, cz,
+                frameTan, frameUp, frameN: FRAMES });
     console.log(`fair: ${FAIR.length} rides at ${FAIR.at0 ? FAIR.at0[0]|0 : 0},${FAIR.at0 ? FAIR.at0[1]|0 : 0} · coaster at ${cx|0},${cz|0} (${LEN|0} m of track)`);
   } else {
     console.warn('coaster: no clear site found');
@@ -8479,6 +8515,7 @@ const rideSeat = (R) => {
   const c = R.cars[R.seat];
   return { x: c.x, y: 1.66, z: c.z, yaw: c.yaw };
 };
+const _cRight = new THREE.Vector3(), _cUp = new THREE.Vector3(), _cMat = new THREE.Matrix4();
 function updateRides(dt) {
   if (rideExitCd > 0) rideExitCd -= dt;
   for (const R of FAIR) {
@@ -8512,10 +8549,16 @@ function updateRides(dt) {
         if (R.phase === 'brake' && R.wrapped && t2 >= R.stopU) { R.t = R.stopU; R.wait = 10; }
         else R.t = t2;
       }
-      const [x, cy, z] = R.P(R.t), [x2, y2, z2] = R.P(R.t + 0.0025);
-      R.cart.position.set(x, cy + 0.32, z);
-      R.cart.rotation.set(-Math.asin(THREE.MathUtils.clamp((y2 - cy)/Math.max(0.001, Math.hypot(x2-x, y2-cy, z2-z)), -1, 1)),
-                          Math.atan2(x2 - x, z2 - z), 0, 'YXZ');
+      // orient the car on the track's rotation-minimising frame, so it banks and rolls
+      // fully upside-down through the loop instead of staying flat
+      const fi = Math.round((((R.t % 1) + 1) % 1) * R.frameN);
+      const T = R.frameTan[fi], U = R.frameUp[fi];
+      _cRight.crossVectors(U, T).normalize();
+      _cUp.crossVectors(T, _cRight).normalize();
+      _cMat.makeBasis(_cRight, _cUp, T);
+      R.cart.quaternion.setFromRotationMatrix(_cMat);
+      const [x, cy, z] = R.P(R.t);
+      R.cart.position.set(x + U.x*0.34, cy + U.y*0.34, z + U.z*0.34);
     } else {
       for (const c of R.cars) {
         const ridden = riding === R && R.cars[R.seat] === c;
