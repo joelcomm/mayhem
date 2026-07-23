@@ -737,9 +737,13 @@ function pointBlocked(x, z, m) {
   for (const c of colliders) if (x > c.minX-m && x < c.maxX+m && z > c.minZ-m && z < c.maxZ+m) return true;
   return false;
 }
-function collideCircle(px, pz, r, list) {
+function collideCircle(px, pz, r, list, overY) {
   let x = px, z = pz, hit = false;
   for (const b of list) {
+    // low barriers (guardrails, fences, bridge rails) carry a `jump` top height; once
+    // the player's feet clear it, they pass straight over — that is what makes a jump
+    // over a rail land on the far side instead of bouncing off it.
+    if (b.jump !== undefined && overY !== undefined && overY >= b.jump) continue;
     if (x + r > b.minX && x - r < b.maxX && z + r > b.minZ && z - r < b.maxZ) {
       const oL=(x+r)-b.minX, oR=b.maxX-(x-r), oT=(z+r)-b.minZ, oB=b.maxZ-(z-r);
       const m = Math.min(oL,oR,oT,oB);
@@ -2970,7 +2974,7 @@ const railCols = [];   // bridge-rail colliders, deferred past the scatter filte
                 const e2 = Math.min(q + 0.92, runB);
                 const qx = st.ax+ux*q+rx, qz = st.az+uz*q+rz;
                 const ex = st.ax+ux*e2+rx, ez = st.az+uz*e2+rz;
-                railCols.push({ minX: Math.min(qx,ex)-0.25, maxX: Math.max(qx,ex)+0.25,
+                railCols.push({ jump: 1.3, minX: Math.min(qx,ex)-0.25, maxX: Math.max(qx,ex)+0.25,
                                 minZ: Math.min(qz,ez)-0.25, maxZ: Math.max(qz,ez)+0.25 });
               }
             }
@@ -3076,7 +3080,7 @@ rngNeutral(() => {
       fence.push(g1, g2);
       fpost.push(g3);
       colliders.push({ minX: x - 0.3, maxX: x2 + 0.3,
-                       minZ: Math.min(za, zb) - 0.3, maxZ: Math.max(za, zb) + 0.3 });
+                       minZ: Math.min(za, zb) - 0.3, maxZ: Math.max(za, zb) + 0.3, jump: 1.3 });
     }
   }
   if (fence.length) {
@@ -3103,7 +3107,7 @@ rngNeutral(() => {
         const ax = st.ax+ux*d + nx*off*sd, az = st.az+uz*d + nz*off*sd;
         const bx = st.ax+ux*e + nx*off*sd, bz = st.az+uz*e + nz*off*sd;
         colliders.push({ minX: Math.min(ax,bx)-0.35, maxX: Math.max(ax,bx)+0.35,
-                         minZ: Math.min(az,bz)-0.35, maxZ: Math.max(az,bz)+0.35 });
+                         minZ: Math.min(az,bz)-0.35, maxZ: Math.max(az,bz)+0.35, jump: 1.0 });
       }
     }
   }
@@ -4985,7 +4989,7 @@ const HERO_LOOK = { skin:0xffd90f, hair:0x2a1e16, shirt:0xffffff, pants:0x2f6fc4
 const player = buildPerson(HERO_LOOK);
 player.visible = false; scene.add(player);
 const playerVel = new THREE.Vector3();
-let playerOnGround = true;
+let playerOnGround = true, canDouble = false;
 
 // The rider sitting in the player's car. He used to be parked at one fixed height that
 // suited the convertible, so in anything with a roof his head went straight through the
@@ -5047,6 +5051,13 @@ addEventListener('keydown', e => {
   keys[e.code] = true;
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
   if (e.code === 'KeyP') togglePause();
+  if (e.code === 'Space' && mode === 'foot' && !playerRag.active && !riding && !paused) {
+    if (playerOnGround) { playerVel.y = JUMP; playerOnGround = false; canDouble = true; }
+    else if (canDouble) {                            // a second tap in the air: jump again, higher
+      playerVel.y = JUMP*0.92; canDouble = false;
+      burst(player.position.x, player.position.y + 0.2, player.position.z, 0xdfeffb, 8);
+    }
+  }
   if (e.code === 'KeyC') camIdx = (camIdx+1) % 3;
   if (e.code === 'KeyM') mapView = !mapView;
   if (e.code === 'KeyR') resetAll();
@@ -5310,15 +5321,14 @@ function updatePlayer(dt) {
   player.rotation.y += (tl - tr) * 2.9 * dt;
   const drive = fwd - back, spd = sprint ? RUN : WALK;
   const fx = Math.sin(player.rotation.y), fz = Math.cos(player.rotation.y);
-  const res = collideCircle(player.position.x + fx*drive*spd*dt, player.position.z + fz*drive*spd*dt, 0.75, colliders);
+  const res = collideCircle(player.position.x + fx*drive*spd*dt, player.position.z + fz*drive*spd*dt, 0.75, colliders, player.position.y);
   const rt = collideTraffic(res.x, res.z, 0.75);
   player.position.x = THREE.MathUtils.clamp(rt.x, -TOWN-40, TOWN+40);
   player.position.z = THREE.MathUtils.clamp(rt.z, -TOWN-40, TOWN+40);
   const pgy = surfaceY(player.position.x, player.position.z);
-  if (keys.Space && playerOnGround) { playerVel.y = JUMP; playerOnGround = false; }
   playerVel.y -= GRAV*dt;
   player.position.y += playerVel.y*dt;
-  if (player.position.y <= pgy) { player.position.y = pgy; playerVel.y = 0; playerOnGround = true; }
+  if (player.position.y <= pgy) { player.position.y = pgy; playerVel.y = 0; playerOnGround = true; canDouble = false; }
   if (inWater(player.position.x, player.position.z) && player.position.y < WATER_Y + 1.4) {
     for (let k = 0; k < 20; k++)
       emit(tmpV.set(player.position.x + rnd(-1.6,1.6), WATER_Y + 0.4, player.position.z + rnd(-1.6,1.6)),
