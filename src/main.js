@@ -6495,14 +6495,30 @@ function petGeo(cat) {
   head.position.set(0, cat ? 0.58 : 0.62, cat ? 0.46 : 0.5); g.add(head);
   const muz = new THREE.Mesh(new THREE.SphereGeometry(0.12, 12, 9).scale(1, 0.8, 1.3), toon(pale));
   muz.position.set(0, cat ? 0.53 : 0.56, cat ? 0.62 : 0.72); g.add(muz);
+  // Ears OUTSIDE the skull — the first version parked the boxes at x ±0.13 on a
+  // 0.25-radius head, which buried them almost entirely and read as no ears at all.
   for (const sx of [-1, 1]) {
     const ear = cat
-      ? new THREE.Mesh(new THREE.ConeGeometry(0.1, 0.2, 4), toon(fur))            // pricked
-      : new THREE.Mesh(BOX(0.11, 0.24, 0.07), toon(fur));                          // floppy
-    ear.position.set(sx*0.13, cat ? 0.74 : 0.66, cat ? 0.44 : 0.46);
-    if (!cat) ear.rotation.z = sx*0.25;
+      ? new THREE.Mesh(new THREE.ConeGeometry(0.09, 0.22, 4), toon(fur))          // pricked
+      : new THREE.Mesh(BOX(0.1, 0.28, 0.06), toon(fur));                           // floppy, draped
+    ear.position.set(sx*(cat ? 0.14 : 0.24), cat ? 0.78 : 0.7, cat ? 0.42 : 0.44);
+    if (!cat) { ear.rotation.z = sx*0.55; ear.position.y = 0.7; }
     g.add(ear);
   }
+  // and a face: bulging crowd-style eyes with pupils, and a nose on the muzzle tip
+  const eyeMat = new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP });
+  const pupilMat = new THREE.MeshBasicMaterial({ color: 0x14192e });
+  for (const sx of [-1, 1]) {
+    const eye = new THREE.Mesh(new THREE.SphereGeometry(cat ? 0.06 : 0.075, 12, 9), eyeMat);
+    eye.position.set(sx*(cat ? 0.08 : 0.09), cat ? 0.64 : 0.7, cat ? 0.61 : 0.66);
+    g.add(eye);
+    const pupil = new THREE.Mesh(new THREE.SphereGeometry(cat ? 0.028 : 0.032, 8, 6), pupilMat);
+    pupil.position.set(eye.position.x, eye.position.y, eye.position.z + (cat ? 0.045 : 0.055));
+    g.add(pupil);
+  }
+  const nose = new THREE.Mesh(new THREE.SphereGeometry(cat ? 0.035 : 0.05, 8, 6),
+    cat ? toon(0xe87ab0) : new THREE.MeshBasicMaterial({ color: 0x14192e }));
+  nose.position.set(0, cat ? 0.56 : 0.6, cat ? 0.75 : 0.86); g.add(nose);
   const tail = new THREE.Mesh(BOX(0.08, 0.08, cat ? 0.7 : 0.36).translate(0, 0, cat ? -0.35 : -0.18), toon(fur));
   tail.position.set(0, cat ? 0.52 : 0.5, cat ? -0.42 : -0.46);
   tail.rotation.x = cat ? -0.9 : -0.5; g.add(tail);
@@ -6695,13 +6711,10 @@ let addJobMarker = null;
   // the pen block via addJobMarker, since the pen picks its site with findGreen.
   marker(STADIUM.cx, STADIUM.cz + STADIUM.rz + 9,
     'CRUSHER', 'Three rigs. One arena. Last one rolling wins.', 'derby');
-  // The Yard Soaker is SHELVED for now (design didn't land). The giver stays
-  // unspawned, which makes the whole mission unreachable; the machinery — the
-  // 'soak' def, spawnSoaker/updateSoak/blowWall, the soaker gun, reticule and
-  // tank — sits dormant behind it for a future revival. The portcullis gate
-  // stays live for free roam.
-  // if (PRISON.gate) marker(PRISON.gate.x + 6, PRISON.gate.z - 10,
-  //   'WARDEN NORRIS', "They're going over the walls! Grab the soaker and stop 'em.", 'soak');
+  // Warden Norris, on the far side of the gate from Lefty Louie (who is at gate.x+8).
+  // The two prison-gate givers keep well clear of each other.
+  if (PRISON.gate) marker(PRISON.gate.x - 10, PRISON.gate.z - 12,
+    'WARDEN NORRIS', "They're going over the walls! Grab the soaker and hose 'em down.", 'soak');
   marker(SPAWN.x - 32, SPAWN.z - (ROAD_HW + 3.5),
     'AXEL', 'One lap of the ring, through the mountain. Beat the clock.', 'race');
   // Tess stands beside the grid, not on it: a junction pad is ~16 m across, so an
@@ -8545,11 +8558,13 @@ function updateSoak(m, dt) {
       if (past > 5) { scene.remove(g); c.state = 'gone'; d.esc++; }
     }
   }
+  // Let too many through and the breakout succeeds — real stakes, not just a tally.
+  if (d.esc >= 12) { failMission('the breakout succeeded'); return; }
   if (d.t <= 0) {
     d.t = 0;
-    if (d.soaked > 0) winMission(d.soaked * 15 + (d.soaked >= 10 ? 80 : 0),
-      d.soaked + ' soaked · ' + d.esc + ' got away');
-    else failMission('they all got away');
+    if (d.soaked >= 5) winMission(d.soaked * 22 + (d.soaked >= 12 ? 200 : d.soaked >= 8 ? 80 : 0),
+      d.soaked + ' soaked · only ' + d.esc + ' got away');
+    else failMission('not enough of them soaked');
   }
 }
 // ---- the portcullis: prison bars over the gate, raised by a button outside ----
@@ -8695,7 +8710,8 @@ function updateSpray(dt) {
     best.state = 'soaked'; best.soakT = 0.55;
     burst(best.g.position.x, best.g.position.y + 1.4, best.g.position.z, 0x9adcff, 12);
     d.soaked++;
-    coinSfx(); addCoins(2);
+    coinSfx(); addCoins(4); chaosHit(6);
+    if (d.soaked === 8) toast('KEEP IT UP!');
   }
 }
 // the big round clock and score, shown for the timed arena rounds
@@ -8932,7 +8948,7 @@ const MISSION_DEFS = {
           m.stage = 1; m.timed = false; m.target = null;
           m.data.t = 60; m.data.spawnT = 0.4;
           gateOpenTgt = 0; gateHold = 0;
-          banner('GO!', 'hold left click to spray — stop them blowing the walls');
+          banner('GO!', 'hold left click to spray · soak 5+ · lose if 12 escape');
         }
       } else updateSoak(m, dt);
     },
