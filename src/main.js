@@ -4849,12 +4849,29 @@ function renderCrowd(sub) {
 const peds = [];
 const makeRag = () => ({ active:false, down:false, settle:0, vel:new THREE.Vector3(), spin:new THREE.Vector3() });
 const SIDEWALK = ROAD_HW + 3.2;
+// A walker is over open water when they're above the channel and NOT on a bridge deck.
+// Nobody should ever be here — the free-movers below treat it as a wall, and pedPlace
+// pulls edge-walkers back onto the deck.
+const onWater = (x, z) => overRiver(x, z, 0) && !onBridge(x, z);
 function pedPlace(p) {
   const e = NET.edges[p.ei], d = edgeDir(e, p.from), A = NET.nodes[p.from];
-  const lat = p.lat || SIDEWALK;         // everyone owns a lane across the pavement width
-  p.g.position.x = A.x + d.dx*p.dist - d.dz*p.side*lat + (p.ox || 0);
-  p.g.position.z = A.z + d.dz*p.dist + d.dx*p.side*lat + (p.oz || 0);
-  p.g.position.y = 0;
+  let lat = p.lat || SIDEWALK;           // everyone owns a lane across the pavement width
+  let ox = p.ox || 0, oz = p.oz || 0;
+  const lx = -d.dz*p.side, lz = d.dx*p.side;             // unit vector out to the walker's side
+  let x = A.x + d.dx*p.dist + lx*lat + ox;
+  let z = A.z + d.dz*p.dist + lz*lat + oz;
+  // A bridge deck is narrower than the pavement lane plus crowd jostle, so a river
+  // crossing would otherwise leave walkers hanging out past the rail over the water.
+  // If this walker is over the channel, squeeze their offset in toward the deck centre
+  // until a full stride further out is still on the deck — i.e. comfortably inside the rail.
+  if (overRiver(x, z, 0) && !onBridge(x + lx*1.3, z + lz*1.3)) {
+    for (let k = 0; k < 8 && overRiver(x, z, 0) && !onBridge(x + lx*1.3, z + lz*1.3); k++) {
+      lat *= 0.7; ox *= 0.7; oz *= 0.7;
+      x = A.x + d.dx*p.dist + lx*lat + ox;
+      z = A.z + d.dz*p.dist + lz*lat + oz;
+    }
+  }
+  p.g.position.x = x; p.g.position.z = z; p.g.position.y = 0;
   p.g.rotation.y = Math.atan2(d.dx, d.dz);
 }
 // Nobody walks the ring highway: it has no pavement, and a pedestrian on the hard
@@ -4949,8 +4966,9 @@ function updatePeds(dt) {
     if (p.flee && p.flee.t > 0) {
       p.flee.t -= dt;
       const res = collideCircle(p.g.position.x + p.flee.dx*11*dt, p.g.position.z + p.flee.dz*11*dt, 0.6, colliders);
-      if (res.hit) { const a = Math.atan2(p.flee.dx, p.flee.dz) + (Math.random()<0.5?1:-1)*1.1; p.flee.dx = Math.sin(a); p.flee.dz = Math.cos(a); }
-      p.g.position.x = res.x; p.g.position.z = res.z;
+      const wet = onWater(res.x, res.z);                 // the river is a wall — never bolt onto it
+      if (res.hit || wet) { const a = Math.atan2(p.flee.dx, p.flee.dz) + (Math.random()<0.5?1:-1)*1.1; p.flee.dx = Math.sin(a); p.flee.dz = Math.cos(a); }
+      if (!wet) { p.g.position.x = res.x; p.g.position.z = res.z; }
       p.g.rotation.y = Math.atan2(p.flee.dx, p.flee.dz);
       walkAnim(p.g, dt, 16, 0.95);
       if (p.flee.t <= 0) { p.flee = null; attachPed(p); }
@@ -4969,9 +4987,10 @@ function updatePeds(dt) {
       const a = Math.atan2(dx, dz) + (s.veer || 0);
       const sp = p.speed * 0.9;
       const res = collideCircle(p.g.position.x + Math.sin(a)*sp*dt, p.g.position.z + Math.cos(a)*sp*dt, 0.6, colliders);
-      if (res.hit) s.veer = THREE.MathUtils.clamp((s.veer || 0) + (Math.random() < 0.5 ? 1.1 : -1.1), -2.4, 2.4);
+      const wet = onWater(res.x, res.z);                 // don't amble out onto the river
+      if (res.hit || wet) s.veer = THREE.MathUtils.clamp((s.veer || 0) + (Math.random() < 0.5 ? 1.1 : -1.1), -2.4, 2.4);
       else s.veer = (s.veer || 0) * (1 - Math.min(1, dt*2));
-      p.g.position.x = res.x; p.g.position.z = res.z;
+      if (!wet) { p.g.position.x = res.x; p.g.position.z = res.z; }
       p.g.rotation.y = a;
       walkAnim(p.g, dt, 7.5, 0.55);
       // Cars yield to anyone in their lane, so a stroller ambling *along* a carriageway
@@ -5013,12 +5032,14 @@ function updatePeds(dt) {
       const at = Math.min(CROSS_AT, e.len*0.5);
       const bx = A.x + nd.dx*at, bz = A.z + nd.dz*at;
       if (Math.random() < 0.5 && lightGreen !== e.axis && !trafficNear(bx, bz, 9)) {
-        p.dist = at;
         const lat = p.lat || SIDEWALK;   // cross from and to their own pavement lane
-        p.cross = { t:0, dur:(2*lat)/2.5, yaw: Math.atan2(nd.dz*p.side, -nd.dx*p.side),
-          x0: bx - nd.dz*p.side*lat, z0: bz + nd.dx*p.side*lat,
-          x1: bx + nd.dz*p.side*lat, z1: bz - nd.dx*p.side*lat };
-        continue;
+        const x0 = bx - nd.dz*p.side*lat, z0 = bz + nd.dx*p.side*lat;
+        const x1 = bx + nd.dz*p.side*lat, z1 = bz - nd.dx*p.side*lat;
+        if (!onWater(x0, z0) && !onWater(x1, z1)) {   // never step onto a crossing over the river
+          p.dist = at;
+          p.cross = { t:0, dur:(2*lat)/2.5, yaw: Math.atan2(nd.dz*p.side, -nd.dx*p.side), x0, z0, x1, z1 };
+          continue;
+        }
       }
     }
     pedPlace(p);
