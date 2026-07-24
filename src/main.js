@@ -299,23 +299,30 @@ for (let k = 0; k < 9; k++) {
 }
 
 const STREETS = [];   // {ax,az,bx,bz,kind,w}
-function street(a, b, kind) {
+function street(a, b, kind, tag) {
   const w = kind === 'avenue' ? ROAD_HW*1.32 : kind === 'highway' ? ROAD_HW*1.5 : ROAD_HW;
-  STREETS.push({ ax:a.x, az:a.z, bx:b.x, bz:b.z, kind, w });
+  // `tag` carries which named road this segment belongs to and which block along it, so
+  // the house numbering below can work out a hundred-block the way a real town does.
+  STREETS.push({ ax:a.x, az:a.z, bx:b.x, bz:b.z, kind, w, ...(tag || {}) });
   a.deg++; b.deg++;
 }
 {
   const cand = [];
-  const add = (a, b, kind) => cand.push({ a, b, kind, live: true });
+  const add = (a, b, kind, tag) => cand.push({ a, b, kind, live: true, tag });
+  // East-west roads run along a ROW and carry a name; north-south roads run down a
+  // COLUMN and are numbered avenues, the way a grid town usually does it. `blk` is the
+  // index of the block this segment spans, which becomes the hundreds of the addresses.
   for (let i = 0; i < GN-1; i++) for (let j = 0; j < GN; j++)
-    if (HKEEP[i][j]) add(CORNER[i][j], CORNER[i+1][j], j === 3 ? 'avenue' : 'street');
+    if (HKEEP[i][j]) add(CORNER[i][j], CORNER[i+1][j], j === 3 ? 'avenue' : 'street',
+                         { road: 'row' + j, blk: i });
   for (let i = 0; i < GN; i++) for (let j = 0; j < GN-1; j++)
-    if (VKEEP[i][j]) add(CORNER[i][j], CORNER[i][j+1], j === RIVER_ROW ? 'bridge' : (i === 3 ? 'avenue' : 'street'));
+    if (VKEEP[i][j]) add(CORNER[i][j], CORNER[i][j+1], j === RIVER_ROW ? 'bridge' : (i === 3 ? 'avenue' : 'street'),
+                         { road: 'col' + i, blk: j });
   // a diagonal avenue slicing across the grain of the grid
   for (let k = 1; k < GN-2; k++) {
     const a = CORNER[k][k], b = CORNER[k+1][k+1];
     if (Math.abs(a.z - riverZ(a.x)) < RIVER_HW+8 || Math.abs(b.z - riverZ(b.x)) < RIVER_HW+8) continue;
-    add(a, b, 'avenue');
+    add(a, b, 'avenue', { road: 'diag', blk: k });
   }
   // Deleting streets to make super-blocks, and dropping all but three river crossings,
   // leaves stubs that stop in the middle of nowhere. Eat them back until every junction
@@ -327,7 +334,44 @@ function street(a, b, kind) {
     for (const c of cand) if (c.live && (deg.get(c.a) === 1 || deg.get(c.b) === 1)) { c.live = false; cut++; }
     if (!cut) break;
   }
-  for (const c of cand) if (c.live) street(c.a, c.b, c.kind);
+  for (const c of cand) if (c.live) street(c.a, c.b, c.kind, c.tag);
+}
+
+// ---- what the streets are called, and how the houses on them are numbered ----
+// Named roads east-west, numbered avenues north-south. Every address is then derived,
+// not invented: the hundreds come from which block along the road you are on, the tens
+// and units from how far along that block, and the parity from which side you stand —
+// odd on one kerb, even on the other, like anywhere else.
+const ROW_NAMES = ['MOOSE ANTLER WAY', 'PICKLEBACK STREET', 'WOBBLY ELM ROAD',
+                   'GRAVY BOULEVARD', 'BUTTERTHUMB LANE', 'CRUMPET STREET',
+                   'SASQUATCH ROAD', 'DISCO BADGER WAY'];
+const ORDINAL = ['1ST', '2ND', '3RD', '4TH', '5TH', '6TH', '7TH', '8TH', '9TH', '10TH'];
+const roadName = (road) => {
+  if (!road) return null;
+  if (road === 'diag') return 'CATTYWAMPUS DIAGONAL';
+  const n = +road.slice(3);
+  return road.startsWith('row') ? (ROW_NAMES[n] || 'MAPLE STREET')
+                                : (ORDINAL[n] || (n+1) + 'TH') + ' AVENUE';
+};
+for (const st of STREETS) st.name = roadName(st.road);
+// The nearest addressable road to a point, with the house number that goes with it.
+function addressOf(x, z) {
+  let best = null, bd = Infinity, bt = 0, bEven = true;
+  for (const st of STREETS) {
+    if (!st.name || st.kind === 'highway') continue;
+    const dx = st.bx - st.ax, dz = st.bz - st.az, L2 = dx*dx + dz*dz || 1;
+    const t = THREE.MathUtils.clamp(((x - st.ax)*dx + (z - st.az)*dz) / L2, 0, 1);
+    const px = st.ax + dx*t, pz = st.az + dz*t;
+    const d2 = (px - x)**2 + (pz - z)**2;
+    if (d2 < bd) {
+      bd = d2; best = st; bt = t;
+      bEven = ((x - st.ax)*dz - (z - st.az)*dx) >= 0;      // which kerb
+    }
+  }
+  if (!best) return null;
+  const within = 2 + Math.floor(bt*48)*2;                  // 2..98, stepping a plot at a time
+  const num = (best.blk + 1)*100 + within - (bEven ? 0 : 1);
+  return { num, street: best.name, text: num + ' ' + best.name };
 }
 
 // ---- cells become blocks (some merged, some drowned by the river) ----
@@ -1177,7 +1221,8 @@ function makeHouse(cx, cz, fx, fz, w, d, walkIn) {
   // Opt this house into the walk-in pipeline (the same one the shops use): the deferred
   // pass hollows the shell, cuts a doorway, lays a floor + ceiling, drops in a room and a
   // swinging door, and furnishes it. The doorway keeps clear of the two front windows.
-  if (walkIn) WALKIN.push({ name: 'HOUSE ' + (101 + vary(cz, cx, 800)),
+  const addr = addressOf(cx, cz);
+  if (walkIn) WALKIN.push({ name: addr ? addr.text : 'HOUSE ' + (101 + vary(cz, cx, 800)), home: true,
     cx, cz, yaw, w, d, h, W: aabbW(w, d, yaw), D: aabbD(w, d, yaw),
     fx, fz, front, bodyCol: wall, skin, drop, foot: colliders[colliders.length-1],
     dw: 2.0, dh: 3.2, glazed: false, avoid: [-w*0.28, w*0.28], reach: 3.5 });
@@ -2124,7 +2169,7 @@ function furnishRoom(R, b, r, dx, dz, walls) {
       }
     }
   }
-  if (b.name.startsWith('HOUSE ')) { furnishHome(); }
+  if (b.home) { furnishHome(); }
   else switch (b.name) {
     case 'SPEEDY MART': {
       if (counter(ud + s*3.0, -hv + 1.8, 2.6, 1.0))
@@ -2705,7 +2750,7 @@ rngNeutral(() => {
     // Prototype houses only go walk-in when the door sits (near) centred and clean — a
     // garden hedge or tree that forces the doorway to slide can push it off the trimmed
     // room wall, and a house is small enough that a far-slid door looks wrong anyway.
-    if (b.name.startsWith('HOUSE ') && Math.abs(q) > 0.7) continue;
+    if (b.home && Math.abs(q) > 0.7) continue;
 
     // Committed. Withdraw the solid body, glazing and footprint collider that were built
     // for the seeded stream's benefit, and put a shell and a room in their place.
@@ -2743,7 +2788,7 @@ rngNeutral(() => {
     // the fit-out: contextual furniture and staff, dispatched on the shop's name,
     // with the old counter-and-crates as the fallback for anything unbriefed
     furnishRoom(R, b, r, dx, dz, walls);
-    ENTERABLE.push({ name: b.name, x: dx, z: dz, fx: b.fx, fz: b.fz, room: R,
+    ENTERABLE.push({ name: b.name, home: !!b.home, x: dx, z: dz, fx: b.fx, fz: b.fz, room: R,
                      // leaf a touch WIDER/TALLER than the hole so the shut door overlaps the
                      // jambs and header — no rim of interior showing around it. The block
                      // collider still keys off the true opening (setDoorBlock), so this only
@@ -2878,6 +2923,40 @@ const OPENING_DOOR = (() => {
     const t = signTexture(s.text, s.bg || '#ffffff', s.fg || '#e8532f', 512, 128);
     const p = signPanel(s.w, s.w*0.25, t);
     p.position.set(s.x, s.y, s.z); p.rotation.y = s.yaw; scene.add(p);
+  }
+  // ---- street name blades ----
+  // One per segment, stood on the verge and turned to face the carriageway, so the name
+  // is readable as you drive it. Textures are cached per name: there are a dozen roads
+  // but scores of segments, and a canvas each would be pure waste.
+  {
+    const texCache = new Map();
+    const nameTex = t => {
+      let x = texCache.get(t);
+      if (!x) { x = signTexture(t, '#2f5fb0', '#ffffff', 512, 96); texCache.set(t, x); }
+      return x;
+    };
+    let put = 0;
+    for (const st of STREETS) {
+      if (!st.name || st.kind === 'highway' || st.kind === 'bridge') continue;
+      const dx = st.bx - st.ax, dz = st.bz - st.az, L = Math.hypot(dx, dz) || 1;
+      if (L < 30) continue;                       // too short to bother signing
+      const ux = dx/L, uz = dz/L, nx = -uz, nz = ux;
+      // a quarter of the way along, so signs land near the junctions rather than mid-block
+      for (const along of [0.22, 0.78]) {
+        const side = along < 0.5 ? 1 : -1;
+        const bx = st.ax + dx*along + nx*side*(st.w + 3.2);
+        const bz = st.az + dz*along + nz*side*(st.w + 3.2);
+        if (pointBlocked(bx, bz, 1.6) || onRoad(bx, bz, 0.5) || overRiver(bx, bz, 6)) continue;
+        const post = new THREE.Mesh(BOX(0.16, 4.0, 0.16), toon(0x6b6f76));
+        post.position.set(bx, 2.0, bz); post.castShadow = true; scene.add(post);
+        const blade = signPanel(5.4, 1.15, nameTex(st.name));
+        blade.position.set(bx, 4.2, bz);
+        blade.rotation.y = Math.atan2(-nx*side, -nz*side);   // turn to face the road
+        scene.add(blade);
+        put++;
+      }
+    }
+    console.log(`street signs: ${put} blades on ${new Set(STREETS.filter(s=>s.name).map(s=>s.name)).size} named roads`);
   }
   const BILL = [['GOLDEN BREW','#e8b53f','#c0392b'], ['FIZZ COLA','#e8532f','#ffffff'],
                 ['DON’T EAT BEEF','#9ec96a','#2f3550'], ['CLOWN SHOW!','#7b4fa7','#ffd23b']];
@@ -10492,7 +10571,7 @@ for (const e of ENTERABLE) setDoorBlock(e);
       flag('something standing inside the room');
   }
   console.log(`interiors: ${ROOMS.length} rooms, ${ENTERABLE.length} doors · colliders ${colliders.length} ·`, JSON.stringify(bad));
-  const walkHouses = ENTERABLE.filter(e => e.name.startsWith('HOUSE '));
+  const walkHouses = ENTERABLE.filter(e => e.home);
   console.log(`walk-in homes: ${walkHouses.length} enterable across the town`);
 }
 
