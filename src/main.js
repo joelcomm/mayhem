@@ -1858,20 +1858,13 @@ function fillDuff(B) {
   for (let k = 0; k < 5; k++) coinsSpots.push({ x: rnd(r.x0+6, r.x1-6), z: rnd(r.z0+6, r.z1-6) });
 }
 
-// PROTOTYPE: make the houses on one central block walk-in, to gauge the look and cost
-// before committing the whole town. Pick the house block nearest the middle of town so
-// it's easy to find.
-let protoHouseBlock = null, protoBd = Infinity;
-for (const B of BLOCKS) {
-  if (B.zone !== 'house') continue;
-  const d = ((B.r.x0+B.r.x1)/2)**2 + ((B.r.z0+B.r.z1)/2)**2;
-  if (d < protoBd) { protoBd = d; protoHouseBlock = B; }
-}
+// Every home in town is now a walk-in candidate (see the 'house' case below). Any whose
+// interior can't be cleanly cleared and doored just stays solid, exactly as the shops do.
 for (const B of BLOCKS) {
   if (B.r.x1 - B.r.x0 < 26 || B.r.z1 - B.r.z0 < 26) continue;   // too slim to build on
   switch (B.zone) {
     case 'duff':      fillDuff(B); break;
-    case 'house':     fillHouseBlock(B, B === protoHouseBlock); break;
+    case 'house':     fillHouseBlock(B, true); break;   // every home is a walk-in candidate
     case 'shops':     fillShopBlock(B); break;
     case 'plaza':     fillPark(B, true); break;
     case 'park':      fillPark(B, false); break;
@@ -2076,7 +2069,61 @@ function furnishRoom(R, b, r, dx, dz, walls) {
     }
   };
 
-  switch (b.name) {
+  // Every ordinary home gets a room type by coordinate hash (no RNG draw, so the town
+  // stays byte-identical): a lounge, a bedroom, a kitchen or a study. Pieces go through
+  // ok()/solid() so a tight room just drops whatever won't fit.
+  function furnishHome() {
+    const kind = vary(cx, cz, 4);
+    const woodC = 0x8c5a34, darkW = 0x5a4632;
+    if (kind === 0) {                                    // ---- lounge: telly + sofa ----
+      const couchC = [0xe08133, 0x4f7d8c, 0x8c3f5e, 0x2f6a52][vary(cz, cx, 4)];
+      const vT = hv - M - 0.45, vS = vT - 2.9;
+      if (ok(0, vT, 1.6, 0.8) && ok(0, vS, 3.2, 1.3)) {
+        vis(woodC, 0, vT, 1.5, 0.6, 0.45, 0);            // TV stand
+        vis(0x2a2e33, 0, vT, 1.3, 0.5, 0.95, 0.45);      // set
+        vis(0x9ad8ff, 0, vT - 0.29, 1.0, 0.05, 0.7, 0.58);
+        solid(0, vT, 1.5, 0.6);
+        vis(couchC, 0, vS, 2.9, 1.1, 0.55, 0);           // sofa
+        vis(couchC, 0, vS - 0.42, 2.9, 0.3, 1.15, 0);
+        for (const e of [-1, 1]) vis(couchC, e*1.32, vS, 0.3, 1.1, 0.8, 0);
+        solid(0, vS, 3.0, 1.2);
+        vis(0x7b4fa7, 0, vS + 1.5, 3.0, 1.5, 0.04, 0.09);            // rug
+        if (ok(0, vS + 1.5, 1.4, 0.7)) { vis(woodC, 0, vS + 1.5, 1.3, 0.6, 0.42, 0.13); solid(0, vS + 1.5, 1.3, 0.6); }
+        for (let i = 0; i < 3; i++) backPanel([0x2f6fc4, 0xd0392b, 0x2f8f4f][i], -1.2 + i*1.2, 0.55, 0.7, 3.0);
+      }
+    } else if (kind === 1) {                             // ---- bedroom ----
+      const bu = s*(hu - M - 1.1);
+      if (ok(bu, -0.2, 2.0, 3.6)) {
+        vis(darkW, bu, -0.2, 2.0, 3.6, 0.5, 0);          // frame
+        vis(0xe8e3d3, bu, -0.4, 1.9, 3.0, 0.28, 0.5);    // duvet
+        vis(0xbcd6ef, bu, 1.25, 1.9, 0.9, 0.26, 0.55);   // pillows
+        vis(woodC, bu, 1.75, 2.0, 0.25, 1.5, 0);         // headboard
+        solid(bu, -0.2, 2.0, 3.6);
+        const nu = bu - s*1.55;                          // nightstand + lamp
+        if (ok(nu, 1.4, 0.8, 0.8)) { vis(woodC, nu, 1.4, 0.8, 0.8, 0.7, 0); solid(nu, 1.4, 0.8, 0.8); cyl(0xfbe7a8, nu, 1.4, 0.28, 0.42, 0.7, 0.16); }
+      }
+      const wu = -s*(hu - M - 1.2);                      // wardrobe on the far side
+      if (ok(wu, hv - M - 0.6, 2.2, 1.0)) { vis(darkW, wu, hv - M - 0.6, 2.2, 1.0, 2.4, 0); solid(wu, hv - M - 0.6, 2.2, 1.0); }
+    } else if (kind === 2) {                             // ---- kitchen / diner ----
+      counter(0, hv - M - 0.55, clamp(2*hu*0.62, 2, 6), 1.0, 0x6f7a58, 0xe0e2d6);   // units
+      if (ok(0, -0.3, 1.6, 2.4)) {
+        vis(woodC, 0, -0.3, 1.6, 2.4, 0.75, 0); solid(0, -0.3, 1.6, 2.4);           // table
+        for (const [cu, cv] of [[-1.15, -0.3], [1.15, -0.3], [0, -1.65], [0, 1.05]])
+          if (ok(cu, cv, 0.6, 0.6)) vis(darkW, cu, cv, 0.55, 0.55, 0.9, 0);         // chairs
+      }
+    } else {                                             // ---- study ----
+      if (ok(s*1.4, hv - M - 0.6, 2.6, 1.0)) { vis(woodC, s*1.4, hv - M - 0.6, 2.6, 1.0, 0.75, 0); solid(s*1.4, hv - M - 0.6, 2.6, 1.0); }
+      if (ok(s*1.4, hv - M - 1.6, 0.6, 0.6)) vis(darkW, s*1.4, hv - M - 1.6, 0.6, 0.6, 0.9, 0);   // chair
+      const shu = -s*(hu - M - 0.6);
+      if (ok(shu, 0, 1.0, 2.8)) {                        // bookcase with colourful shelves
+        vis(darkW, shu, 0, 1.0, 2.8, 2.4, 0); solid(shu, 0, 1.0, 2.8);
+        for (let i = 0; i < 3; i++)                      // rows of books, set into the case front
+          vis([0xd0392b, 0xf0b429, 0x2f8f4f][i], shu + s*0.28, -0.8 + i*0.8, 0.3, 2.2, 0.5, 0.6 + i*0.6);
+      }
+    }
+  }
+  if (b.name.startsWith('HOUSE ')) { furnishHome(); }
+  else switch (b.name) {
     case 'SPEEDY MART': {
       if (counter(ud + s*3.0, -hv + 1.8, 2.6, 1.0))
         guy(ud + s*3.0, -hv + 2.9, 0, -1, { shirt: 0x2f8f4f, pants: 0x7b5ea7 });
@@ -10087,10 +10134,9 @@ for (const e of ENTERABLE) setDoorBlock(e);
                                           c.maxZ > I.z0 && c.minZ < I.z1))
       flag('something standing inside the room');
   }
-  console.log(`interiors: ${ROOMS.length} rooms, ${ENTERABLE.length} doors ·`, JSON.stringify(bad));
+  console.log(`interiors: ${ROOMS.length} rooms, ${ENTERABLE.length} doors · colliders ${colliders.length} ·`, JSON.stringify(bad));
   const walkHouses = ENTERABLE.filter(e => e.name.startsWith('HOUSE '));
-  if (protoHouseBlock) console.log(`walk-in house prototype: ${walkHouses.length} houses at block ` +
-    `${((protoHouseBlock.r.x0+protoHouseBlock.r.x1)/2)|0},${((protoHouseBlock.r.z0+protoHouseBlock.r.z1)/2)|0}`);
+  console.log(`walk-in homes: ${walkHouses.length} enterable across the town`);
 }
 
 function updateDoors(dt) {
