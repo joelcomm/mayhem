@@ -5311,6 +5311,8 @@ addEventListener('keydown', e => {
   }
   if (e.code === 'KeyC') camIdx = (camIdx+1) % 3;
   if (e.code === 'KeyM') mapView = !mapView;
+  if (mapView && (e.code === 'Equal' || e.code === 'NumpadAdd')) mapZoom = clampZoom(mapZoom * 1.2);
+  if (mapView && (e.code === 'Minus' || e.code === 'NumpadSubtract')) mapZoom = clampZoom(mapZoom / 1.2);
   if (e.code === 'KeyR') {
     if (mode === 'plane') ejectPlane();                                  // bail out of the cockpit
     else if (mode === 'foot' && !playerOnGround && chuteReady && !chuteOpen) deployChute();
@@ -5325,6 +5327,22 @@ addEventListener('keydown', e => {
   if (e.code.startsWith('Digit')) shopBuy(+e.code.slice(5) - 1);        // the garage menu
 });
 addEventListener('keyup', e => { keys[e.code] = false; });
+
+// ---- map-view zoom: wheel + / - keys (desktop) and pinch (mobile) ----
+addEventListener('wheel', e => {
+  if (!mapView) return;
+  mapZoom = clampZoom(mapZoom * (e.deltaY < 0 ? 1.16 : 0.86));
+  e.preventDefault();
+}, { passive: false });
+let pinchD = 0;
+addEventListener('touchmove', e => {
+  if (!mapView || e.touches.length < 2) { pinchD = 0; return; }
+  const d = Math.hypot(e.touches[0].clientX - e.touches[1].clientX,
+                       e.touches[0].clientY - e.touches[1].clientY);
+  if (pinchD) mapZoom = clampZoom(mapZoom * (d / pinchD));
+  pinchD = d; e.preventDefault();
+}, { passive: false });
+addEventListener('touchend', e => { if (e.touches.length < 2) pinchD = 0; });
 
 let camYaw = 0, camPitch = -0.22, dragging = false, lastMX = 0, lastMY = 0, lastMouse = 0;
 const canvas = renderer.domElement;
@@ -5471,6 +5489,9 @@ if (!FORCE_OFF) {
 }
 
 let camIdx = 0, mapView = false, camSettled = false;
+let mapZoom = 1;                          // 1 = default height; >1 closer, <1 further out
+const MAP_ZMIN = 0.45, MAP_ZMAX = 3.2;
+const clampZoom = z => THREE.MathUtils.clamp(z, MAP_ZMIN, MAP_ZMAX);
 const carDists = [11, 15, 6.5], footDists = [5.5, 8, 3.6];
 
 // =================================================================
@@ -10146,19 +10167,47 @@ function clampCameraToRoom(desired) {
 //  CAMERA
 // =================================================================
 function lerpAngle(a, b, t) { let d = ((b-a+Math.PI) % (Math.PI*2)) - Math.PI; if (d < -Math.PI) d += Math.PI*2; return a + d*t; }
+
+// "You are here" marker for the map: a big arrow flat on the ground, pointing the way
+// you face. From 1180 m a person is a sub-pixel speck, so the map needs its own pip.
+// A dark plate under a bright arrow gives it an outline the ink pass can't (too far).
+const mapMarker = (() => {
+  const g = new THREE.Group();
+  const arrow = (col, s, y) => {
+    const geo = new THREE.BufferGeometry();
+    geo.setAttribute('position', new THREE.Float32BufferAttribute(
+      [0,0,30*s,  -19*s,0,-16*s,  0,0,-6*s,   0,0,30*s,  0,0,-6*s,  19*s,0,-16*s], 3));
+    geo.computeVertexNormals();
+    const m = new THREE.Mesh(geo, new THREE.MeshBasicMaterial({ color: col, side: THREE.DoubleSide }));
+    m.position.y = y; m.rotation.x = 0; return m;
+  };
+  g.add(arrow(0x1b2340, 1.18, 3.4));               // dark base = outline
+  g.add(arrow(0xffd23b, 1.0, 3.6));                // bright sun-yellow arrow
+  g.visible = false; g.renderOrder = 3;
+  scene.add(g);
+  return g;
+})();
+
 const camTarget = new THREE.Vector3(), desired = new THREE.Vector3();
 function updateCamera(dt, now) {
+  mapMarker.visible = mapView;
   if (mapView) {                                  // pull way back and look straight down
-    const s2 = mode === 'car' ? car.position : player.position;
+    const s2 = mode === 'car' ? car.position : mode === 'plane' ? plane.position : player.position;
+    const face = mode === 'car' ? car.rotation.y : mode === 'plane' ? plane.rotation.y : player.rotation.y;
     scene.fog = null;                             // distance fog would grey the whole town out
+    const H = 1180 / mapZoom;                     // zoom pulls the eye in and out
     // a 0.4 near plane leaves no depth precision at 1200 m: the road paint, pads and
     // lawns (6–20 mm apart) z-fight into scribbles. Pull the near plane way in — the
     // whole town is 500+ m from the camera up here, so nothing is lost.
-    camera.near = 250;
-    camera.position.lerp(desired.set(s2.x, 1180, s2.z + 400), Math.min(1, dt*3));
+    camera.near = Math.max(60, H * 0.2);
+    camera.position.lerp(desired.set(s2.x, H, s2.z + H*0.34), Math.min(1, dt*3));
     camera.lookAt(camTarget.set(s2.x, 0, s2.z));
     camera.fov += (58 - camera.fov) * Math.min(1, dt*4);
     camera.updateProjectionMatrix();
+    // keep the pip on you, facing your heading, sized so it stays roughly constant on screen
+    mapMarker.position.set(s2.x, 0, s2.z);
+    mapMarker.rotation.y = face;
+    mapMarker.scale.setScalar(H / 1180);
     return;
   }
   // Up in the plane the camera is high and looking at ground hundreds of metres off, so
