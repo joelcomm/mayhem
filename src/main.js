@@ -5324,6 +5324,108 @@ addEventListener('mousemove', e => {
   lastMouse = performance.now();
 });
 
+// ---------------------------------------------------------------------------
+// Touch controls. A phone has no keyboard or mouse, so on a coarse-pointer
+// device we paint an on-screen stick + buttons and feed them straight into the
+// SAME `keys` map and `camYaw/camPitch` that the desktop input drives — every
+// movement system (car, foot, plane) already reads those, so nothing downstream
+// has to know a finger is behind it.
+// ---------------------------------------------------------------------------
+// Auto-detect a touch device, but let ?touch / ?notouch force it either way — handy
+// for a touchscreen laptop that wants the keyboard, or for testing the pad on desktop.
+const _q = new URLSearchParams(location.search);
+const IS_TOUCH = _q.has('notouch') ? false
+  : _q.has('touch') || matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
+if (IS_TOUCH) {
+  document.body.classList.add('touch');
+
+  // --- look: drag anywhere on the canvas (empty HUD is pointer-events:none, so
+  // stray touches fall through to here; the stick and buttons opt back in and
+  // swallow their own). One finger owns the look at a time. ---
+  let lookId = null;
+  canvas.addEventListener('pointerdown', e => {
+    if (e.pointerType !== 'touch' || lookId !== null) return;
+    lookId = e.pointerId; lastMX = e.clientX; lastMY = e.clientY; sirenInit();
+  });
+  canvas.addEventListener('pointermove', e => {
+    if (e.pointerId !== lookId) return;
+    camYaw   -= (e.clientX - lastMX) * 0.0044;
+    camPitch -= (e.clientY - lastMY) * 0.0038;
+    camPitch = THREE.MathUtils.clamp(camPitch, -1.2, 0.42);
+    lastMX = e.clientX; lastMY = e.clientY; lastMouse = performance.now();
+  });
+  const dropLook = e => { if (e.pointerId === lookId) lookId = null; };
+  canvas.addEventListener('pointerup', dropLook);
+  canvas.addEventListener('pointercancel', dropLook);
+
+  // --- movement stick: map the thumb offset onto the four WASD keys. WASD carry
+  // no discrete side-effects, so writing the map directly is safe (buttons below
+  // instead replay real key events, to fire the one-shot handlers). ---
+  const joy = document.getElementById('joy'), knob = document.getElementById('joyk');
+  const MOVE = ['KeyW','KeyS','KeyA','KeyD'];
+  const clearMove = () => MOVE.forEach(k => keys[k] = false);
+  let joyId = null;
+  const setStick = (dx, dy) => {
+    const R = 46, dead = 0.34;                           // travel radius, then dead-zone
+    const len = Math.hypot(dx, dy) || 1, cl = Math.min(len, R);
+    const kx = dx / len * cl, ky = dy / len * cl;
+    knob.style.transform = `translate(${kx}px, ${ky}px)`;
+    const nx = kx / R, ny = ky / R;
+    keys.KeyW = ny < -dead; keys.KeyS = ny > dead;       // up = forward, down = back/brake
+    keys.KeyA = nx < -dead; keys.KeyD = nx > dead;
+  };
+  joy.addEventListener('pointerdown', e => {
+    joyId = e.pointerId; joy.setPointerCapture(joyId); sirenInit();
+    const r = joy.getBoundingClientRect();
+    setStick(e.clientX - (r.left + r.width/2), e.clientY - (r.top + r.height/2));
+  });
+  joy.addEventListener('pointermove', e => {
+    if (e.pointerId !== joyId) return;
+    const r = joy.getBoundingClientRect();
+    setStick(e.clientX - (r.left + r.width/2), e.clientY - (r.top + r.height/2));
+  });
+  const dropJoy = e => {
+    if (e.pointerId !== joyId) return;
+    joyId = null; knob.style.transform = ''; clearMove();
+  };
+  joy.addEventListener('pointerup', dropJoy);
+  joy.addEventListener('pointercancel', dropJoy);
+
+  // --- action buttons: replay a real keydown/keyup so the existing keyboard
+  // handler runs (F's interact chain, jump, reset, camera…) and held keys land
+  // in `keys` for the pollers (Space handbrake, plane pitch/roll). Punch/kick
+  // are mouse-driven on desktop, so call those functions straight. ---
+  const tapKey = (code, down) =>
+    dispatchEvent(new KeyboardEvent(down ? 'keydown' : 'keyup', { code, bubbles: true }));
+  document.querySelectorAll('#tbtns .tb').forEach(btn => {
+    const what = btn.dataset.btn;
+    btn.addEventListener('pointerdown', e => {
+      e.preventDefault(); sirenInit();
+      if (what === 'punch') { if (!soakArm()) punch(); }
+      else if (what === 'kick') kick();
+      else tapKey(what, true);
+    });
+    const release = e => { e.preventDefault(); if (what !== 'punch' && what !== 'kick') tapKey(what, false); };
+    btn.addEventListener('pointerup', release);
+    btn.addEventListener('pointercancel', release);
+    btn.addEventListener('contextmenu', e => e.preventDefault());
+  });
+
+  // keep the button set + labels honest to the current mode
+  let tmode = '';
+  const F = document.querySelector('[data-btn="KeyF"]');
+  const SP = document.querySelector('[data-btn="Space"]');
+  const RS = document.querySelector('[data-btn="KeyR"]');
+  window.syncTouch = () => {
+    if (mode === tmode) return;
+    tmode = mode; document.body.dataset.tmode = mode;
+    F.textContent  = mode === 'foot' ? 'ENTER' : 'EXIT';
+    SP.textContent = mode === 'plane' ? 'NOSE▲' : mode === 'car' ? 'BRAKE' : 'JUMP';
+    RS.textContent = mode === 'plane' ? 'EJECT' : 'RESET';
+  };
+  window.syncTouch();
+}
+
 let camIdx = 0, mapView = false, camSettled = false;
 const carDists = [11, 15, 6.5], footDists = [5.5, 8, 3.6];
 
@@ -10543,6 +10645,7 @@ function animate() {
   const now = performance.now();
   const sub = mode === 'car' ? car.position : mode === 'plane' ? plane.position : player.position;
 
+  if (window.syncTouch) window.syncTouch();
   updateLights(dt);
   updateSky(dt);
   if (riverWater) riverWater.uniforms.uTime.value += dt;

@@ -169,6 +169,48 @@
     border:4px solid var(--ink); overflow:hidden; }
   #loader .bar i { display:block; height:100%; width:0; background:var(--sun); transition:width .25s; }
   #loader small { font-weight:700; letter-spacing:2px; opacity:.75; max-width:80vw; text-align:center; }
+
+  /* ---- mobile touch controls: hidden unless the device has a coarse pointer ---- */
+  #touch { display:none; }
+  body.touch #touch { display:block; }
+  body.touch #controls { display:none; }             /* the keyboard legend is useless on a phone */
+  body.touch #reticle { display:none !important; }
+  .touch-only { display:none; }
+  body.touch .touch-only { display:block; }
+  body.touch #start .ctrls:not(.touch-only) { display:none; }
+
+  canvas { touch-action:none; }                        /* stop the page scrolling under a drag */
+  #touch, #touch * { -webkit-tap-highlight-color:transparent; user-select:none; touch-action:none; }
+
+  /* left thumb: an analog-ish stick that just sets the WASD keys */
+  #joy { position:absolute; left:22px; bottom:26px; width:132px; height:132px; border-radius:50%;
+    background:rgba(24,32,60,.32); border:3px solid rgba(255,255,255,.5); pointer-events:auto;
+    box-shadow:0 4px 0 rgba(0,0,0,.22); }
+  #joyk { position:absolute; left:50%; top:50%; width:58px; height:58px; margin:-29px 0 0 -29px;
+    border-radius:50%; background:rgba(255,255,255,.82); border:3px solid rgba(24,32,60,.6);
+    box-shadow:0 2px 0 rgba(0,0,0,.25); }
+
+  /* right thumb: a wrap-up cluster of action buttons, built from the bottom-right corner */
+  #tbtns { position:absolute; right:16px; bottom:22px; width:172px; pointer-events:none;
+    display:flex; flex-direction:row-reverse; flex-wrap:wrap-reverse;
+    align-content:flex-end; justify-content:flex-start; gap:12px; }
+  .tb { width:64px; height:64px; border-radius:50%; pointer-events:auto; cursor:pointer;
+    border:3px solid rgba(255,255,255,.82); background:rgba(24,32,60,.6);
+    color:#fff; font-family:inherit; font-weight:900; font-size:12px; letter-spacing:.3px;
+    box-shadow:0 4px 0 rgba(0,0,0,.28); }
+  .tb:active { transform:translateY(3px); box-shadow:0 1px 0 rgba(0,0,0,.28);
+    background:rgba(60,80,140,.85); }
+  .tb.big { width:80px; height:80px; font-size:14px; color:var(--sun); }
+  .tb.foot, .tb.plane { display:none; }
+  body[data-tmode="foot"] .tb.foot { display:block; }
+  body[data-tmode="plane"] .tb.plane { display:block; }
+
+  /* shove the corner HUD out of the thumbs' way on touch */
+  body.touch #radar { top:14px; bottom:auto; right:14px; width:116px; height:116px; }
+  body.touch #mute { top:138px; right:66px; bottom:auto; }   /* tucked under the relocated minimap */
+  body.touch #speedo { left:20px; right:auto; top:150px; bottom:auto; text-align:left; }
+  body.touch #speedo .val { font-size:38px; }
+  body.touch #health { left:22px; right:auto; top:196px; bottom:auto; width:120px; }
 </style>
 
 <div id="app"></div>
@@ -202,6 +244,20 @@
   <div id="reticle"></div>
   <div id="tank"><i></i></div>
   <div id="shop"></div>
+  <div id="touch">
+    <div id="joy"><div id="joyk"></div></div>
+    <div id="tbtns">
+      <button class="tb big" data-btn="KeyF" type="button">ENTER</button>
+      <button class="tb" data-btn="Space" type="button">JUMP</button>
+      <button class="tb foot" data-btn="punch" type="button">PUNCH</button>
+      <button class="tb foot" data-btn="kick" type="button">KICK</button>
+      <button class="tb plane" data-btn="KeyQ" type="button">ROLL◀</button>
+      <button class="tb plane" data-btn="KeyE" type="button">ROLL▶</button>
+      <button class="tb plane" data-btn="ControlLeft" type="button">NOSE▼</button>
+      <button class="tb" data-btn="KeyR" type="button">RESET</button>
+      <button class="tb" data-btn="KeyC" type="button">CAM</button>
+    </div>
+  </div>
 </div>
 
 <div id="help">
@@ -246,6 +302,7 @@
       <li>💥 <b>Cause a little chaos</b> while you're at it</li>
     </ul>
     <div class="ctrls"><b>WASD</b> move · <b>Mouse</b> look · <b>F</b> get in / out · <b>Space</b> jump / brake · <b>M</b> map · <b>P</b> pause</div>
+    <div class="ctrls touch-only"><b>Left stick</b> move · <b>drag</b> to look · <b>ENTER</b> get in / out · tap the buttons to act</div>
     <div class="go">PRESS ANY KEY OR TAP TO PLAY</div>
   </div>
 </div>
