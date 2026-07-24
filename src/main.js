@@ -728,6 +728,9 @@ for (let i = 0; i < GN; i++) for (let j = 0; j < GN; j++) {
 //  COLLIDERS
 // =================================================================
 const colliders = [], mapBoxes = [];
+// Raised walking surfaces (see deckY, far below). Declared up here because the interiors
+// pass runs long before that section and pushes each room's floor into it.
+const DECKS = [];
 // Does an oriented footprint touch any carriageway? Samples corners, edge midpoints
 // and centre — enough for the rectangles everything here is built from.
 function footprintOnRoad(cx, cz, w, d, yaw, m) {
@@ -1186,7 +1189,11 @@ function makeHouse(cx, cz, fx, fz, w, d, walkIn) {
   // (walls are WALL_T thick), so the floor you stand on is clear.
   {
     const pw = w + 0.5, pd = d + 0.5, pt = 0.45;
+    // The FRONT band is withdrawn on a walk-in house: the doorway is in this wall, so the
+    // band sits exactly across the threshold and you wade through 0.65 m of it on the way
+    // in. The other three sides keep the trim, which is all you see from the street.
     put(0x9a8f7a, L(baked(BOX(pw, 0.65, pt), 0, 0.32, (pd - pt)/2)));
+    if (walkIn) drop.push(lastPut(0x9a8f7a));
     put(0x9a8f7a, L(baked(BOX(pw, 0.65, pt), 0, 0.32, -(pd - pt)/2)));
     put(0x9a8f7a, L(baked(BOX(pt, 0.65, pd - pt*2), (pw - pt)/2, 0.32, 0)));
     put(0x9a8f7a, L(baked(BOX(pt, 0.65, pd - pt*2), -(pw - pt)/2, 0.32, 0)));
@@ -2793,6 +2800,12 @@ rngNeutral(() => {
       if (kl > 0.3) put(0x5a5346, L(baked(BOX(kl, 0.4, 0.34), -b.w*0.44 + kl/2, 0.2, b.front + 0.08)));
       if (kr > 0.3) put(0x5a5346, L(baked(BOX(kr, 0.4, 0.34),  b.w*0.44 - kr/2, 0.2, b.front + 0.08)));
     }
+    // Stand ON the interior floor, not in it. The room's floor slab tops out at 0.09, and
+    // without a walkable deck the player's feet stay at ground level and the boards clip
+    // through their shins. The deck runs a little past the door face so the threshold is
+    // covered too, otherwise you step up onto nothing in the doorway itself.
+    DECKS.push({ x0: r.x0 - (b.fx ? 0.9 : 0), x1: r.x1 + (b.fx ? 0.9 : 0),
+                 z0: r.z0 - (b.fz ? 0.9 : 0), z1: r.z1 + (b.fz ? 0.9 : 0), h: 0.09 });
     const walls = shellColliders(r, b.fx, b.fz, b.dw, dx, dz);
     const R = addRoom(b.name, r, b.cx, b.cz, b.fx, b.fz, b.dw, walls);
     // the fit-out: contextual furniture and staff, dispatched on the shop's name,
@@ -4112,7 +4125,6 @@ function rampY(x, z) {
 // philosophy as the ramps: part of the ground, never a collider, so you walk up
 // the stairs and onto the deck with the ordinary altitude code. A `rise` axis
 // makes an entry a wedge (stairs); without one it is a flat deck.
-const DECKS = [];
 function deckY(x, z) {
   let best = 0;
   for (const d of DECKS) {
@@ -5450,6 +5462,7 @@ addEventListener('keydown', e => {
       burst(player.position.x, player.position.y + 0.2, player.position.z, 0xdfeffb, 8);
     }
   }
+  if (e.code === 'KeyX') abandonMission();
   if (e.code === 'KeyC') camIdx = (camIdx+1) % 3;
   if (e.code === 'KeyM') mapView = !mapView;
   if (mapView && (e.code === 'Equal' || e.code === 'NumpadAdd')) mapZoom = clampZoom(mapZoom * 1.2);
@@ -7920,11 +7933,20 @@ let riding = null, rideExitCd = 0;
 
     // one board on the way in — nudged off the carriageway if the plot edge lands on it
     let sx0 = cx - 20, sz0 = cz - FD/2 + 2;
-    if (onRoad(sx0, sz0, 4)) {
+    // The board is 16 m wide on posts at +/-7.4, so testing only its centre for road
+    // clearance put the posts — and half the sign — out in the carriageway. Test the
+    // whole span, and search in both axes rather than just sliding along z.
+    const signClear = (x, z) => {
+      for (const dxp of [-8.2, -4, 0, 4, 8.2])
+        if (onRoad(x + dxp, z, 3) || pointBlocked(x + dxp, z, 1.6) || overRiver(x + dxp, z, 6)) return false;
+      return true;
+    };
+    if (!signClear(sx0, sz0)) {
       let placed = false;
-      for (let dz = 0; dz <= 14 && !placed; dz += 2)
-        for (const s2 of [1, -1]) {                    // walk inward off the road
-          if (!onRoad(sx0, sz0 + s2*dz, 4)) { sz0 = sz0 + s2*dz; placed = true; break; }
+      for (let r = 2; r <= 26 && !placed; r += 2)
+        for (const [ox, oz] of [[0,1],[0,-1],[1,0],[-1,0],[0.7,0.7],[-0.7,0.7],[0.7,-0.7],[-0.7,-0.7]]) {
+          const nx = sx0 + ox*r, nz = sz0 + oz*r;
+          if (signClear(nx, nz)) { sx0 = nx; sz0 = nz; placed = true; break; }
         }
     }
     const brd = signPanel(16, 4, signTexture('MAPLEWOOD FAIR', '#7b4fa7', '#ffd23b', 512, 128));
@@ -8001,9 +8023,13 @@ let riding = null, rideExitCd = 0;
   ];
   // Uniform scale about the station height keeps every slope identical, just larger. There
   // is plenty of grass on this plot, so the ride is bigger than the old one.
-  const S = 0.62;
+  // Two scales, not one. Stretching the PLAN (SH) further than the height (S) is what
+  // makes the profile read like a real coaster: same drops, but the hills and valleys get
+  // the run-out they need instead of stacking up on top of each other. There is plenty of
+  // grass on this plot to spend on it.
+  const S = 0.62, SH = 0.80;
   const curve = new THREE.CatmullRomCurve3(
-    CTRL.map(c => new THREE.Vector3(c[0]*S, B + (c[1]-B)*S, c[2]*S)), true);
+    CTRL.map(c => new THREE.Vector3(c[0]*SH, B + (c[1]-B)*S, c[2]*SH)), true);
   const SAMPLES = curve.getSpacedPoints(260);
   // site: candidates spiral out from the CAROUSEL — the user wants the coaster right
   // across the street from it, not off on its own ground.
@@ -8029,8 +8055,10 @@ let riding = null, rideExitCd = 0;
   // a road clipping one edge that findGreen's coarse grid missed), so a direct scan is
   // what actually finds the room that is there.
   let site = null, bestD = Infinity;
-  for (let sx = plot[0] - 58; sx <= plot[0] + 58; sx += 4)
-    for (let sz = plot[1] - 22; sz <= plot[1] + 22; sz += 4) {
+  // Widened along with the track: the spread-out layout needs a bigger clear window,
+  // and there is more grass around this plot than the old box was searching.
+  for (let sx = plot[0] - 95; sx <= plot[0] + 95; sx += 4)
+    for (let sz = plot[1] - 55; sz <= plot[1] + 55; sz += 4) {
       const d = (sx - fairAt[0])**2 + (sz - fairAt[1])**2;
       if (d >= bestD) continue;
       if (pathOK(sx, sz)) { bestD = d; site = { x: sx, z: sz }; }
@@ -8049,7 +8077,7 @@ let riding = null, rideExitCd = 0;
   }
   if (site) {
     const cx = site.x, cz = site.z;
-    TAKEN.push({ x: cx, z: cz, w: 140*S, d: 100*S });
+    TAKEN.push({ x: cx, z: cz, w: 150*SH, d: 110*SH });
     const mesh2 = (geo, col, x, y, z) => {
       const m = new THREE.Mesh(geo, toon(col));
       m.position.set(x, y, z); m.castShadow = true; m.receiveShadow = true;
@@ -8062,7 +8090,7 @@ let riding = null, rideExitCd = 0;
     // Arc-length u of a control point, matched in 3D — a plan-only match would be
     // ambiguous where the corkscrew passes over its own footprint.
     const uOfCtrl = (i) => {
-      const c = CTRL[i], tgt = new THREE.Vector3(c[0]*S, B + (c[1]-B)*S, c[2]*S);
+      const c = CTRL[i], tgt = new THREE.Vector3(c[0]*SH, B + (c[1]-B)*S, c[2]*SH);
       let bi = 0, bd = Infinity;
       SAMPLES.forEach((p, k) => { const d = p.distanceToSquared(tgt); if (d < bd) { bd = d; bi = k; } });
       return bi / (SAMPLES.length - 1);
@@ -8165,7 +8193,7 @@ let riding = null, rideExitCd = 0;
     scene.add(cart);
     // the station: platform beside the flat run, stairs up, all walking surface. The flat
     // run is the local z=-40 straight (centre x=2); the platform sits just outside it.
-    const stx = cx + 2*S, stz = cz - 40*S - 2.6, deckH = B - 0.3, deckTop = deckH + 0.22;
+    const stx = cx + 2*SH, stz = cz - 40*SH - 2.6, deckH = B - 0.3, deckTop = deckH + 0.22;
     mesh2(BOX(9.5, deckH, 5.4), 0x8c6a44, stx, deckH/2, stz);
     mesh2(BOX(9.9, 0.22, 5.8), 0xa8845c, stx, deckH + 0.11, stz);
     for (const sxp of [-4, 4]) mesh2(BOX(0.3, 3.4, 0.3), 0x6b6f76, stx + sxp, deckH + 1.7, stz);
@@ -8187,7 +8215,10 @@ let riding = null, rideExitCd = 0;
       for (const rz of [z0 + 0.1, z1 - 0.1]) {
         const rail = new THREE.Mesh(BOX(Math.hypot(sx1 - sx0, deckTop) + 0.4, 0.08, 0.08), toon(0xf6f3ea));
         rail.position.set((sx0 + sx1)/2, deckTop/2 + 0.95, rz);
-        rail.rotation.z = -Math.atan2(deckTop, sx1 - sx0);
+        // The steps climb from sx0 (ground) to sx1 (platform), so the rail has to rise
+        // with +x. A positive rotation about z tilts +x toward +y; it was negated, which
+        // ran the handrail downhill against the stairs.
+        rail.rotation.z = Math.atan2(deckTop, sx1 - sx0);
         scene.add(rail);
       }
     }
@@ -9627,6 +9658,18 @@ function winMission(base, flavor) {
   addCoins(total); coinSfx();
   banner('+' + total + ' COINS', (flavor || 'job done') + (stars ? ' · wanted bonus x' + mult.toFixed(1) : ''));
   finishMission(true);
+}
+// X: walk away from the job you took. Without this, a job you have lost interest in
+// leaves its arrow and beacon hanging over you until you either finish it or fail it.
+function abandonMission() {
+  if (MI) {
+    const g = MI.giver;
+    banner('JOB DROPPED', 'find ' + g.name + ' if you change your mind');
+    finishMission(false);
+    retryGiver = null;
+    return;
+  }
+  if (retryGiver) { retryGiver = null; toast('GUIDE CLEARED'); }
 }
 function failMission(why) {
   const g = MI.giver;
