@@ -4527,17 +4527,20 @@ function pickLook() {
              : style === 'fedora'  ? mpick(FELT_COLS)
              : style === 'hardhat' ? mpick(HIVIS_COLS)
              : rpick(HAIR);
+  // Everyone gets one of the five face looks, and their skin comes from that look's own
+  // palette — so the classic yellow crowd mixes with natural-skinned neighbours.
+  const face = (Math.random() * FACE_STYLES.length) | 0;
   return {
     shoulder: female ? rnd(0.44, 0.55) : rnd(0.56, 0.68),
     // depth, independent of width: a town of one build reads as clones however much
     // the heights vary, because the silhouette from the side never changes
     build: rnd(0.86, 1.28),
-    tall: rnd(0.85, 1.15), style,
+    tall: rnd(0.85, 1.15), style, face,
     // a striped shirt is the same torso mesh under a stripe texture, tinted by the same
     // instance colour — a whole second wardrobe for one draw call
     striped: Math.random() < 0.3,
     specs: Math.random() < 0.17 ? new THREE.Color(mpick(SPEC_COLS)) : null,
-    skin:new THREE.Color(rpick(SKIN)), hair:new THREE.Color(hair),
+    skin:new THREE.Color(rpick(FACE_STYLES[face].skin)), hair:new THREE.Color(hair),
     shirt:new THREE.Color(rpick(SHIRT)), pants:new THREE.Color(rpick(PANTS)),
     shoe:new THREE.Color(rpick([0x2b2f38, 0x1f2430, 0x5a3a2a, 0x8c1f1f, 0xe8e3d3])),
   };
@@ -4563,6 +4566,48 @@ const pupilPair = merge([
 ]);
 const muzzleGeo = new THREE.SphereGeometry(0.17, 16, 12).scale(1.45, 0.95, 1.15).translate(0, 1.585, 0.165);
 const mouthGeo  = BOX(0.27, 0.055, 0.06).translate(0, 1.495, 0.315);
+
+// --- FACE STYLES: five looks for the townsfolk, chosen once from the picker and swapped
+// into the crowd's instanced face meshes. The head, hair, hats and body stay the same
+// (so every hairstyle still fits) — what changes is the eyes, muzzle/nose, mouth and skin,
+// which is what actually reads as "the look". ---
+const emptyGeo = new THREE.BufferGeometry();
+const SKIN_YELLOW = SKIN;                       // the classic Simpsons palette (defined above)
+const SKIN_NATURAL = [0xf3cda7, 0xe6b48c, 0xd39b6e, 0xbe8354, 0x9c6644, 0x7a4a2b];
+const eyePairAt = (r, dx, y, z, sz) => merge([
+  baked(new THREE.SphereGeometry(r, 16, 12).scale(1, 1, sz || 1), -dx, y, z),
+  baked(new THREE.SphereGeometry(r, 16, 12).scale(1, 1, sz || 1),  dx, y, z),
+]);
+const dotPairAt = (r, dx, y, z) => merge([
+  baked(new THREE.SphereGeometry(r, 14, 10), -dx, y, z),
+  baked(new THREE.SphereGeometry(r, 14, 10),  dx, y, z),
+]);
+const browAt = (y, z, dx, w) => merge([
+  baked(BOX(w, 0.04, 0.08), -dx, y, z, -0.2, 0,  0.11),
+  baked(BOX(w, 0.04, 0.08),  dx, y, z, -0.2, 0, -0.11),
+]);
+const FACE_STYLES = [
+  { key: 'CLASSIC', desc: 'the yellow, big-eyed original',
+    eyes: baked(eyePair, 0, 1.85, 0.185), pupil: baked(pupilPair, 0, 1.85, 0.185),
+    muzzle: muzzleGeo, nose: emptyGeo, mouth: mouthGeo, brow: browAt(2.008, 0.185, 0.128, 0.17), skin: SKIN_YELLOW },
+  { key: 'FRIENDLY', desc: 'natural skin, softer face, a nose',
+    eyes: eyePairAt(0.12, 0.108, 1.80, 0.235, 0.6), pupil: dotPairAt(0.058, 0.108, 1.80, 0.30),
+    muzzle: emptyGeo, nose: baked(new THREE.SphereGeometry(0.052, 12, 10).scale(1, 0.9, 1.2), 0, 1.72, 0.285),
+    mouth: BOX(0.2, 0.05, 0.06).translate(0, 1.56, 0.275), brow: browAt(1.925, 0.29, 0.108, 0.15), skin: SKIN_NATURAL },
+  { key: 'SIMPLE', desc: 'clean, small features, bean-like',
+    eyes: eyePairAt(0.072, 0.10, 1.80, 0.255, 0.6), pupil: dotPairAt(0.044, 0.10, 1.80, 0.31),
+    muzzle: emptyGeo, nose: emptyGeo, mouth: BOX(0.16, 0.045, 0.06).translate(0, 1.58, 0.28),
+    brow: browAt(1.905, 0.30, 0.10, 0.13), skin: SKIN_NATURAL },
+  { key: 'BIG EYES', desc: 'big cartoon eyes, cute',
+    eyes: eyePairAt(0.155, 0.122, 1.82, 0.225, 0.5), pupil: dotPairAt(0.088, 0.122, 1.82, 0.285),
+    muzzle: emptyGeo, nose: baked(new THREE.SphereGeometry(0.04, 12, 10), 0, 1.70, 0.29),
+    mouth: BOX(0.14, 0.045, 0.06).translate(0, 1.58, 0.28), brow: browAt(1.985, 0.285, 0.122, 0.17), skin: SKIN_NATURAL },
+  { key: 'MINIMAL', desc: 'flat modern dots, no eye-whites',
+    eyes: emptyGeo, pupil: dotPairAt(0.056, 0.102, 1.82, 0.265),
+    muzzle: emptyGeo, nose: emptyGeo,
+    mouth: baked(new THREE.TorusGeometry(0.1, 0.02, 6, 14, 1.5), 0, 1.63, 0.265, Math.PI + 0.75),
+    brow: emptyGeo, skin: SKIN_NATURAL },
+];
 // hairstyles, one instanced mesh each; every townsperson writes to exactly one
 // Hemispheres, not spheres: a full sphere hangs below the crown and reads as a beard.
 const dome = (r, sy, y) => new THREE.SphereGeometry(r, 16, 12, 0, Math.PI*2, 0, Math.PI*0.52)
@@ -4681,11 +4726,6 @@ const CI = {
   // same object with different matrices, so two draw calls would buy nothing
   hands: instanced(handGeo, crowdToon, CROWD_MAX*2),
   head:  instanced(headGeo, crowdToon, CROWD_MAX),
-  muzzle:instanced(muzzleGeo, crowdToon, CROWD_MAX),
-  brow:  instanced(browGeo, crowdToon, CROWD_MAX),
-  mouth: instanced(mouthGeo, new THREE.MeshBasicMaterial({ color:0x7a3b34 }), CROWD_MAX, false),
-  eyes:  instanced(baked(eyePair, 0, 1.85, 0.185), new THREE.MeshToonMaterial({ color:0xffffff, gradientMap:RAMP }), CROWD_MAX),
-  pupil: instanced(baked(pupilPair, 0, 1.85, 0.185), new THREE.MeshBasicMaterial({ color:0x14192e }), CROWD_MAX, false),
   hairShort: instanced(hairShort, crowdToon, CROWD_MAX),
   hairTall:  instanced(hairTall,  crowdToon, CROWD_MAX),
   hairSpiky: instanced(hairSpiky, crowdToon, CROWD_MAX),
@@ -4700,6 +4740,19 @@ const CI = {
   hairHardhat:instanced(hairHardhat, crowdToon, CROWD_MAX),
   glasses:   instanced(glassesGeo, crowdToon, CROWD_MAX, false),
 };
+// One instanced mesh per face part PER style, so the town wears all five looks at once.
+// A townsperson writes its face to the meshes for its own style (see look.face); styles
+// that leave a part out (a muzzle, a nose, eye-whites) use an empty geometry, so the
+// instance simply draws nothing.
+for (let s = 0; s < FACE_STYLES.length; s++) {
+  const S = FACE_STYLES[s];
+  CI['eyes'+s]  = instanced(S.eyes,  new THREE.MeshToonMaterial({ color:0xffffff, gradientMap:RAMP }), CROWD_MAX);
+  CI['pupil'+s] = instanced(S.pupil, new THREE.MeshBasicMaterial({ color:0x14192e }), CROWD_MAX, false);
+  CI['muzzle'+s]= instanced(S.muzzle, crowdToon, CROWD_MAX);
+  CI['nose'+s]  = instanced(S.nose,  crowdToon, CROWD_MAX);
+  CI['mouth'+s] = instanced(S.mouth, new THREE.MeshBasicMaterial({ color:0x7a3b34 }), CROWD_MAX, false);
+  CI['brow'+s]  = instanced(S.brow,  crowdToon, CROWD_MAX);
+}
 const HAIR_MESH = { short:'hairShort', tall:'hairTall', spiky:'hairSpiky', bun:'hairBun', bald:'hairBald',
                     cap:'hairCap', afro:'hairAfro', long:'hairLong', mohawk:'hairMohawk',
                     beanie:'hairBeanie', fedora:'hairFedora', hardhat:'hairHardhat' };
@@ -4710,7 +4763,8 @@ for (const k in CI) {
   CI[k].setColorAt(0, new THREE.Color(0xffffff));
   CI[k].instanceColor.array.fill(1);
   CI[k].instanceColor.needsUpdate = true;
-  scene.add(CI[k]);
+  CI[k].frustumCulled = false;                   // instances span the town; and a face style
+  scene.add(CI[k]);                              // may leave a part empty (NaN bounds), so don't cull
 }
 const rootM = new THREE.Matrix4(), partM = new THREE.Matrix4(), cCnt = {};
 function renderCrowd(sub) {
@@ -4731,17 +4785,19 @@ function renderCrowd(sub) {
     dummy.rotation.set(g.rotation.x, g.rotation.y, g.rotation.z);
     dummy.scale.set(1, L.tall, 1); dummy.updateMatrix(); rootM.copy(dummy.matrix);
     put2(L.striped ? 'torsoS' : 'torso', L.shirt, 0,0,0, 0,0, sh, L.build);
-    put2('head',  L.skin,  0,0,0);
-    put2('muzzle',L.skin,  0,0,0);
-    put2('mouth', null,    0,0,0);
-    put2('eyes',  null,    0,0,0);
+    const f = L.face;                              // this person's face style (0-4)
+    put2('head',    L.skin,  0,0,0);
+    put2('muzzle'+f, L.skin, 0,0,0);
+    put2('nose'+f,  L.skin,  0,0,0);
+    put2('mouth'+f, null,    0,0,0);
+    put2('eyes'+f,  null,    0,0,0);
     // The pupils are the same mesh every frame, just parked a few millimetres off
     // centre — so a slow wander costs nothing and stops fourteen hundred people
     // staring dead ahead in unison. Everyone drifts on their own phase.
     const gx = Math.sin(gazeT * 0.53 + u.phase) * 0.035;
     const gy = Math.sin(gazeT * 0.37 + u.phase * 1.7) * 0.018;
-    put2('pupil', null, gx, gy, 0);
-    put2('brow', L.hair, 0,0,0);
+    put2('pupil'+f, null, gx, gy, 0);
+    put2('brow'+f, L.hair, 0,0,0);
     put2(HAIR_MESH[L.style], L.hair, 0,0,0);
     if (L.specs) put2('glasses', L.specs, 0,0,0);
     put2('legL', L.pants, -0.14, 0.86, 0, u.legL.rotation.x);
@@ -4790,7 +4846,6 @@ function renderCrowd(sub) {
     if (CI[k].instanceColor) CI[k].instanceColor.needsUpdate = true;
   }
 }
-
 const peds = [];
 const makeRag = () => ({ active:false, down:false, settle:0, vel:new THREE.Vector3(), spin:new THREE.Vector3() });
 const SIDEWALK = ROAD_HW + 3.2;
@@ -8906,8 +8961,8 @@ function winMission(base, flavor) {
   finishMission(true);
 }
 function failMission(why) {
-  banner('JOB FAILED', why + ' · head back to try again');
   const g = MI.giver;
+  banner('JOB FAILED', why + ' · find ' + g.name + ' to try again');
   finishMission(false);
   retryGiver = g;                                // arrow, beacon and radar lead back
 }
@@ -10544,9 +10599,11 @@ function animate() {
 
 const loader = document.getElementById('loader');
 const bar = loader.querySelector('.bar i');
-// The title / instructions screen: once the town is built we hold the sim paused behind it
-// and wait for the player to press any key (or tap) before the game runs.
 const startScreen = document.getElementById('start');
+
+// ---- the title / instructions screen ----
+// Once the town is built we hold the sim paused behind the splash and wait for the player
+// to press any key (or tap) before the game runs.
 let gameStarted = false;
 function beginGame() {
   if (gameStarted) return;
