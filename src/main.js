@@ -2567,12 +2567,7 @@ function furnishRoom(R, b, r, dx, dz, walls) {
         sph(0x3f8f4a, up + du, vp + dv, 0.38, h + 0.28, 0.85);
       solid(up, vp, 0.9, 0.9);
     }
-    const ub = -s*(hu - 0.7), vb = -hv + 0.85;         // and a bin by the door side
-    if (ok(ub, vb, 0.7, 0.7)) {
-      cyl(0x4a4f58, ub, vb, 0.28, 0.62, 0, 0.24);
-      torus(0x2b2f38, ub, vb, 0.27, 0.045, 0.62);
-      solid(ub, vb, 0.6, 0.6);
-    }
+    // (no bin by the door — trash cans belong on the street, not on the shop floor)
   }
 }
 
@@ -3466,7 +3461,16 @@ function writeProp(p) {
   for (const m of p.meshes) m.setMatrixAt(p.i, dummy.matrix);
 }
 {
-  const placed = propSpots.filter(s => !pointBlocked(s.x, s.z, 0.8) && !onRoad(s.x, s.z, 0.8));
+  // A walk-in shop's solid block is withdrawn and replaced by a wall shell, so its interior
+  // reads as open ground to pointBlocked — which is how municipal bins ended up standing in
+  // the middle of shop floors. Street furniture belongs outside, so drop anything that lands
+  // within a room's footprint.
+  const inRoom = (x, z) => ROOMS.some(R => {
+    const I = R.inner;
+    return x > I.x0 - 0.8 && x < I.x1 + 0.8 && z > I.z0 - 0.8 && z < I.z1 + 0.8;
+  });
+  const placed = propSpots.filter(s =>
+    !pointBlocked(s.x, s.z, 0.8) && !onRoad(s.x, s.z, 0.8) && !inRoom(s.x, s.z));
   propSpots.length = 0; propSpots.push(...placed);
   const byKind = {};
   for (const s of propSpots) (byKind[s.kind] = byKind[s.kind] || []).push(s);
