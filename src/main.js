@@ -1101,11 +1101,20 @@ function roofPrism(w, h, d) {
 }
 
 // one suburban house, facing +face (a unit vector toward its street)
-function makeHouse(cx, cz, fx, fz, w, d) {
+function makeHouse(cx, cz, fx, fz, w, d, walkIn) {
+  // The walk-in room box is axis-aligned, and even a couple of degrees of the jittered
+  // street's tilt puts the doorway off its wall. So a house we intend to hollow faces
+  // exactly square-on to the nearest cardinal — the garden's a hair off but the room lines
+  // up perfectly. placeClear draws no RNG, so this doesn't disturb the rest of the town.
+  if (walkIn) {
+    if (Math.abs(fx) >= Math.abs(fz)) { fx = Math.sign(fx) || 1; fz = 0; }
+    else                              { fz = Math.sign(fz) || 1; fx = 0; }
+  }
   const yaw = Math.atan2(fx, fz);
   const spot = placeClear(cx, cz, fx, fz, w, d, yaw);
   if (!spot) return null;                        // nowhere clear of the road for it
   cx = spot.x; cz = spot.z;
+  const drop = [];                               // solid parts withdrawn if this becomes walk-in
   let wall = rpick(WALL_COLS);
   const roof = rpick(ROOF_COLS), door = rpick(DOOR_COLS);
   const storeys = prng() < 0.35 ? 2 : 1;
@@ -1120,6 +1129,7 @@ function makeHouse(cx, cz, fx, fz, w, d) {
   if (skin === 'brick') wall = BRICK_COLS[vary(cz, cx, BRICK_COLS.length)];
 
   put(wall, L(baked(BOX(w, h, d), 0, h/2, 0)), skin);
+  if (walkIn) drop.push(lastPut(wall, skin));       // the solid shell, replaced by a walled room
   put(roof, L(baked(roofPrism(w+1.4, rnd(2.6,3.8), d+1.4), 0, h, 0)), 'shingle');
 
   const front = d/2 + 0.06;
@@ -1130,7 +1140,9 @@ function makeHouse(cx, cz, fx, fz, w, d) {
   put(TRIM, L(baked(BOX(w+1.5, 0.34, d+1.5), 0, h - 0.17, 0)));      // eaves fascia
   // door: recessed frame, panel, step, and a knob you can actually see
   put(TRIM, L(baked(BOX(2.4, 3.5, 0.14), 0, 1.72, front - 0.02)));
+  if (walkIn) drop.push(lastPut(TRIM));             // door frame + panel clear the opening
   put(door, L(baked(BOX(1.9, 3.1, 0.25), 0, 1.55, front)));
+  if (walkIn) drop.push(lastPut(door));
   put(0xc9a24b, L(baked(new THREE.SphereGeometry(0.1, 10, 8), 0.68, 1.62, front + 0.15)));
   put(TRIM, L(baked(BOX(2.5, 0.22, 0.9), 0, 0.11, front+0.4)));
   // windows either side, and upstairs — each gets a sill and a mullion cross, which
@@ -1160,6 +1172,13 @@ function makeHouse(cx, cz, fx, fz, w, d) {
     for (const s of [-1,1]) put(TRIM, L(baked(BOX(0.3, 3.5, 0.3), s*w*0.26, 1.75, front+2.2)));
   }
   addBox(cx, cz, aabbW(w, d, yaw), aabbD(w, d, yaw), 'house', undefined, { w, d, yaw });
+  // Opt this house into the walk-in pipeline (the same one the shops use): the deferred
+  // pass hollows the shell, cuts a doorway, lays a floor + ceiling, drops in a room and a
+  // swinging door, and furnishes it. The doorway keeps clear of the two front windows.
+  if (walkIn) WALKIN.push({ name: 'HOUSE ' + (101 + vary(cz, cx, 800)),
+    cx, cz, yaw, w, d, h, W: aabbW(w, d, yaw), D: aabbD(w, d, yaw),
+    fx, fz, front, bodyCol: wall, skin, drop, foot: colliders[colliders.length-1],
+    dw: 2.0, dh: 3.2, glazed: false, avoid: [-w*0.28, w*0.28], reach: 3.5 });
   return { yaw, h, x: cx, z: cz };
 }
 
@@ -1273,7 +1292,7 @@ let shopIdx = 0;
 const lawnPos = [], drivePos = [], drivewayUV = [];
 const hedges = [], fences = [], coinsSpots = [], treeSpots = [], propSpots = [];
 
-function fillHouseBlock(B) {
+function fillHouseBlock(B, walkIn) {
   const r = B.r;
   lawnPoly(B.poly);
   // Walk the block outline. Its edges run along street centrelines, so each edge is a
@@ -1300,7 +1319,7 @@ function fillHouseBlock(B) {
       const hx = a.x + ux*t - nx*setback, hz = a.z + uz*t - nz*setback;
       if (overRiver(hx, hz, 12)) continue;
       const w = rnd(13, 16), d = rnd(10, 12);
-      const built = makeHouse(hx, hz, nx, nz, w, d);
+      const built = makeHouse(hx, hz, nx, nz, w, d, walkIn);
       if (!built) continue;
       const hx2 = built.x, hz2 = built.z;
       // front garden, driveway and mailbox now run toward the street, i.e. +n
@@ -1839,11 +1858,20 @@ function fillDuff(B) {
   for (let k = 0; k < 5; k++) coinsSpots.push({ x: rnd(r.x0+6, r.x1-6), z: rnd(r.z0+6, r.z1-6) });
 }
 
+// PROTOTYPE: make the houses on one central block walk-in, to gauge the look and cost
+// before committing the whole town. Pick the house block nearest the middle of town so
+// it's easy to find.
+let protoHouseBlock = null, protoBd = Infinity;
+for (const B of BLOCKS) {
+  if (B.zone !== 'house') continue;
+  const d = ((B.r.x0+B.r.x1)/2)**2 + ((B.r.z0+B.r.z1)/2)**2;
+  if (d < protoBd) { protoBd = d; protoHouseBlock = B; }
+}
 for (const B of BLOCKS) {
   if (B.r.x1 - B.r.x0 < 26 || B.r.z1 - B.r.z0 < 26) continue;   // too slim to build on
   switch (B.zone) {
     case 'duff':      fillDuff(B); break;
-    case 'house':     fillHouseBlock(B); break;
+    case 'house':     fillHouseBlock(B, B === protoHouseBlock); break;
     case 'shops':     fillShopBlock(B); break;
     case 'plaza':     fillPark(B, true); break;
     case 'park':      fillPark(B, false); break;
@@ -2625,6 +2653,10 @@ rngNeutral(() => {
       q = opts.find(clear);
       if (q === undefined) continue;                      // nowhere on this frontage works
     }
+    // Prototype houses only go walk-in when the door sits (near) centred and clean — a
+    // garden hedge or tree that forces the doorway to slide can push it off the trimmed
+    // room wall, and a house is small enough that a far-slid door looks wrong anyway.
+    if (b.name.startsWith('HOUSE ') && Math.abs(q) > 0.7) continue;
 
     // Committed. Withdraw the solid body, glazing and footprint collider that were built
     // for the seeded stream's benefit, and put a shell and a room in their place.
@@ -3583,7 +3615,12 @@ function hitPropsAt(x, z, dx, dz, speed, radius, maxMass) {
 const coins = [], LOOSE_MAX = 90;
 let PLACED = 0, looseNext = 0;
 {
-  const reachable = coinsSpots.filter(c => !pointBlocked(c.x, c.z, 0.8));
+  // A hollow walk-in reads as open ground to pointBlocked, so a coin spot inside one would
+  // pass this filter and float indoors — keep coins out of every room's footprint.
+  const inAnyRoom = (x, z) => ROOMS.some(R => {
+    const I = R.inner; return x > I.x0 - 0.6 && x < I.x1 + 0.6 && z > I.z0 - 0.6 && z < I.z1 + 0.6;
+  });
+  const reachable = coinsSpots.filter(c => !pointBlocked(c.x, c.z, 0.8) && !inAnyRoom(c.x, c.z));
   coinsSpots.length = 0; coinsSpots.push(...reachable);
   const geo = new THREE.CylinderGeometry(0.62, 0.62, 0.14, 20).rotateX(Math.PI/2);
   // Placed coins first, then a fixed pool of loose ones on the end. Loose coins are the
@@ -9782,6 +9819,9 @@ for (const e of ENTERABLE) setDoorBlock(e);
       flag('something standing inside the room');
   }
   console.log(`interiors: ${ROOMS.length} rooms, ${ENTERABLE.length} doors ·`, JSON.stringify(bad));
+  const walkHouses = ENTERABLE.filter(e => e.name.startsWith('HOUSE '));
+  if (protoHouseBlock) console.log(`walk-in house prototype: ${walkHouses.length} houses at block ` +
+    `${((protoHouseBlock.r.x0+protoHouseBlock.r.x1)/2)|0},${((protoHouseBlock.r.z0+protoHouseBlock.r.z1)/2)|0}`);
 }
 
 function updateDoors(dt) {
