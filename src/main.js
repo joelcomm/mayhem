@@ -5583,7 +5583,17 @@ function updateCar(dt) {
   const rt = collideTraffic(res.x, res.z, 1.7);
   if (rt.hit && rt.who >= 0) {
     const other = traffic[rt.who], impact = Math.abs(speed);
-    if (impact > 3) {
+    if (impact > 3 && other.racer) {
+      // You can't take a race rival out by ramming: it shrugs the hit off and keeps
+      // driving its line (no knock/lift/spin, so it never drops into the tumble state),
+      // and the contact costs YOU the speed. Ramming is a mistake, not a tactic.
+      speed *= impact > 18 ? 0.34 : 0.6;
+      other.cur *= 0.9;                       // it flinches a touch, then it's back on it
+      clangSfx(impact);
+      damageCar(impact*0.4);
+      shake = Math.min(1.4, shake + 0.3 + impact*0.02);
+      burst(other.x, 1.2, other.z, 0xffe27a, 5);
+    } else if (impact > 3) {
       // shove strictly proportional to impact speed: a tap nudges the car a metre or
       // two, a full-speed ram sends it sliding — and with knock collision above it
       // stays in sight instead of phasing into a building
@@ -9101,11 +9111,15 @@ beacon.renderOrder = 5; beacon.visible = false; scene.add(beacon);
 const beaconRing = new THREE.Mesh(new THREE.TorusGeometry(1, 0.09, 8, 36).rotateX(Math.PI/2),
   new THREE.MeshBasicMaterial({ color: 0xffd23b, transparent: true, opacity: 0.85, depthWrite: false }));
 beaconRing.visible = false; scene.add(beaconRing);
+// A bigger, cyan "which way next" arrow that hovers over a race checkpoint and points to
+// the one after it — so as you bear down on a ring you already know the way through.
+const nextArrow = new THREE.Mesh(arrowGeo, new THREE.MeshBasicMaterial({ color: 0x2ad4ff }));
+nextArrow.visible = false; nextArrow.renderOrder = 6; scene.add(nextArrow);
 
 let MI = null;                                   // the active mission, or null
 let retryGiver = null;                           // failed a job? the guide walks you back
 const fmtT = s => { const t = Math.max(0, Math.ceil(s)); return (t/60|0) + ':' + String(t%60).padStart(2, '0'); };
-function setTarget(x, z, r, label) { if (MI) MI.target = { x, z, r, label }; }
+function setTarget(x, z, r, label, next) { if (MI) MI.target = { x, z, r, label, next }; }
 const atTarget = (p, tg) => tg && (p.x - tg.x)**2 + (p.z - tg.z)**2 < tg.r*tg.r;
 
 function startMission(id, giver) {
@@ -9189,6 +9203,21 @@ function updateMissions(dt, sub) {
     beaconRing.position.set(tg.x, 0.18, tg.z);
     beaconRing.scale.setScalar(tg.r * (1 + 0.06*Math.sin(markerBob*2.2)));
   }
+  // Race checkpoints carry the next one in tg.next: as you close on the ring, a cyan
+  // arrow rises over it pointing the way through — up well before the ring (~70 m, a
+  // couple of seconds at race pace) so there's time to read the turn and react.
+  let showNext = false;
+  if (tg && tg.next) {
+    const dRing = Math.hypot(tg.x - sub.x, tg.z - sub.z);
+    if (dRing < 70) {
+      showNext = true;
+      const grow = THREE.MathUtils.clamp((70 - dRing) / 46, 0.4, 1);
+      nextArrow.position.set(tg.x, 5.4 + Math.sin(markerBob*2.4)*0.3, tg.z);
+      nextArrow.rotation.y = Math.atan2(tg.next.x - tg.x, tg.next.z - tg.z);
+      nextArrow.scale.setScalar(2.4 + grow*3.4);
+    }
+  }
+  nextArrow.visible = showNext;
 }
 
 // ---- the demolition crew ----
@@ -9603,7 +9632,8 @@ function spawnRacers(m) {
       ei: 0, from: 0, dist: 0, baseSpeed: spec[1], cur: 0, gap: 99, fx: 0, fz: 1,
       stopping: false, waitT: 0, vx: 0, vz: 0, spin: 0, knock: 0, hitCooldown: 0,
     y: 0, vy: 0, pitch: 0, roll: 0, pitchV: 0, rollV: 0, rec: 0, 
-      racer: true, name: RACER_NAMES[i], cp: 1, lapDone: false, stuck: 0 };
+      racer: true, name: RACER_NAMES[i], cp: 1, lapDone: false, stuck: 0,
+      diff: (m.data.tier ? m.data.tier.d : 1) * [1.0, 0.97, 1.03][i] };   // slight spread across the pack
     traffic.push(t); m.data.racers.push(t);
   });
 }
@@ -9613,7 +9643,14 @@ function updateRacerCar(t, dt) {
   const tgt = cps[t.cp % cps.length];
   const dx = tgt.x - t.x, dz = tgt.z - t.z, d = Math.hypot(dx, dz) || 1;
   t.yaw = lerpAngle(t.yaw, Math.atan2(dx, dz), 1 - Math.exp(-dt*3.4));
-  t.cur += (t.baseSpeed - t.cur) * Math.min(1, dt*2.2);
+  // Rubber-band: chase whoever's leading. Behind the player → surge to catch up; well
+  // ahead → ease off so a slip lets you back in. Scaled by the race's difficulty tier,
+  // so a BRUTAL grid genuinely hounds you and an EASY one is a gentle scrap.
+  const pcp = (MI && MI.id === 'street' && MI.data) ? MI.data.cp : t.cp;
+  const lead = t.cp - pcp;
+  const band = lead <= -1 ? 1.22 : lead >= 2 ? 0.8 : lead >= 1 ? 0.9 : 1.05;
+  const want = t.baseSpeed * (t.diff || 1) * band;
+  t.cur += (want - t.cur) * Math.min(1, dt*2.4);
   const nx = t.x + Math.sin(t.yaw)*t.cur*dt, nz = t.z + Math.cos(t.yaw)*t.cur*dt;
   const res = collideCircle(nx, nz, 1.9, colliders);
   // scraping a wall bleeds speed and, if it lasts, nudges the aim past the corner
@@ -9797,9 +9834,13 @@ const MISSION_DEFS = {
     title: 'BACK ALLEY DASH', late: 'the grid left without you',
     start(m) {
       const cps = townCircuit();
+      // The grid's bite is fixed per giver, so a given race giver is consistently a soft
+      // touch or a nightmare — "some races are harder than others".
+      const tiers = [{ n: 'EASY', d: 0.98 }, { n: 'TOUGH', d: 1.16 }, { n: 'BRUTAL', d: 1.33 }];
+      m.data.tier = tiers[Math.abs((m.giver.x*7 + m.giver.z*13) | 0) % 3];
       m.timed = true; m.t = driveTime(m.giver.x, m.giver.z, cps[0].x, cps[0].z, 13) + 20;
       m.data.cp = 0; m.data.place = 1;
-      setTarget(cps[0].x, cps[0].z, 15, 'get to the start line');
+      setTarget(cps[0].x, cps[0].z, 15, 'get to the ' + m.data.tier.n + ' start line');
     },
     update(m, dt, sub) {
       const cps = townCircuit();
@@ -9808,8 +9849,8 @@ const MISSION_DEFS = {
           m.stage = 1; m.timed = false;
           m.data.cp = 1;
           spawnRacers(m);
-          setTarget(cps[1 % cps.length].x, cps[1 % cps.length].z, 15, null);
-          banner('GREEN LIGHT!', 'three rivals · ' + cps.length + ' checkpoints · first one home wins');
+          setTarget(cps[1 % cps.length].x, cps[1 % cps.length].z, 15, null, cps[2 % cps.length]);
+          banner('GREEN LIGHT!', m.data.tier.n + ' grid · three rivals · ' + cps.length + ' checkpoints · first one home wins');
         }
         return;
       }
@@ -9828,7 +9869,7 @@ const MISSION_DEFS = {
           return;
         }
         const n = cps[m.data.cp % cps.length];
-        setTarget(n.x, n.z, 15, null);
+        setTarget(n.x, n.z, 15, null, cps[(m.data.cp + 1) % cps.length]);
       }
       // everyone home before you and the race is over
       if (m.data.racers.every(r => r.lapDone)) { failMission('all three beat you home'); return; }
@@ -9861,7 +9902,7 @@ const MISSION_DEFS = {
       }
       m.data.i = bi; m.data.count = 0; m.data.lapT = 0;
       m.data.par = per/22 + 5;
-      setTarget(cps[bi].x, cps[bi].z, 20, 'get to the ring road');
+      setTarget(cps[bi].x, cps[bi].z, 20, 'get to the ring road', cps[(bi + 1) % cps.length]);
     },
     update(m, dt, sub) {
       const cps = ringCheckpoints();
@@ -9883,7 +9924,7 @@ const MISSION_DEFS = {
         }
       }
       m.data.i = (m.data.i + 1) % cps.length;
-      setTarget(cps[m.data.i].x, cps[m.data.i].z, 20, null);
+      setTarget(cps[m.data.i].x, cps[m.data.i].z, 20, null, cps[(m.data.i + 1) % cps.length]);
     },
     hud(m) {
       if (!m.stage) return null;
