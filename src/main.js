@@ -1180,7 +1180,17 @@ function makeHouse(cx, cz, fx, fz, w, d, walkIn) {
   // Trim detail. All of it is derived from w/d/h — no rnd() anywhere in here, so the
   // seeded stream never sees it and the town stays byte-identical. (Adding new bucket
   // colours is free now too: three.js takes its UUIDs from the real Math.random.)
-  put(0x9a8f7a, L(baked(BOX(w+0.5, 0.65, d+0.5), 0, 0.32, 0)));      // plinth course
+  // Plinth course — a RING, not a slab. As a solid box it filled the whole footprint
+  // 0.65 m deep, which was invisible while houses were solid boxes but buries you to the
+  // knees now that you can walk inside one. The band sits outside the room's inner face
+  // (walls are WALL_T thick), so the floor you stand on is clear.
+  {
+    const pw = w + 0.5, pd = d + 0.5, pt = 0.45;
+    put(0x9a8f7a, L(baked(BOX(pw, 0.65, pt), 0, 0.32, (pd - pt)/2)));
+    put(0x9a8f7a, L(baked(BOX(pw, 0.65, pt), 0, 0.32, -(pd - pt)/2)));
+    put(0x9a8f7a, L(baked(BOX(pt, 0.65, pd - pt*2), (pw - pt)/2, 0.32, 0)));
+    put(0x9a8f7a, L(baked(BOX(pt, 0.65, pd - pt*2), -(pw - pt)/2, 0.32, 0)));
+  }
   put(TRIM, L(baked(BOX(w+1.5, 0.34, d+1.5), 0, h - 0.17, 0)));      // eaves fascia
   // door: recessed frame, panel, step, and a knob you can actually see
   put(TRIM, L(baked(BOX(2.4, 3.5, 0.14), 0, 1.72, front - 0.02)));
@@ -2941,8 +2951,11 @@ const OPENING_DOOR = (() => {
       const dx = st.bx - st.ax, dz = st.bz - st.az, L = Math.hypot(dx, dz) || 1;
       if (L < 30) continue;                       // too short to bother signing
       const ux = dx/L, uz = dz/L, nx = -uz, nz = ux;
-      // a quarter of the way along, so signs land near the junctions rather than mid-block
-      for (const along of [0.22, 0.78]) {
+      // Hard against the junctions at either end, on the corner — a street blade belongs
+      // where you need to read it, which is the intersection you are about to turn at,
+      // not halfway down the block outside somebody's front door.
+      const CORNER_IN = Math.min(11, L*0.3);      // metres back from the junction
+      for (const along of [CORNER_IN/L, 1 - CORNER_IN/L]) {
         const side = along < 0.5 ? 1 : -1;
         const bx = st.ax + dx*along + nx*side*(st.w + 3.2);
         const bz = st.az + dz*along + nz*side*(st.w + 3.2);
@@ -7827,8 +7840,15 @@ let riding = null, rideExitCd = 0;
           const leg = new THREE.Mesh(BOX(0.16, 1.1, 0.16), toon(col));
           leg.position.set(sx*0.26, 0.9, sz); h.add(leg);
         }
-        const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, 3.4, 10), toon(0xd8dde4));
-        bar.position.y = 2.6; h.add(bar);
+        // The brass pole has to run from the deck right up into the canopy. The canopy is
+        // a cone of base radius 8.2 and height 2.4 sitting at y 7.4, so directly over a
+        // horse (radius 4.9) its underside is at 6.2 + 2.4*(1 - 4.9/8.2) = 7.17 — a pole
+        // ending at 4.65 left an obvious two-and-a-half metre gap under the roof.
+        const BAR_TOP = 7.17, BAR_BOT = 0.3;                 // in the spinner's frame
+        const barLen = BAR_TOP - BAR_BOT;
+        const bar = new THREE.Mesh(new THREE.CylinderGeometry(0.07, 0.07, barLen, 10), toon(0xd8dde4));
+        bar.position.y = (BAR_BOT + BAR_TOP)/2 - h.position.y;   // h rides at 0.35 on the deck
+        h.add(bar);
         spin.add(h); horses.push({ g: h, a });
       }
       FAIR.push({ kind: 'carousel', label: 'CAROUSEL', x: mx, z: mz, r: 9.5,
@@ -8048,7 +8068,11 @@ let riding = null, rideExitCd = 0;
       return bi / (SAMPLES.length - 1);
     };
     const stopU = uOfCtrl(2);            // station: mid-flat, with flat either side
-    const brakeU = uOfCtrl(0);           // brakes grab at the start of the flat run
+    // Brakes grab at the LAST control point, not the first. Control point 0 is where the
+    // closed curve begins, so its arc param is ~0 and `t >= brakeU` would be true from the
+    // moment the lift ended — the cart braked the entire circuit at the 3.4 m/s floor.
+    // The last point is the top of the flat run, so the whole straight is the brake run.
+    const brakeU = uOfCtrl(CTRL.length - 1);
 
     // ---- the track frame -------------------------------------------------------
     // A coaster needs a full orientation per point, not just a heading: rails offset
@@ -8072,10 +8096,14 @@ let riding = null, rideExitCd = 0;
       const p = curve.getPointAt(uu);
       const q = curve.getPointAt((uu + 0.0015) % 1);
       const dir = q.clone().sub(p).normalize();
-      let right = new THREE.Vector3().crossVectors(dir, WUP);
-      if (right.lengthSq() < 1e-6) right.crossVectors(dir, new THREE.Vector3(0, 0, 1));  // tangent vertical
+      // WUP x dir, NOT dir x WUP: (right, up, dir) has to be a RIGHT-handed basis, or
+      // makeBasis below builds a reflection (determinant -1) and setFromRotationMatrix
+      // hands back a nonsense quaternion — which is what put the cart on sideways. The
+      // ties and the paired rails are symmetric, so they hid it.
+      let right = new THREE.Vector3().crossVectors(WUP, dir);
+      if (right.lengthSq() < 1e-6) right.crossVectors(new THREE.Vector3(0, 0, 1), dir);  // tangent vertical
       right.normalize();
-      const up = new THREE.Vector3().crossVectors(right, dir).normalize();
+      const up = new THREE.Vector3().crossVectors(dir, right).normalize();
       const r = rollAt(uu);
       if (r !== 0) { tmpQ.setFromAxisAngle(dir, r); right.applyQuaternion(tmpQ); up.applyQuaternion(tmpQ); }
       return { p, dir, right, up };
@@ -9213,7 +9241,9 @@ function updateRides(dt) {
         // bring it home to the platform.
         let v;
         if (R.phase === 'lift') {
-          v = 3.6;
+          v = 6.6;                                    // brisk chain: the taller lift took
+                                                      // 21 s at 3.6, which is a long wait
+
           if (R.t >= R.crestU) R.phase = 'coast';
         } else if (R.phase === 'coast') {
           const y = R.P(R.t)[1];
@@ -9297,10 +9327,18 @@ function updateRides(dt) {
 function tryRide() {
   if (riding) {
     const s = rideSeat(riding);
+    const R0 = riding;
     riding = null; rideExitCd = 0.4;
     camYaw = s.yaw + camYaw; camPitch = -0.15;   // carry the look angle back out with you
     player.visible = true;
-    player.position.set(s.x + Math.sin(s.yaw + Math.PI/2)*3.5, 0, s.z + Math.cos(s.yaw + Math.PI/2)*3.5);
+    // Stepping out of a bumper car sideways just put you back inside the arena, on the
+    // wrong side of its wall. Put the rider out on the apron by the entrance instead.
+    if (R0.kind === 'bumper') {
+      player.position.set(R0.bx, 0, R0.bz - R0.HD - 3.2);
+      camYaw = 0;                                 // facing back in at the rink
+    } else {
+      player.position.set(s.x + Math.sin(s.yaw + Math.PI/2)*3.5, 0, s.z + Math.cos(s.yaw + Math.PI/2)*3.5);
+    }
     playerVel.set(0,0,0);
     return true;
   }
