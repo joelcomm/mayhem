@@ -6938,11 +6938,21 @@ function dogSpot(d, ax, az) {
 function updateDogs(dt) {
   const P = dogs.parts; if (!P) return;
   if (!dogs.ready) {                                  // scatter them once the town exists
-    // Only the strays scatter. The round-up giver's own three are placed at his feet by
-    // the quest, so they stay unplaced (and undrawn) until then.
+    // Only the strays scatter across town. The round-up giver's own three sit at his
+    // feet in the park — they never roam and can't be picked up.
     for (const d of dogs) if (!d.placed && !d.owned) dogSpot(d, 0, 0);
+    if (DOGPARK.ok) {
+      let k = 0;
+      for (const d of dogs) if (d.owned) {
+        const a = k*2.1 + 0.7;
+        d.x = DOGPARK.x + Math.cos(a)*2.6; d.z = DOGPARK.z + Math.sin(a)*2.6;
+        d.yaw = Math.atan2(DOGPARK.x - d.x, DOGPARK.z - d.z);   // all looking up at him
+        d.speed = 0; d.t = 1e9; d.placed = true; k++;
+      }
+    }
     dogs.ready = true;
-    console.log(`dogs: ${dogs.filter(d => d.placed && !d.owned).length} strays roaming the town`);
+    console.log(`dogs: ${dogs.filter(d => d.placed && !d.owned).length} strays roaming` +
+      (DOGPARK.ok ? ` · McGraw's ${dogs.filter(d => d.owned && d.placed).length} at ${DOGPARK.x|0},${DOGPARK.z|0}` : ' · no round-up giver sited'));
   }
   const sub = mode === 'car' ? car.position : player.position;
   const carMoving = mode === 'car' && Math.abs(speed) > 4;
@@ -6951,7 +6961,9 @@ function updateDogs(dt) {
   for (const d of dogs) {
     if (!d.placed) continue;
     const br = d.br;
-    if (d.following) {
+    if (d.owned) {
+      // McGraw's own three: they sit where he put them. No roam, no bolting, no lead.
+    } else if (d.following) {
       follow++;
       // Conga line: each dog aims at a slot a little further back along your trail.
       const gap = 2.2 + d.order*1.9;
@@ -7039,21 +7051,19 @@ function tryDog() {
   if (mode !== 'foot' || playerRag.active) return false;
   let best = null, bd = 3.4*3.4;
   for (const d of dogs) {
-    if (!d.placed) continue;
+    // Only strays that aren't already with you. Your own pack trails ~2 m behind, so if
+    // F could also dismiss, it would grab a follower every time you tried to open a door
+    // or get in the car — F would never reach the rest of the interact chain.
+    if (!d.placed || d.owned || d.following) continue;
     const dx = d.x - player.position.x, dz = d.z - player.position.z, d2 = dx*dx + dz*dz;
     if (d2 > bd) continue;
     bd = d2; best = d;
   }
   if (!best) return false;
-  if (best.following) {
-    best.following = false; best.home = { x: best.x, z: best.z };
-    toast(best.name + ' stays');
-  } else {
-    best.following = true;
-    best.order = dogs.filter(d => d.following).length - 1;
-    toast(best.name + ' the ' + best.br.name + ' joins you!');
-    coinSfx();
-  }
+  best.following = true;
+  best.order = dogs.filter(d => d.following).length - 1;
+  toast(best.name + ' the ' + best.br.name + ' joins you!');
+  coinSfx();
   return true;
 }
 
@@ -7412,6 +7422,17 @@ let addJobMarker = null;
   // pick up a bag nobody should ask about
   if (PRISON.gate) marker(PRISON.gate.x + 8, PRISON.gate.z - 12,
     'LEFTY LOUIE', "This bag needs to cross town, and the law knows it's moving. Drive.", 'getaway');
+  // ---- the dog round-up: a park, because that is where a man with three dogs stands ----
+  { const b = BLOCKS.find(b2 => b2.zone === 'park') || BLOCKS.find(b2 => b2.zone === 'plaza');
+    if (b) {
+      const before = MARKERS.length;
+      marker(b.cx + 8, b.cz - 6,
+        'WHISTLES McGRAW', "Half the strays in town have my whistle in their ear. Walk ten of them home to me — on foot, mind.", 'dogwalk');
+      if (MARKERS.length > before) {                 // it found a spot: park his own three there
+        const m = MARKERS[MARKERS.length - 1];
+        DOGPARK.x = m.x; DOGPARK.z = m.z; DOGPARK.ok = true;
+      }
+    } }
   addJobMarker = marker;
 
   // ---- Gus, on his forecourt: not a job giver, a shop ----
@@ -10281,6 +10302,40 @@ const MISSION_DEFS = {
       const tg = m.target;
       return 'checkpoint <b>' + (m.data.count + 1) + '/' + ringCheckpoints().length + '</b> · ' +
         Math.round(Math.hypot(tg.x - sub.x, tg.z - sub.z)) + 'm · lap ' + fmtT(m.data.lapT);
+    },
+  },
+  dogwalk: {
+    // On foot, start to finish: a car scatters the pack, which is the whole point of it.
+    title: 'THE ROUND-UP',
+    start(m) {
+      m.data.need = 10; m.data.n = 0;
+      banner('THE ROUND-UP', 'walk 10 strays back to McGraw · press F beside a dog · no car');
+      setTarget(m.giver.x, m.giver.z, 6, 'find 10 dogs, then walk them back');
+    },
+    update(m, dt, sub) {
+      if (mode === 'car') { failMission('you got in a car and the pack scattered'); return; }
+      m.data.n = dogs.filter(d => d.following && !d.owned).length;
+      if (m.data.n >= m.data.need && atTarget(player.position, m.target)) {
+        // hand them over: they settle in the park with his own three
+        let k = 0;
+        for (const d of dogs) if (d.following && !d.owned) {
+          const a = k*0.9 + 2.0;
+          d.following = false; d.speed = 0;
+          d.x = m.giver.x + Math.cos(a)*(4.5 + (k%3)); d.z = m.giver.z + Math.sin(a)*(4.5 + (k%3));
+          d.home = { x: d.x, z: d.z }; k++;
+        }
+        winMission(420, m.data.need + ' dogs home · McGraw is delighted');
+      }
+    },
+    hud(m) {
+      const n = m.data.n || 0;
+      return 'dogs on the lead <b>' + n + '/' + m.data.need + '</b>' +
+             (n >= m.data.need ? ' · <b>get them back to McGraw</b>' : '');
+    },
+    cleanup(m, won) {                            // failed? the pack wanders off again
+      if (!won) for (const d of dogs) if (d.following && !d.owned) {
+        d.following = false; d.home = { x: d.x, z: d.z };
+      }
     },
   },
   getaway: {
