@@ -4166,7 +4166,16 @@ function renderTraffic() {
     if (t.rival && t.rival.respawn > 0 && t.knock <= 0) continue;
     const inst = VEH_INST[t.type]; const i = cnt[t.type];
     if (i >= VEH_CAP) continue;
-    dummy.position.set(t.x, t.y, t.z);
+    // A car's origin is its wheel-contact plane, so tilting it rotates the body straight
+    // down through the tarmac — a tumbling car sank half-under the road. Lift it by however
+    // far the lowest corner swings below that origin, and the shell rides on the road while
+    // it rolls instead of clipping through it.
+    let yLift = 0;
+    if (t.pitch || t.roll) {
+      const cs = CAR_TYPES[t.type];
+      yLift = (cs.W/2)*Math.abs(Math.sin(t.roll)) + (cs.L/2)*Math.abs(Math.sin(t.pitch));
+    }
+    dummy.position.set(t.x, t.y + yLift, t.z);
     // YXZ so pitch and roll are applied in the car's own frame rather than the world's —
     // with the default XYZ a rolling car also swings its nose around. `dummy` is shared
     // with the crowd and props, so the order is put back before anyone else uses it.
@@ -9977,6 +9986,18 @@ function updateCamera(dt, now) {
 const speedEl = document.querySelector('#speedo .val');
 const healthEl = document.querySelector('#health i');
 const promptEl = document.getElementById('prompt');
+// The corner control list swaps to the flight keys the moment you climb into the plane —
+// on the ground half of them mean something else entirely (R is reset, Space the handbrake).
+const controlsEl = document.getElementById('controls');
+const CONTROLS_GROUND = controlsEl.innerHTML;
+const CONTROLS_PLANE =
+  '<b>W</b> throttle &nbsp; <b>S</b> slow down<br>' +
+  '<b>A D</b> turn &nbsp; <b>Q E</b> roll<br>' +
+  '<b>Space</b> nose up &nbsp; <b>Ctrl</b> nose down<br>' +
+  '<b>R</b> eject &nbsp; then <b>R</b> again = parachute<br>' +
+  '<b>F</b> get out (landed) &nbsp; <b>C</b> camera<br>' +
+  '<b>M</b> map &nbsp; <b>N</b> mute &nbsp; <b>P</b> pause';
+let shownControls = CONTROLS_GROUND;
 const chaosEl = document.getElementById('chaos');
 const starsEl = document.getElementById('stars');
 const comboEl = document.getElementById('combo');
@@ -9986,6 +10007,11 @@ let shownScore = -1, shownStars = -1;
 const objEl = document.getElementById('objective');
 const rd = document.querySelector('#radar canvas').getContext('2d');
 function updateHUD(dt) {
+  const wantControls = mode === 'plane' ? CONTROLS_PLANE : CONTROLS_GROUND;
+  if (shownControls !== wantControls) {
+    controlsEl.innerHTML = wantControls; shownControls = wantControls;
+    controlsEl.style.opacity = mode === 'plane' ? '1' : '0.35';   // bring them back up in the cockpit
+  }
   speedEl.textContent = mode === 'car' ? Math.round(Math.abs(speed)*1.7)
                       : mode === 'plane' ? Math.round(planeSpeed*1.7) : '—';
   healthEl.style.width = carHealth + '%';
@@ -9995,7 +10021,16 @@ function updateHUD(dt) {
     const gp = PRISON.gate;
     const nearGate = gp && (player.position.x - gp.x)**2 + (player.position.z - gp.z)**2 < 64;
     const door = nearestDoor();
-    if (nearGate && !(MI && MI.id === 'soak' && MI.stage === 1)) {
+    // bailed out of the plane — the chute prompt outranks everything else on the way down
+    if (chuteReady && !chuteOpen && !playerOnGround) {
+      promptEl.style.display = 'block';
+      promptEl.innerHTML = 'Press <b>R</b> to open the parachute!';
+    }
+    else if (chuteOpen && !playerOnGround) {
+      promptEl.style.display = 'block';
+      promptEl.innerHTML = 'Chute open · <b>WASD</b> to steer where you land';
+    }
+    else if (nearGate && !(MI && MI.id === 'soak' && MI.stage === 1)) {
       promptEl.style.display = 'block';
       promptEl.innerHTML = gateT > 0.5 ? 'Press <b>F</b> to lower the gate'
         : inYard(player.position.x, player.position.z)
@@ -10029,7 +10064,7 @@ function updateHUD(dt) {
   } else if (mode === 'plane') {
     promptEl.style.display = 'block';
     const alt = Math.max(0, Math.round(plane.position.y));
-    promptEl.innerHTML = 'ALT <b>' + alt + 'm</b> · land &amp; slow, then <b>F</b> to hop out';
+    promptEl.innerHTML = 'ALT <b>' + alt + 'm</b> · <b>R</b> to eject · land &amp; slow, then <b>F</b> to hop out';
   } else promptEl.style.display = 'none';
 
   if (shownScore !== chaosScore) {
