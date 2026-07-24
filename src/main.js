@@ -5325,20 +5325,20 @@ addEventListener('mousemove', e => {
 });
 
 // ---------------------------------------------------------------------------
-// Touch controls. A phone has no keyboard or mouse, so on a coarse-pointer
-// device we paint an on-screen stick + buttons and feed them straight into the
-// SAME `keys` map and `camYaw/camPitch` that the desktop input drives — every
-// movement system (car, foot, plane) already reads those, so nothing downstream
-// has to know a finger is behind it.
+// Touch controls. A phone has no keyboard or mouse, so we paint an on-screen
+// stick + buttons and feed them straight into the SAME `keys` map and
+// `camYaw/camPitch` that the desktop input drives — every movement system (car,
+// foot, plane) already reads those, so nothing downstream knows a finger is
+// behind it.
+//
+// The handlers are wired UNCONDITIONALLY (inert on desktop: they either check
+// pointerType==='touch' or sit on hidden elements). Detection is the flaky part
+// — a phone in "Request Desktop Site" mode lies and reports no touch at all — so
+// we never gate the wiring on it. We only decide *when to reveal* the pad, and
+// the last-resort reveal is a real touchstart, which fires on a physical screen
+// no matter what the media queries claim.
 // ---------------------------------------------------------------------------
-// Auto-detect a touch device, but let ?touch / ?notouch force it either way — handy
-// for a touchscreen laptop that wants the keyboard, or for testing the pad on desktop.
-const _q = new URLSearchParams(location.search);
-const IS_TOUCH = _q.has('notouch') ? false
-  : _q.has('touch') || matchMedia('(pointer: coarse)').matches || 'ontouchstart' in window;
-if (IS_TOUCH) {
-  document.body.classList.add('touch');
-
+{
   // --- look: drag anywhere on the canvas (empty HUD is pointer-events:none, so
   // stray touches fall through to here; the stick and buttons opt back in and
   // swallow their own). One finger owns the look at a time. ---
@@ -5375,7 +5375,8 @@ if (IS_TOUCH) {
     keys.KeyA = nx < -dead; keys.KeyD = nx > dead;
   };
   joy.addEventListener('pointerdown', e => {
-    joyId = e.pointerId; joy.setPointerCapture(joyId); sirenInit();
+    e.preventDefault(); enableTouch();
+    joyId = e.pointerId; try { joy.setPointerCapture(joyId); } catch (_) {} sirenInit();
     const r = joy.getBoundingClientRect();
     setStick(e.clientX - (r.left + r.width/2), e.clientY - (r.top + r.height/2));
   });
@@ -5400,7 +5401,7 @@ if (IS_TOUCH) {
   document.querySelectorAll('#tbtns .tb').forEach(btn => {
     const what = btn.dataset.btn;
     btn.addEventListener('pointerdown', e => {
-      e.preventDefault(); sirenInit();
+      e.preventDefault(); enableTouch(); sirenInit();
       if (what === 'punch') { if (!soakArm()) punch(); }
       else if (what === 'kick') kick();
       else tapKey(what, true);
@@ -5424,6 +5425,24 @@ if (IS_TOUCH) {
     RS.textContent = mode === 'plane' ? 'EJECT' : 'RESET';
   };
   window.syncTouch();
+}
+
+// Decide when to reveal the pad. ?touch / ?notouch force it either way (handy for
+// a touchscreen laptop that wants the keyboard, or for testing on desktop).
+const _q = new URLSearchParams(location.search);
+const FORCE_OFF = _q.has('notouch');
+function enableTouch() {
+  if (FORCE_OFF || document.body.classList.contains('touch')) return;
+  document.body.classList.add('touch');
+  if (window.syncTouch) window.syncTouch();
+}
+if (!FORCE_OFF) {
+  // Best-effort auto-detect up front…
+  if (_q.has('touch') || matchMedia('(pointer: coarse)').matches ||
+      navigator.maxTouchPoints > 0 || 'ontouchstart' in window) enableTouch();
+  // …and, whatever it claimed, reveal on the first real touch anywhere.
+  addEventListener('touchstart', enableTouch, { capture: true, passive: true });
+  addEventListener('pointerdown', e => { if (e.pointerType === 'touch') enableTouch(); }, { capture: true, passive: true });
 }
 
 let camIdx = 0, mapView = false, camSettled = false;
