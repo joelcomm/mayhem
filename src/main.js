@@ -8964,7 +8964,9 @@ function failMission(why) {
   const g = MI.giver;
   banner('JOB FAILED', why + ' · find ' + g.name + ' to try again');
   finishMission(false);
-  retryGiver = g;                                // arrow, beacon and radar lead back
+  // No breadcrumb back to the giver — it just re-arms its "!" and you go find it if you
+  // want to. An arrow leading you back only gets in the way when you've moved on.
+  retryGiver = null;
 }
 function missionEvent(ev) {
   if (!MI) return;
