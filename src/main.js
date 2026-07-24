@@ -1144,6 +1144,8 @@ function makeHouse(cx, cz, fx, fz, w, d, walkIn) {
   put(door, L(baked(BOX(1.9, 3.1, 0.25), 0, 1.55, front)));
   if (walkIn) drop.push(lastPut(door));
   put(0xc9a24b, L(baked(new THREE.SphereGeometry(0.1, 10, 8), 0.68, 1.62, front + 0.15)));
+  if (walkIn) drop.push(lastPut(0xc9a24b));         // else this baked knob is left floating when
+                                                    // the panel is withdrawn — the swinging leaf brings its own
   put(TRIM, L(baked(BOX(2.5, 0.22, 0.9), 0, 0.11, front+0.4)));
   // windows either side, and upstairs — each gets a sill and a mullion cross, which
   // is what stops a window reading as a flat blue rectangle
@@ -5366,7 +5368,7 @@ addEventListener('keydown', e => {
     else resetAll();
   }
   // ride, gate, doorway, then the shop games, then car — F is the one interact key
-  if (e.code === 'KeyF' && !tryRide() && !tryGate() && !tryDoor() && !tryBowl() &&
+  if (e.code === 'KeyF' && !tryDog() && !tryRide() && !tryGate() && !tryDoor() && !tryBowl() &&
       !tryRush() && !tryWhack() && !tryDance() && !tryPint() &&
       !tryHeist() && !tryKoi() && !tryOwl() && !tryPlane()) toggleVehicle();
   if (e.code === 'KeyH') honk();
@@ -6851,6 +6853,210 @@ function updateChickens(dt) {
   chickens.mesh.instanceMatrix.needsUpdate = true;
 }
 
+// =================================================================
+//  TOWN DOGS
+//  Twenty strays roaming the whole town — five breeds across three sizes. They keep
+//  to the gardens and greens (never the carriageway), and a car bearing down makes
+//  them bolt clear rather than get flattened: you cannot run a dog down in this game.
+//  Walk up and press F and one falls in behind you, then trails in a conga line.
+//  One instanced mesh per part, all sharing a matrix per dog, so twenty dogs cost
+//  six draw calls. Built inside rngNeutral: the geometry and materials burn randoms,
+//  and everything downstream of here is seeded off the same stream.
+// =================================================================
+const dogs = [];
+const DOG_BREEDS = [
+  // s = overall scale, body/leg/ear shape tweaks per breed
+  { name: 'RETRIEVER', s: 1.00, body: 0xd8a24b, legs: 0.52, ear: 'flop', tail: 'plume', snout: 1.15 },
+  { name: 'DACHSHUND', s: 0.72, body: 0x8c4a2f, legs: 0.30, ear: 'flop', tail: 'thin',  snout: 1.35, long: 1.45 },
+  { name: 'HUSKY',     s: 1.05, body: 0x9aa4b0, legs: 0.56, ear: 'prick', tail: 'plume', snout: 1.0 },
+  { name: 'TERRIER',   s: 0.66, body: 0xe8e3d3, legs: 0.40, ear: 'prick', tail: 'thin',  snout: 0.9 },
+  { name: 'MASTIFF',   s: 1.25, body: 0x5a4632, legs: 0.50, ear: 'flop', tail: 'thin',  snout: 0.85 },
+];
+const DOG_NAMES = ['REX', 'BUDDY', 'MOLLY', 'BANDIT', 'PEPPER', 'ZEUS', 'DAISY', 'SCOUT',
+  'MURPHY', 'NALA', 'BRUNO', 'PIXEL', 'MAPLE', 'OTIS', 'JUNO', 'RANGER',
+  'BISCUIT', 'SHADOW', 'WAFFLE', 'TUCKER'];
+const DOG_N = 20;                    // strays you can collect — the number the round-up needs from
+const DOG_OWNED = 3;                 // the round-up giver's own three, who stay by his feet
+const DOGPARK = { x: 0, z: 0, ok: false };
+{
+  // Unit dog, nose toward +z. The BODY is modelled as if it stands on zero-length legs
+  // (its belly at y=0) and is then lifted by the breed's leg height at draw time; the LEGS
+  // are a separate unit-height mesh scaled to that same height. That keeps a dachshund
+  // stubby and a husky tall without the legs ever poking up through the back.
+  const bodyGeo = merge([
+    baked(new THREE.SphereGeometry(0.34, 14, 10).scale(1, 0.86, 1.5), 0, 0.30, 0),      // barrel
+    baked(new THREE.SphereGeometry(0.24, 14, 10), 0, 0.50, 0.52),                        // head
+  ]);
+  const snoutGeo = merge([baked(new THREE.SphereGeometry(0.12, 12, 8).scale(1, 0.8, 1.5), 0, 0.44, 0.80)]);
+  const legGeo = merge([-1, 1].flatMap(sx => [-1, 1].map(sz =>
+    baked(BOX(0.12, 1.0, 0.13), sx*0.19, 0.5, sz*0.34))));      // 4 legs, unit height 1.0
+  const earFlopGeo = merge([-1, 1].map(sx =>                     // hang down beside the head
+    baked(BOX(0.09, 0.28, 0.13), sx*0.23, 0.46, 0.50)));
+  const earPrickGeo = merge([-1, 1].map(sx =>                    // stand up on top of it
+    baked(new THREE.ConeGeometry(0.1, 0.26, 8), sx*0.15, 0.70, 0.48)));
+  const tailPlumeGeo = merge([baked(new THREE.SphereGeometry(0.11, 10, 8).scale(1, 1, 2.1), 0, 0.44, -0.62)]);
+  const tailThinGeo  = merge([baked(BOX(0.07, 0.07, 0.42), 0, 0.42, -0.68)]);
+  const TOTAL = DOG_N + DOG_OWNED;
+  const M = (g, n, sh) => { const m = instanced(g, new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP }), n, sh); scene.add(m); return m; };
+  const dBody = M(bodyGeo, TOTAL, true);
+  const dLegs = M(legGeo, TOTAL, false);
+  const dSnout = instanced(snoutGeo, toon(0x2a2e33), TOTAL, false);
+  const dEarF = M(earFlopGeo, TOTAL, false), dEarP = M(earPrickGeo, TOTAL, false);
+  const dTailA = M(tailPlumeGeo, TOTAL, false), dTailB = M(tailThinGeo, TOTAL, false);
+  scene.add(dSnout);
+  const col = new THREE.Color();
+  for (let i = 0; i < TOTAL; i++) {
+    const br = DOG_BREEDS[i % DOG_BREEDS.length];
+    dogs.push({ x: 0, z: 0, yaw: rnd(0, 6.28), br, name: DOG_NAMES[i % DOG_NAMES.length],
+      t: rnd(0.4, 2.2), phase: rnd(0, 6.28), speed: 0, dash: 0, following: false, order: 0,
+      home: null, placed: false, owned: i >= DOG_N });
+    const c = col.setHex(br.body);
+    dBody.setColorAt(i, c); dLegs.setColorAt(i, c);
+    dEarF.setColorAt(i, c); dEarP.setColorAt(i, c);
+    dTailA.setColorAt(i, c); dTailB.setColorAt(i, c);
+  }
+  for (const m of [dBody, dLegs, dEarF, dEarP, dTailA, dTailB])
+    if (m.instanceColor) m.instanceColor.needsUpdate = true;
+  dogs.parts = { body: dBody, legs: dLegs, snout: dSnout, earF: dEarF, earP: dEarP,
+                 tailA: dTailA, tailB: dTailB };
+}
+let dogsFollowing = 0;
+// Parked far below the world: an instance we don't want to see this frame.
+const HIDE_M = new THREE.Matrix4().makeTranslation(0, -9999, 0);
+// Somewhere a dog is happy to stand: off the road, out of the buildings, on dry land.
+function dogSpot(d, ax, az) {
+  for (let k = 0; k < 60; k++) {
+    const r = 30 + Math.random()*560, a = Math.random()*6.283;
+    const x = (ax || 0) + Math.cos(a)*r, z = (az || 0) + Math.sin(a)*r;
+    if (Math.abs(x) > TOWN + 40 || Math.abs(z) > TOWN + 40) continue;
+    if (onRoad(x, z, 5) || pointBlocked(x, z, 1.4) || overRiver(x, z, 12)) continue;
+    if (roomOf(x, z)) continue;                       // not shut inside somebody's lounge
+    d.x = x; d.z = z; d.home = { x, z }; d.placed = true; return true;
+  }
+  return false;
+}
+function updateDogs(dt) {
+  const P = dogs.parts; if (!P) return;
+  if (!dogs.ready) {                                  // scatter them once the town exists
+    // Only the strays scatter. The round-up giver's own three are placed at his feet by
+    // the quest, so they stay unplaced (and undrawn) until then.
+    for (const d of dogs) if (!d.placed && !d.owned) dogSpot(d, 0, 0);
+    dogs.ready = true;
+    console.log(`dogs: ${dogs.filter(d => d.placed && !d.owned).length} strays roaming the town`);
+  }
+  const sub = mode === 'car' ? car.position : player.position;
+  const carMoving = mode === 'car' && Math.abs(speed) > 4;
+  const cfx = Math.sin(heading), cfz = Math.cos(heading);   // where the car is pointed
+  let i = 0, follow = 0;
+  for (const d of dogs) {
+    if (!d.placed) continue;
+    const br = d.br;
+    if (d.following) {
+      follow++;
+      // Conga line: each dog aims at a slot a little further back along your trail.
+      const gap = 2.2 + d.order*1.9;
+      const tx = player.position.x - Math.sin(player.rotation.y)*gap;
+      const tz = player.position.z - Math.cos(player.rotation.y)*gap;
+      const dx = tx - d.x, dz = tz - d.z, dd = Math.hypot(dx, dz);
+      if (dd > 0.5) {
+        const sp = Math.min(dd > 6 ? 7.5 : 4.4, dd*3.2);      // sprint to catch up, trot when close
+        d.yaw = lerpAngle(d.yaw, Math.atan2(dx, dz), 1 - Math.exp(-dt*9));
+        const res = collideCircle(d.x + Math.sin(d.yaw)*sp*dt, d.z + Math.cos(d.yaw)*sp*dt, 0.34, colliders);
+        d.x = res.x; d.z = res.z;
+        d.phase += dt*sp*3.2;
+      }
+    } else {
+      // A car coming at speed: bolt perpendicular, away from it. This is why you can
+      // never run a dog down — it commits to a dash well before you arrive.
+      const cdx = d.x - sub.x, cdz = d.z - sub.z, cd2 = cdx*cdx + cdz*cdz;
+      if (carMoving && cd2 < 26*26) {
+        // only bolt if the car is actually pointed roughly at the dog
+        const towards = (cdx*cfx + cdz*cfz) / (Math.hypot(cdx, cdz) || 1);
+        if (towards < -0.25 || cd2 < 12*12) {
+          d.dash = 0.9;
+          d.yaw = Math.atan2(cdx, cdz) + (Math.random() < 0.5 ? 1.25 : -1.25);   // sideways, not straight ahead
+        }
+      }
+      if (d.dash > 0) { d.dash -= dt; d.speed = 9.5; }
+      else {
+        d.t -= dt;
+        if (d.t <= 0) {
+          d.t = rnd(0.8, 3.0);
+          d.yaw += rnd(-1.5, 1.5);
+          d.speed = Math.random() < 0.35 ? 0 : rnd(0.9, 2.2);
+        }
+      }
+      // never wander onto the carriageway, and drift back if they've strayed far from home
+      const ahead = 1.6;
+      const nx = d.x + Math.sin(d.yaw)*ahead, nz = d.z + Math.cos(d.yaw)*ahead;
+      if (onRoad(nx, nz, 3.5) || overRiver(nx, nz, 10)) {
+        d.yaw += Math.PI*0.6 + rnd(-0.3, 0.3);
+        if (d.dash <= 0) d.speed = Math.min(d.speed, 1.2);
+      } else if (d.home && d.dash <= 0) {
+        const hx = d.home.x - d.x, hz = d.home.z - d.z;
+        if (hx*hx + hz*hz > 70*70) d.yaw = lerpAngle(d.yaw, Math.atan2(hx, hz), 1 - Math.exp(-dt*1.2));
+      }
+      if (d.speed > 0) {
+        const sp = d.dash > 0 ? d.speed : Math.min(d.speed, 2.2);
+        const res = collideCircle(d.x + Math.sin(d.yaw)*sp*dt, d.z + Math.cos(d.yaw)*sp*dt, 0.34, colliders);
+        if (res.hit) d.yaw += 1.5;
+        d.x = res.x; d.z = res.z;
+        d.phase += dt*sp*3.4;
+      }
+    }
+    // ---- draw ----
+    // Two transforms: the body (lifted onto the legs) and the legs themselves. Every
+    // body part shares the body matrix, so a dog costs one matrix write per part mesh.
+    const gy = surfaceY(d.x, d.z);
+    const legH = br.legs * br.s;
+    const bounce = d.dash > 0 || d.following ? Math.abs(Math.sin(d.phase))*0.09*br.s : 0;
+    const zs = br.s * (br.long || 1);                  // dachshunds stretch along the nose axis
+    dummy.position.set(d.x, gy + legH + bounce, d.z);
+    dummy.rotation.set(0, d.yaw, 0);
+    dummy.scale.set(br.s, br.s, zs);
+    dummy.updateMatrix();
+    const bodyM = dummy.matrix.clone();
+    P.body.setMatrixAt(i, bodyM);
+    P.snout.setMatrixAt(i, bodyM);
+    const flop = br.ear === 'flop';
+    P.earF.setMatrixAt(i, flop ? bodyM : HIDE_M);
+    P.earP.setMatrixAt(i, flop ? HIDE_M : bodyM);
+    const plume = br.tail === 'plume';
+    P.tailA.setMatrixAt(i, plume ? bodyM : HIDE_M);
+    P.tailB.setMatrixAt(i, plume ? HIDE_M : bodyM);
+    // legs: unit height scaled to legH, standing on the ground
+    dummy.position.set(d.x, gy + bounce, d.z);
+    dummy.scale.set(br.s, legH, zs);
+    dummy.updateMatrix();
+    P.legs.setMatrixAt(i, dummy.matrix);
+    i++;
+  }
+  dogsFollowing = follow;
+  for (const k in P) { P[k].count = i; P[k].instanceMatrix.needsUpdate = true; }
+}
+// F next to a dog: it joins the pack (or is sent home again).
+function tryDog() {
+  if (mode !== 'foot' || playerRag.active) return false;
+  let best = null, bd = 3.4*3.4;
+  for (const d of dogs) {
+    if (!d.placed) continue;
+    const dx = d.x - player.position.x, dz = d.z - player.position.z, d2 = dx*dx + dz*dz;
+    if (d2 > bd) continue;
+    bd = d2; best = d;
+  }
+  if (!best) return false;
+  if (best.following) {
+    best.following = false; best.home = { x: best.x, z: best.z };
+    toast(best.name + ' stays');
+  } else {
+    best.following = true;
+    best.order = dogs.filter(d => d.following).length - 1;
+    toast(best.name + ' the ' + best.br.name + ' joins you!');
+    coinSfx();
+  }
+  return true;
+}
+
 // Which jobs will not start unless you are behind a wheel. This duplicates the
 // `needsCar` flags in MISSION_DEFS because the markers are placed long before that
 // object exists — so the two are cross-checked at startup and a drift shows up in the
@@ -7628,30 +7834,54 @@ let riding = null, rideExitCd = 0;
 //  the carriageway the old reserved-rectangle siting let it clip.
 // =================================================================
 {
-  const B = 2.6, TOP = 40;
+  const B = 2.6, TOP = 42;
+  // Authored like a real circuit, in order: a long flat station straight, a chain lift
+  // sweeping up to the highest point, the crest pulled over into a steep first drop, then
+  // gravity doing the work through an airtime hill, camelbacks, an S-bend, a CORKSCREW
+  // (a true helix about a horizontal axis), a last hill, and a flat brake run home.
+  // Indices are referenced below for the roll profile, so keep them in step.
   const CTRL = [
-    [-22, B, -40], [2, B, -40], [26, B, -40],          // the flat station run (board here)
-    [48, B + 8, -33], [60, B + 22, -14],               // the chain lift, slow and steady
-    [66, TOP - 5, 6], [58, TOP, 26],                   // ... up to a tall crest, pulled over the top
-    [50, TOP - 8, 36],                                 // the lip
-    [43, 6, 41],                                       // THE DROP — a steep near-vertical plunge
-    [33, 21, 36],                                      // straight into a big airtime hill
-    [22, 5, 30],                                       // valley floor
-    [10, 18, 40], [-3, 6, 31], [-15, 17, 41],          // a run of camelbacks and S-bends
-    [-30, 8, 40],
-    [-47, 12, 36], [-60, 9, 22], [-56, 7, 7],          // into the circle, coming in high
-    [-43, 6, 4], [-31, 6.5, 16], [-35, 6, 31],         // round and round, closing under the way in
-    [-49, 7, 40],                                      // breaking out along the top
-    [-62, 14, 24], [-60, 19, 4], [-47, 5, -10],        // up and over a hill
-    [-54, 16, -24], [-40, 5, -33],                     // one more hill
-    [-30, B, -40],                                     // brake run, flatten home
+    // ---- flat: brake run into the station, then the station straight (z = -40) ----
+    [-46, B,      -40],   // 0  brakes bite here
+    [-30, B,      -40],   // 1
+    [-14, B,      -40],   // 2  BOARD HERE
+    [  2, B,      -40],   // 3
+    [ 18, B,      -40],   // 4  end of the flat
+    // ---- chain lift: sweep right and climb steadily to the top of the ride ----
+    [ 38, B + 8,  -37],   // 5
+    [ 54, B + 22, -24],   // 6
+    [ 63, TOP - 8, -6],   // 7
+    [ 64, TOP,     12],   // 8  CREST — the highest point
+    // ---- over the top and straight down ----
+    [ 57, TOP - 7, 27],   // 9  the lip
+    [ 47, 12,      37],   // 10 THE DROP — steep, but shy of vertical so the frame stays sane
+    // ---- big airtime hill out of the valley ----
+    [ 35, 26,      35],   // 11
+    [ 24,  7,      27],   // 12 valley floor
+    // ---- camelbacks and an S-bend ----
+    [ 12, 20,      34],   // 13
+    [  0,  8,      26],   // 14
+    [-12, 19,      35],   // 15
+    [-26, 11,      40],   // 16 sweeping turn, lining up the corkscrew
+    // ---- CORKSCREW: one full turn of a helix about a horizontal axis (y=15, z=33, r=8) ----
+    [-34, 23,      33],   // 17 top
+    [-42, 15,      41],   // 18 side
+    [-50,  7,      33],   // 19 bottom  (rider is inverted through here)
+    [-58, 15,      25],   // 20 side
+    [-66, 23,      33],   // 21 top again — one complete revolution
+    // ---- a last hill, then turn home and settle to station height ----
+    [-74, 17,      18],   // 22
+    [-70, 21,       2],   // 23
+    [-58,  8,     -12],   // 24
+    [-66, 13,     -25],   // 25 one last bunny hop
+    [-64,  6,     -35],   // 26 down to the approach
+    [-56, B,      -40],   // 27 ON station height already, so the flat run really is flat:
+                          //    the spline needs collinear points either side of a straight,
+                          //    or it eases through it and the "flat" is shorter than authored
   ];
-  // The known-good layout: a flowing sequence of hills, camelbacks and a circle that closes
-  // under its own way in — smooth, logically continuous, and the cross-ties space evenly on
-  // it. Bigger than the original with a taller lift and a steeper drop, scaled so the whole
-  // loop still validates on the fair's green beside the carousel. Uniform scale about the
-  // station height keeps every slope identical, just larger.
-  const S = 0.56;
+  // Uniform scale about the station height keeps every slope identical, just larger. There
+  // is plenty of grass on this plot, so the ride is bigger than the old one.
+  const S = 0.62;
   const curve = new THREE.CatmullRomCurve3(
     CTRL.map(c => new THREE.Vector3(c[0]*S, B + (c[1]-B)*S, c[2]*S)), true);
   const SAMPLES = curve.getSpacedPoints(260);
@@ -7707,42 +7937,94 @@ let riding = null, rideExitCd = 0;
     };
     const world = u => { const p = curve.getPointAt(((u % 1) + 1) % 1); return [cx + p.x, p.y, cz + p.z]; };
     const LEN = curve.getLength();
-    const uNear = (lx, lz) => {                        // arc param of the sample nearest a plan point
-      let bi = 0, bd = Infinity;
-      SAMPLES.forEach((p, i) => { const d = (p.x - lx)**2 + (p.z - lz)**2; if (d < bd) { bd = d; bi = i; } });
-      return bi / (SAMPLES.length - 1);
-    };
     let crestU = 0, crestY = 0;
     SAMPLES.forEach((p, i) => { if (p.y > crestY) { crestY = p.y; crestU = i / (SAMPLES.length - 1); } });
-    const stopU = uNear(2*S, -40*S), brakeU = uNear(-40*S, -34*S);
-    // rails: two offset tubes, ties, posts down to the ground
-    const up = new THREE.Vector3(0, 1, 0);
+    // Arc-length u of a control point, matched in 3D — a plan-only match would be
+    // ambiguous where the corkscrew passes over its own footprint.
+    const uOfCtrl = (i) => {
+      const c = CTRL[i], tgt = new THREE.Vector3(c[0]*S, B + (c[1]-B)*S, c[2]*S);
+      let bi = 0, bd = Infinity;
+      SAMPLES.forEach((p, k) => { const d = p.distanceToSquared(tgt); if (d < bd) { bd = d; bi = k; } });
+      return bi / (SAMPLES.length - 1);
+    };
+    const stopU = uOfCtrl(2);            // station: mid-flat, with flat either side
+    const brakeU = uOfCtrl(0);           // brakes grab at the start of the flat run
+
+    // ---- the track frame -------------------------------------------------------
+    // A coaster needs a full orientation per point, not just a heading: rails offset
+    // sideways, ties lie across, and through an inversion all of it rolls. Two parts:
+    //
+    //  1. a REFERENCE frame from the tangent and world up. Stable and twist-free, which
+    //     is what made the old flat layout read smoothly — and it degenerates only where
+    //     the tangent goes vertical, which the drop above deliberately stays shy of.
+    //  2. an AUTHORED roll laid on top. The corkscrew ramps roll 0 -> 2*PI across its
+    //     helix and then simply HOLDS 2*PI. Because a 2*PI rotation is the identity, the
+    //     frame is still exactly periodic at the seam, so the closed loop needs no
+    //     holonomy correction — the trap that skewed every previous attempt.
+    const WUP = new THREE.Vector3(0, 1, 0);
+    const smooth = t => t*t*(3 - 2*t);
+    const ramp = (u, a, b) => smooth(THREE.MathUtils.clamp((u - a)/(b - a), 0, 1));
+    const csIn = uOfCtrl(16), csOut = uOfCtrl(21);         // ease in before, out after the helix
+    const rollAt = u => Math.PI*2 * ramp(u, csIn, csOut);
+    const tmpQ = new THREE.Quaternion();
+    const frameAt = (u) => {
+      const uu = ((u % 1) + 1) % 1;
+      const p = curve.getPointAt(uu);
+      const q = curve.getPointAt((uu + 0.0015) % 1);
+      const dir = q.clone().sub(p).normalize();
+      let right = new THREE.Vector3().crossVectors(dir, WUP);
+      if (right.lengthSq() < 1e-6) right.crossVectors(dir, new THREE.Vector3(0, 0, 1));  // tangent vertical
+      right.normalize();
+      const up = new THREE.Vector3().crossVectors(right, dir).normalize();
+      const r = rollAt(uu);
+      if (r !== 0) { tmpQ.setFromAxisAngle(dir, r); right.applyQuaternion(tmpQ); up.applyQuaternion(tmpQ); }
+      return { p, dir, right, up };
+    };
+
+    // rails: two tubes riding the frame, so they bank and invert with the track
+    const GAUGE = 0.54, RAIL_UP = 0.17;
     const railCurve = (sgn) => {
       const pts = [];
-      for (let i = 0; i < 220; i++) {
-        const t = i / 220;
-        const p = curve.getPointAt(t), q = curve.getPointAt((t + 0.002) % 1);
-        const dir = q.clone().sub(p).normalize();
-        const side = new THREE.Vector3().crossVectors(dir, up).normalize();
-        pts.push(new THREE.Vector3(cx + p.x + side.x*sgn*0.52, p.y + 0.16, cz + p.z + side.z*sgn*0.52));
+      const N = 420;                                      // dense enough that the helix stays round
+      for (let i = 0; i < N; i++) {
+        const f = frameAt(i / N);
+        pts.push(new THREE.Vector3(
+          cx + f.p.x + f.right.x*sgn*GAUGE + f.up.x*RAIL_UP,
+               f.p.y + f.right.y*sgn*GAUGE + f.up.y*RAIL_UP,
+          cz + f.p.z + f.right.z*sgn*GAUGE + f.up.z*RAIL_UP));
       }
       return new THREE.CatmullRomCurve3(pts, true);
     };
     for (const sgn of [-1, 1])
-      mesh2(new THREE.TubeGeometry(railCurve(sgn), 640, 0.09, 10, true), 0xd0392b, 0, 0, 0);
-    const ties = [], posts = [];
-    const NT = Math.round(LEN / 3);
+      mesh2(new THREE.TubeGeometry(railCurve(sgn), 900, 0.085, 8, true), 0xd0392b, 0, 0, 0);
+
+    // ties: evenly spaced by ARC LENGTH (getPointAt is arc-length parameterised, so a
+    // uniform step in u is a uniform step in metres) and oriented by the frame basis,
+    // not Euler angles — that is what keeps them square to the rails everywhere.
+    const ties = [], posts = [], spine = [];
+    const TIE_GAP = 1.5;                                   // metres between cross-ties
+    const NT = Math.max(24, Math.round(LEN / TIE_GAP));
+    const tieGeo = BOX(GAUGE*2 + 0.26, 0.09, 0.24);
+    const mBasis = new THREE.Matrix4();
     for (let i = 0; i < NT; i++) {
-      const t = i / NT;
-      const p = curve.getPointAt(t), q = curve.getPointAt((t + 0.002) % 1);
-      const dir = q.clone().sub(p).normalize();
-      const yaw = Math.atan2(dir.x, dir.z), pitch = -Math.asin(THREE.MathUtils.clamp(dir.y, -1, 1));
-      ties.push(baked(BOX(1.5, 0.09, 0.28), cx + p.x, p.y + 0.05, cz + p.z, pitch, yaw, 0));
-      if (i % 4 === 0 && p.y > 1.2)
-        posts.push(baked(BOX(0.34, p.y, 0.34), cx + p.x, p.y/2, cz + p.z));
+      const f = frameAt(i / NT);
+      mBasis.makeBasis(f.right, f.up, f.dir);
+      mBasis.setPosition(cx + f.p.x - f.up.x*0.06, f.p.y - f.up.y*0.06, cz + f.p.z - f.up.z*0.06);
+      ties.push(tieGeo.clone().applyMatrix4(mBasis));
+      // a spine tube under the ties is what a real coaster hangs its track from
+      spine.push(new THREE.Vector3(cx + f.p.x - f.up.x*0.30, f.p.y - f.up.y*0.30, cz + f.p.z - f.up.z*0.30));
+      // Posts only where the track is the right way up and off the ground — through the
+      // inverted half of the corkscrew a vertical post would spear the track.
+      if (i % 5 === 0 && f.p.y > 1.6 && f.up.dot(WUP) > 0.35) {
+        const footY = surfaceY(cx + f.p.x, cz + f.p.z);
+        const h = f.p.y - footY - 0.3;
+        if (h > 0.6) posts.push(baked(BOX(0.32, h, 0.32), cx + f.p.x, footY + h/2, cz + f.p.z));
+      }
     }
     mesh2(merge(ties), 0x8c6a44, 0, 0, 0);
-    mesh2(merge(posts), 0x6b6f76, 0, 0, 0);
+    if (posts.length) mesh2(merge(posts), 0x6b6f76, 0, 0, 0);
+    mesh2(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(spine, true), 700, 0.11, 6, true),
+          0x6b6f76, 0, 0, 0);
     const cart = new THREE.Group();
     const cb = new THREE.Mesh(BOX(1.3, 0.7, 2.0), toon(0xf0b429));
     cb.position.y = 0.55; cb.castShadow = true; cart.add(cb);
@@ -7783,10 +8065,20 @@ let riding = null, rideExitCd = 0;
     }
     const sign = signPanel(12, 3, signTexture('THE MAPLE MOUSE', '#2f3550', '#ffd23b', 512, 128));
     sign.position.set(stx, 7, stz - 3.6); sign.rotation.y = Math.PI; scene.add(sign);   // faces the way in
+    // How much dead-flat track leads into the station — the ride is authored for at least
+    // 20 m of it, and this proves it rather than assuming it.
+    let flatM = 0;
+    { const step = LEN / 400;
+      for (let k = 1; k <= 400; k++) {
+        const u = ((stopU - k*step/LEN) % 1 + 1) % 1;
+        const f = frameAt(u);
+        if (Math.abs(f.dir.y) > 0.02) break;
+        flatM = k*step;
+      } }
     FAIR.push({ kind: 'coaster', label: 'MAPLE MOUSE', x: stx, z: stz, r: 8,
-                P: world, cart, t: stopU, wait: 10, phase: 'lift', wrapped: false,
-                stopU, crestU, brakeU, topY: crestY, len: LEN, cx, cz });
-    console.log(`fair: ${FAIR.length} rides at ${FAIR.at0 ? FAIR.at0[0]|0 : 0},${FAIR.at0 ? FAIR.at0[1]|0 : 0} · coaster at ${cx|0},${cz|0} (${LEN|0} m of track)`);
+                P: world, F: frameAt, cart, t: stopU, wait: 10, phase: 'lift', wrapped: false,
+                stopU, crestU, brakeU, topY: crestY, len: LEN, cx, cz, flatM });
+    console.log(`fair: ${FAIR.length} rides at ${FAIR.at0 ? FAIR.at0[0]|0 : 0},${FAIR.at0 ? FAIR.at0[1]|0 : 0} · coaster at ${cx|0},${cz|0} (${LEN|0} m of track, crest ${crestY.toFixed(1)} m, ${flatM.toFixed(1)} m flat into the station, ${NT} ties @ ${TIE_GAP} m)`);
   } else {
     console.warn('coaster: no clear site found');
     console.log(`fair: ${FAIR.length} rides`);
@@ -8802,6 +9094,7 @@ const rideSeat = (R) => {
   const c = R.cars[R.seat];
   return { x: c.x, y: 1.66, z: c.z, yaw: c.yaw };
 };
+const coasterM = new THREE.Matrix4();      // scratch basis for the coaster cart's orientation
 function updateRides(dt) {
   if (rideExitCd > 0) rideExitCd -= dt;
   for (const R of FAIR) {
@@ -8835,10 +9128,19 @@ function updateRides(dt) {
         if (R.phase === 'brake' && R.wrapped && t2 >= R.stopU) { R.t = R.stopU; R.wait = 10; }
         else R.t = t2;
       }
-      const [x, cy, z] = R.P(R.t), [x2, y2, z2] = R.P(R.t + 0.0025);
-      R.cart.position.set(x, cy + 0.32, z);
-      R.cart.rotation.set(-Math.asin(THREE.MathUtils.clamp((y2 - cy)/Math.max(0.001, Math.hypot(x2-x, y2-cy, z2-z)), -1, 1)),
-                          Math.atan2(x2 - x, z2 - z), 0, 'YXZ');
+      // Ride the track frame, so the cart banks through the turns and goes properly
+      // upside down in the corkscrew instead of staying stubbornly world-level.
+      if (R.F) {
+        const f = R.F(R.t);
+        R.cart.position.set(R.cx + f.p.x + f.up.x*0.34, f.p.y + f.up.y*0.34, R.cz + f.p.z + f.up.z*0.34);
+        coasterM.makeBasis(f.right, f.up, f.dir);
+        R.cart.quaternion.setFromRotationMatrix(coasterM);
+      } else {
+        const [x, cy, z] = R.P(R.t), [x2, y2, z2] = R.P(R.t + 0.0025);
+        R.cart.position.set(x, cy + 0.32, z);
+        R.cart.rotation.set(-Math.asin(THREE.MathUtils.clamp((y2 - cy)/Math.max(0.001, Math.hypot(x2-x, y2-cy, z2-z)), -1, 1)),
+                            Math.atan2(x2 - x, z2 - z), 0, 'YXZ');
+      }
     } else {
       for (const c of R.cars) {
         const ridden = riding === R && R.cars[R.seat] === c;
@@ -10844,6 +11146,7 @@ function animate() {
   updateTraffic(dt);
   updatePeds(dt);
   updateChickens(dt);
+  updateDogs(dt);
   updateTireClimb(dt);
   updateBombs(dt);
   updateRides(dt);
