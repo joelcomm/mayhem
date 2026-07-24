@@ -7639,7 +7639,10 @@ const PEN = { inner: null, walls: [] };
     for (let x = -W/2; x <= W/2; x += 3.6) { post(cx + x, cz - D/2); post(cx + x, cz + D/2); }
     for (let z = -D/2; z <= D/2; z += 3.5) { post(cx - W/2, cz + z); post(cx + W/2, cz + z); }
     for (let x = -W/2 + 1.8; x <= W/2 - 1.8; x += 3.6) {
-      if (Math.abs(x) < GATE/2 + 1.2) { rail(cx + x, cz + D/2, 3.6, 0.12); continue; } // gate side stays open
+      // The gap belongs on the +z side — the side with the MAPLE FARM sign, the swing gate
+      // and Nurse Mabel. It used to be cut in the far (-z) rail instead, so the way in was
+      // round the back and the giver stood against an unbroken fence.
+      if (Math.abs(x) < GATE/2 + 1.2) { rail(cx + x, cz - D/2, 3.6, 0.12); continue; }
       rail(cx + x, cz - D/2, 3.6, 0.12); rail(cx + x, cz + D/2, 3.6, 0.12);
     }
     for (let z = -D/2 + 1.75; z <= D/2 - 1.75; z += 3.5) {
@@ -7689,7 +7692,7 @@ const PEN = { inner: null, walls: [] };
       colliders.push(block); PEN.walls.push(block);
       PEN.gate = { mesh: gate, block, closed: true, cz: cz + D/2 };
     }
-    if (addJobMarker) addJobMarker(cx, cz + D/2 + 9,
+    if (addJobMarker) addJobMarker(cx, cz + D/2 + 5.5,     // right at the gate you walk in through
       'NURSE MABEL', "The flock's gone feral down at the farm. Boot me seven of them!", 'feather');
     console.log(`farm pen at ${cx|0},${cz|0}`);
   }
