@@ -2695,7 +2695,11 @@ rngNeutral(() => {
     // with the old counter-and-crates as the fallback for anything unbriefed
     furnishRoom(R, b, r, dx, dz, walls);
     ENTERABLE.push({ name: b.name, x: dx, z: dz, fx: b.fx, fz: b.fz, room: R,
-                     w: b.dw - 0.15, h: b.dh - 0.1, off: b.glazed ? 0.30 : 0.12 });
+                     // leaf a touch WIDER/TALLER than the hole so the shut door overlaps the
+                     // jambs and header — no rim of interior showing around it. The block
+                     // collider still keys off the true opening (setDoorBlock), so this only
+                     // changes what you see, not where you can walk.
+                     w: b.dw + 0.2, h: b.dh + 0.12, opening: b.dw, off: b.glazed ? 0.30 : 0.12 });
   }
 });
 
@@ -9944,7 +9948,11 @@ roomLight.visible = false; scene.add(roomLight);
 // door is just its instance matrix recomputed. The unit leaf has its hinge
 // edge at the origin; per-door width/height ride in the instance scale.
 const DOOR_MAT = new THREE.MeshToonMaterial({ color: 0x8c4a2f, gradientMap: RAMP });
-const doorLeafG = BOX(1, 1, 0.16).translate(0.5, 0.5, 0);
+// A deep leaf (0.7, most of the WALL_T reveal) rather than a thin plane: a thin door set
+// at the outer face leaves the doorway's depth open at the sides, so from an angle you
+// see straight past it into the lit room. The plug closes that sightline. Paired with a
+// leaf sized a touch larger than the opening (below), the shut door reads fully solid.
+const doorLeafG = BOX(1, 1, 0.7).translate(0.5, 0.5, 0);
 const doorLeaf = instanced(doorLeafG, DOOR_MAT, ENTERABLE.length);
 const doorKnob = instanced(new THREE.SphereGeometry(0.1, 16, 12), toon(0xc9a24b), ENTERABLE.length, false);
 scene.add(doorLeaf, doorKnob);
@@ -9978,7 +9986,7 @@ doorLeaf.instanceMatrix.needsUpdate = true;
 doorKnob.instanceMatrix.needsUpdate = true;
 function setDoorBlock(e) {
   if (e.open > 0.35 || !e.room) { e.block.minX = e.block.maxX = 1e9; e.block.minZ = e.block.maxZ = 1e9; return; }
-  const half = e.w/2 + 0.1, t = 0.5;
+  const half = (e.opening || e.w)/2 + 0.1, t = 0.5;
   e.block.minX = e.x - (e.fz ? half : t); e.block.maxX = e.x + (e.fz ? half : t);
   e.block.minZ = e.z - (e.fz ? t : half); e.block.maxZ = e.z + (e.fz ? t : half);
 }
