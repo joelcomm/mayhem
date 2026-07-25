@@ -1788,52 +1788,18 @@ function fillCivic(B) {
 }
 
 // Duff Stadium — an open bowl of banked seating
+// The bowl itself is NOT built here any more — see VICTORY STADIUM, far below. A city
+// block cannot give an arena the room it needs: on this seed the block was a long thin
+// strip and the bowl came out 14 m x 110 m, a corridor rather than an arena, with the
+// derby spawning its three cars inside a 3 m radius. It is built out on the green belt
+// instead. This block stays open ground — and still spends exactly the same twelve
+// seeded randoms on its coin spots, so nothing downstream in the town moves.
 function fillStadium(B) {
   const r = B.r;
   const cx = (r.x0+r.x1)/2, cz = (r.z0+r.z1)/2;
   rect(lawnPos, r.x0, r.z0, r.x1, r.z1, 0.012, null);
-  const seg = 24;
-  // The ring is closed, so a segment can't just be skipped when it fouls a neighbour —
-  // that would leave a hole in the stands. Shrink the whole bowl instead, uniformly,
-  // until every segment is clear.
-  const segAt = (k, RX, RZ) => {
-    const a0 = (k/seg)*Math.PI*2, a1 = ((k+1)/seg)*Math.PI*2, am = (a0+a1)/2;
-    return { px: cx + Math.cos(am)*RX*0.92, pz: cz + Math.sin(am)*RZ*0.92, yaw: -am + Math.PI/2,
-             len: Math.hypot(Math.cos(a1)*RX - Math.cos(a0)*RX, Math.sin(a1)*RZ - Math.sin(a0)*RZ) + 2 };
-  };
-  let RX = (r.x1-r.x0)/2 - 11, RZ = (r.z1-r.z0)/2 - 11;
-  for (const sc of [1, 0.94, 0.88, 0.82, 0.76, 0.7]) {
-    const tx = ((r.x1-r.x0)/2 - 11)*sc, tz = ((r.z1-r.z0)/2 - 11)*sc;
-    let ok = true;
-    for (let k = 0; k < seg && ok; k++) {
-      const g = segAt(k, tx, tz);
-      if (footprintClash(g.px, g.pz, g.len, 12, g.yaw, 0.3)) ok = false;
-    }
-    RX = tx; RZ = tz;
-    if (ok) break;
-  }
-  for (let k = 0; k < seg; k++) {
-    const g = segAt(k, RX, RZ);
-    put(0xc9ccd2, baked(BOX(g.len, 13, 12), g.px, 6.5, g.pz, 0, g.yaw));
-    const dropSeat = lastPut(0xc9ccd2);
-    put(0xe8532f, baked(BOX(g.len, 2.0, 13), g.px, 13.6, g.pz, 0, g.yaw));
-    const dropRim = lastPut(0xe8532f);
-    // the real turned footprint, not a blanket 11x11 that reached into the next block
-    addBox(g.px, g.pz, aabbW(g.len, 12, g.yaw), aabbD(g.len, 12, g.yaw),
-           'stadium', 'stadium', { w: g.len, d: 12, yaw: g.yaw });
-    // the two south-facing segments become the gate: built as ever (their RNG cost is
-    // part of the seeded stream) and withdrawn in the deferred pass, like the walk-ins
-    if (k === 17 || k === 18) STADIUM.gate.push({ drop: [dropSeat, dropRim],
-      col: colliders[colliders.length-1], box: mapBoxes[mapBoxes.length-1], g });
-  }
-  STADIUM.cx = cx; STADIUM.cz = cz; STADIUM.rx = RX; STADIUM.rz = RZ;
-  rect(lotPos, cx-RX*0.6, cz-RZ*0.6, cx+RX*0.6, cz+RZ*0.6, 0.03, lotUV, 9);
-  for (const s of [-1, 1]) {                                          // floodlight pylons
-    put(0x6b6f76, baked(BOX(1.2, 26, 1.2), cx + s*RX*0.75, 13, cz - RZ*0.75));
-    put(0xfff0b8, baked(BOX(5, 2.4, 1.2), cx + s*RX*0.75, 26.5, cz - RZ*0.75));
-  }
-  nameBoard(cx, cz - RZ - 3, 10, Math.PI, 20, 'VICTORY STADIUM', '#e8b53f', '#c0392b');
-  for (let k = 0; k < 6; k++) coinsSpots.push({ x: rnd(cx-RX*0.5, cx+RX*0.5), z: rnd(cz-RZ*0.5, cz+RZ*0.5) });
+  for (let k = 0; k < 6; k++)
+    coinsSpots.push({ x: rnd(r.x0+8, r.x1-8), z: rnd(r.z0+8, r.z1-8) });
 }
 
 // Maplewood Retirement Castle
@@ -7508,8 +7474,9 @@ let addJobMarker = null;
       'THIRSTY LOU', "I'm barred from the Rusty Mug. Fetch me a cold one?", 'mug'); }
   // Nurse Mabel moved to the farm pen with the flock — her marker is placed from
   // the pen block via addJobMarker, since the pen picks its site with findGreen.
-  marker(STADIUM.cx, STADIUM.cz + STADIUM.rz + 9,
-    'CRUSHER', 'Three rigs. One arena. Last one rolling wins.', 'derby');
+  // Crusher moved out to the stadium's car park, placed from the stadium block via
+  // addJobMarker — the arena now picks its own site on the green belt, so STADIUM.cx
+  // is still 0 at this point in the file.
   // Warden Norris, on the far side of the gate from Lefty Louie (who is at gate.x+8).
   // The two prison-gate givers keep well clear of each other.
   if (PRISON.gate) marker(PRISON.gate.x - 10, PRISON.gate.z - 12,
@@ -7728,6 +7695,71 @@ function findAirfield(w, d) {
   }
   if (best) TAKEN.push({ x: best.x, z: best.z, w, d });
   return best;
+}
+
+// =================================================================
+//  VICTORY STADIUM
+//  Out on the green belt, not on a city block — an arena needs room no block has.
+//  Sited like the airfield: the clear parcel farthest from the middle but still well
+//  inside the ring. The bowl is a 24-segment oval with two segments left out for the
+//  way in, a paved infield big enough to actually drive a derby on, floodlights, and
+//  a car park on the apron outside the gate. The derby (CRUSHER's job) runs on the
+//  infield, so its size is what makes that game work at all.
+// =================================================================
+{
+  const SW = 230, SD = 190;
+  const site = findAirfield(SW, SD) || findGreen(SW, SD) || findGreen(170, 140);
+  if (site) {
+    const cx = site.x, cz = site.z;
+    const RX = SW/2 - 20, RZ = SD/2 - 20;          // 95 x 75 -> a 190 x 150 m bowl
+    const M = (geo, col, x, y, z, ry) => {
+      const m = new THREE.Mesh(geo, toon(col));
+      m.position.set(x, y, z); if (ry) m.rotation.y = ry;
+      m.castShadow = true; m.receiveShadow = true; scene.add(m); return m;
+    };
+    // the infield: paved, and the derby's arena floor
+    const field = new THREE.Mesh(new THREE.CircleGeometry(1, 48).rotateX(-Math.PI/2), toon(0x6f7178));
+    field.scale.set(RX*0.86, 1, RZ*0.86);
+    field.position.set(cx, 0.03, cz); field.receiveShadow = true; scene.add(field);
+
+    const seg = 24, GATE = [17, 18];
+    for (let k = 0; k < seg; k++) {
+      const a0 = (k/seg)*Math.PI*2, a1 = ((k+1)/seg)*Math.PI*2, am = (a0+a1)/2;
+      const px = cx + Math.cos(am)*RX*0.94, pz = cz + Math.sin(am)*RZ*0.94;
+      const yaw = -am + Math.PI/2;
+      const len = Math.hypot(Math.cos(a1)*RX - Math.cos(a0)*RX,
+                             Math.sin(a1)*RZ - Math.sin(a0)*RZ) + 2.5;
+      if (GATE.includes(k)) continue;              // left out: this is the way in
+      M(BOX(len, 16, 14), 0xc9ccd2, px, 8, pz, yaw);          // stand
+      M(BOX(len, 2.4, 15), 0xe8532f, px, 17.2, pz, yaw);      // rim
+      addBox(px, pz, aabbW(len, 14, yaw), aabbD(len, 14, yaw),
+             'stadium', 'stadium', { w: len, d: 14, yaw });
+    }
+    // gate pillars either side of the gap
+    for (const k of [GATE[0], GATE[GATE.length-1] + 1]) {
+      const a = (k/seg)*Math.PI*2;
+      const px = cx + Math.cos(a)*RX*0.94, pz = cz + Math.sin(a)*RZ*0.94;
+      M(BOX(2.4, 18, 2.4), 0xe8e3d3, px, 9, pz);
+      M(BOX(3, 1.6, 3), 0xe8532f, px, 18.6, pz);
+    }
+    for (const s of [-1, 1]) {                     // floodlight pylons
+      M(BOX(1.4, 30, 1.4), 0x6b6f76, cx + s*RX*0.8, 15, cz + RZ*0.8);
+      M(BOX(6, 2.6, 1.4), 0xfff0b8, cx + s*RX*0.8, 30.5, cz + RZ*0.8);
+    }
+    // the gate faces -z (segments 17/18 sit around 270 deg), so the car park goes there
+    const lotZ = cz - RZ - 34;
+    const lot = new THREE.Mesh(new THREE.PlaneGeometry(150, 50).rotateX(-Math.PI/2), toon(0x6f7178));
+    lot.position.set(cx, 0.02, lotZ); lot.receiveShadow = true; scene.add(lot);
+    for (let i = -3; i <= 3; i++)                  // bay markings
+      M(BOX(0.3, 0.02, 40), 0xe8e3d3, cx + i*20, 0.05, lotZ);
+    nameBoard(cx, cz - RZ - 8, 12, Math.PI, 26, 'VICTORY STADIUM', '#e8b53f', '#c0392b');
+    STADIUM.cx = cx; STADIUM.cz = cz; STADIUM.rx = RX; STADIUM.rz = RZ;
+    for (let k = 0; k < 8; k++)
+      coinsSpots.push({ x: cx + rnd(-RX*0.6, RX*0.6), z: cz + rnd(-RZ*0.6, RZ*0.6) });
+    if (addJobMarker) addJobMarker(cx + 14, lotZ + 12,
+      'CRUSHER', 'Three rigs. One arena. Last one rolling wins.', 'derby');
+    console.log(`stadium at ${cx|0},${cz|0} · bowl ${(RX*2)|0} x ${(RZ*2)|0} m · car park at ${cx|0},${lotZ|0}`);
+  } else console.warn('stadium: no clear parcel found');
 }
 
 // =================================================================
