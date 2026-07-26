@@ -1,4 +1,4 @@
-# Maplewood Mayhem
+# Public Nuisance
 
 A cartoon open-world driving game in the spirit of *The Simpsons: Hit & Run*.
 `docs/index.html` is the built game — one self-contained file with three.js inlined,

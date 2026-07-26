@@ -1,4 +1,5 @@
-// Maplewood Mayhem — the whole game. Imported by index.html as a module.
+// Public Nuisance — the whole game. Imported by index.html as a module.
+// (The town itself is still Maplewood; only the game is renamed.)
 // three comes from npm (pinned to the same 0.161.0 the CDN importmap used), so
 // behaviour is identical to the pre-Vite build.
 import * as THREE from 'three';
@@ -11450,7 +11451,7 @@ rngNeutral(() => {
 //  already reads, so closing the panel leaves no trace.
 // =================================================================
 {
-  const gui = new GUI({ title: 'MAPLEWOOD TUNING', width: 300 });
+  const gui = new GUI({ title: 'NUISANCE TUNING', width: 300 });
   gui.close();
   gui.domElement.style.zIndex = '30';
 

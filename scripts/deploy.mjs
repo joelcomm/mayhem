@@ -41,7 +41,7 @@ run('git add mayhem', tmp);
 if (capture('git status --porcelain mayhem', tmp) === '') {
   console.log('· hub unchanged (already up to date)');
 } else {
-  run('git commit -q -m "Update Maplewood Mayhem"', tmp);
+  run('git commit -q -m "Update Public Nuisance"', tmp);
   run(`git push -q origin ${HUB_BRANCH}`, tmp);
   console.log('✓ pushed to Mobile-fun/gh-pages — games.aiforeveryoneshow.com/mayhem/');
 }
