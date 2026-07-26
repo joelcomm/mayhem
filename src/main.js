@@ -4957,6 +4957,13 @@ function renderCrowd(sub) {
       u.armL.rotation.z = 0.5 + beat*0.4; u.armR.rotation.z = -0.5 - beat*0.4;
       g.rotation.y = s.yaw + beat*0.35;
       g.position.y = Math.abs(beat)*0.12;
+    } else if (s.pose === 'walk' && s.moving) {
+      // occupants crossing a room: a proper stride, driven off the same phase the
+      // street crowd uses so they read as the same people
+      u.phase += 0.16;
+      const sw = Math.sin(u.phase)*0.5;
+      u.legL.rotation.x = sw; u.legR.rotation.x = -sw;
+      u.armL.rotation.x = -sw; u.armR.rotation.x = sw;
     } else {
       u.legL.rotation.x = u.legR.rotation.x = 0;
       u.armL.rotation.x = sway; u.armR.rotation.x = -sway;
@@ -5028,7 +5035,10 @@ function attachPed(p) {
 }
 const WALKABLE = [];
 for (let i = 0; i < NET.edges.length; i++) if (!NET.edges[i].hw) WALKABLE.push(i);
-for (let i = 0; i < 1600; i++) {
+// Halved from 1600: the pavements were shoulder to shoulder. The people saved from the
+// street are put back indoors instead (see the room occupants below), which spreads the
+// town's population out the way a real one is — most of it inside, at any given moment.
+for (let i = 0; i < 800; i++) {
   const ei = WALKABLE[(Math.random()*WALKABLE.length)|0], e = NET.edges[ei];
   const p = { g: makeAvatar(), ei, from: Math.random()<0.5?e.a:e.b, side: Math.random()<0.5?1:-1,
     dist: Math.random()*e.len, speed: rnd(1.1, 2.0), cross:null, rag:makeRag(), flee:null,
@@ -5048,6 +5058,56 @@ function strollTarget(s) {              // a clear patch of grass inside the cho
     s.tx = x; s.tz = z; return true;
   }
   return false;
+}
+// ---- people who live and shop indoors ----
+// The counterpart to halving the street crowd. Every room gets one or two occupants
+// who mill about inside it: a shopper working along the aisles, somebody crossing their
+// own front room. They ride the same `staff` list (so they cost nothing extra to draw —
+// same instanced crowd) but carry a room and a wander target, and updateIndoors walks
+// them around it. rngNeutral because their looks and paths draw randoms and the seeded
+// stream everything after this is built from must not move.
+rngNeutral(() => {
+  for (const R of ROOMS) {
+    const w = R.inner.x1 - R.inner.x0, d = R.inner.z1 - R.inner.z0;
+    if (w < 5 || d < 5) continue;                         // no room to pace in
+    const n = w*d > 90 ? 2 : 1;                           // a big shop floor gets two
+    for (let k = 0; k < n; k++) {
+      staff.push({ x: R.cx + rnd(-w*0.25, w*0.25), z: R.cz + rnd(-d*0.25, d*0.25),
+                   yaw: rnd(0, 6.28), pose: 'walk', room: R,
+                   tx: 0, tz: 0, hold: rnd(0, 2.5), spd: rnd(0.7, 1.25) });
+    }
+  }
+});
+// Pick somewhere else in the room to amble to, clear of the furniture.
+function indoorTarget(s) {
+  const I = s.room.inner;
+  for (let k = 0; k < 6; k++) {
+    const x = rnd(I.x0 + 1.1, I.x1 - 1.1), z = rnd(I.z0 + 1.1, I.z1 - 1.1);
+    if (pointBlocked(x, z, 0.7)) continue;
+    s.tx = x; s.tz = z; return true;
+  }
+  s.tx = s.room.cx; s.tz = s.room.cz; return false;
+}
+function updateIndoors(dt, sub) {
+  for (const s of staff) {
+    if (s.pose !== 'walk' || !s.g) continue;
+    const g = s.g;
+    // only simulate the ones you could actually see — there are hundreds of rooms
+    const dxc = g.position.x - sub.x, dzc = g.position.z - sub.z;
+    if (dxc*dxc + dzc*dzc > 60*60) continue;
+    if (s.hold > 0) { s.hold -= dt; s.moving = false; continue; }   // paused, looking at something
+    if (!s.tx && !s.tz) indoorTarget(s);
+    const dx = s.tx - g.position.x, dz = s.tz - g.position.z, dd = Math.hypot(dx, dz);
+    if (dd < 0.35) { s.hold = rnd(1.2, 4.5); indoorTarget(s); s.moving = false; continue; }
+    s.yaw = lerpAngle(s.yaw, Math.atan2(dx, dz), 1 - Math.exp(-dt*7));
+    const step = Math.min(s.spd, dd*2.5) * dt;
+    const res = collideCircle(g.position.x + Math.sin(s.yaw)*step,
+                              g.position.z + Math.cos(s.yaw)*step, 0.34, s.room.walls);
+    if (res.hit) { s.hold = rnd(0.3, 0.9); indoorTarget(s); }
+    g.position.x = res.x; g.position.z = res.z;
+    g.rotation.y = s.yaw;
+    s.moving = true;
+  }
 }
 // The room staff get their bodies here rather than in the interiors pass — pickLook's
 // palettes aren't initialised that early in the file — and rngNeutral keeps their
@@ -11489,6 +11549,7 @@ function animate() {
   updatePeds(dt);
   updateChickens(dt);
   updateDogs(dt);
+  updateIndoors(dt, sub);
   updateTireClimb(dt);
   updateBombs(dt);
   updateRides(dt);
