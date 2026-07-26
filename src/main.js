@@ -7698,6 +7698,58 @@ function findAirfield(w, d) {
 }
 
 // =================================================================
+//  SHOP CAR PARKS
+//  A shop block is paved kerb to kerb with the stores ringed around its rim, which
+//  reads as a parking lot but had neither bays nor a single car in it. This lays
+//  marked bays down the middle and parks cars in some of them, leaving a clear lane
+//  so you can drive in through the gaps between the shops. Late pass on purpose: the
+//  parked cars are real colliders, and adding those during the block loop would move
+//  the tree scatter and its audit.
+// =================================================================
+{
+  const CARCOL = [0xd0392b, 0x2f6fc4, 0xe8e3d3, 0x2f8f4f, 0xf0b429, 0x7b4fa7, 0x4a4f58, 0xe8532f];
+  const PM = (geo, col, x, y, z, ry) => {
+    const m = new THREE.Mesh(geo, toon(col));
+    m.position.set(x, y, z); if (ry) m.rotation.y = ry;
+    m.castShadow = true; m.receiveShadow = true; scene.add(m); return m;
+  };
+  const parkedCar = (x, z, yaw, col) => {
+    PM(BOX(2.0, 0.85, 4.3), col, x, 0.72, z, yaw);                    // body
+    PM(BOX(1.7, 0.7, 2.0), 0x9ad8ff, x, 1.5, z, yaw);                 // cabin glass
+    const ax2 = Math.sin(yaw), az2 = Math.cos(yaw);                   // along the car
+    const bx = Math.cos(yaw), bz = -Math.sin(yaw);                    // across it
+    for (const s of [-1, 1]) for (const e of [-1.4, 1.4]) {
+      const wx = x + ax2*e + bx*s*0.95, wz = z + az2*e + bz*s*0.95;
+      PM(new THREE.CylinderGeometry(0.34, 0.34, 0.26, 10).rotateZ(Math.PI/2), 0x2b2f38, wx, 0.34, wz, yaw);
+    }
+    colliders.push({ minX: x - 2.2, maxX: x + 2.2, minZ: z - 2.2, maxZ: z + 2.2 });
+  };
+  let bays = 0, cars = 0;
+  for (const B of BLOCKS) {
+    if (B.zone !== 'shops' && B.zone !== 'plaza') continue;
+    const r = B.r;
+    const ix0 = r.x0 + 26, ix1 = r.x1 - 26, iz0 = r.z0 + 26, iz1 = r.z1 - 26;
+    if (ix1 - ix0 < 16 || iz1 - iz0 < 16) continue;
+    // rows of bays running along x, with a driving lane left between each pair
+    for (let rz = iz0 + 5; rz <= iz1 - 5; rz += 24) {
+      for (let x = ix0; x <= ix1; x += 3.1) {
+        if (onRoad(x, rz, 3) || pointBlocked(x, rz, 3.0)) continue;
+        PM(BOX(0.2, 0.04, 9.4), 0xe8e3d3, x, 0.06, rz);               // bay line
+        bays++;
+        // park a car in roughly half the bays, chosen by the coordinate hash so the
+        // pattern is stable for a given town without drawing a seeded random
+        if (vary(x, rz, 10) < 5 && !pointBlocked(x + 1.55, rz, 2.6)) {
+          const face = vary(rz, x, 2) ? 0 : Math.PI;
+          parkedCar(x + 1.55, rz, face, CARCOL[vary(x, rz + 7, CARCOL.length)]);
+          cars++;
+        }
+      }
+    }
+  }
+  console.log(`shop car parks: ${bays} bays marked, ${cars} cars parked`);
+}
+
+// =================================================================
 //  VICTORY STADIUM
 //  Out on the green belt, not on a city block — an arena needs room no block has.
 //  Sited like the airfield: the clear parcel farthest from the middle but still well
@@ -8634,8 +8686,12 @@ if (AIRPORT) {
   plane.visible = true;
   planeShadow = blobShadow(9);
 
-  // (The sky-ring BARNSTORMER course is removed for now — the plane is free-flight only.
-  //  Walk up and press F to fly.)
+  // The airfield's own job giver, stood beside the parked plane.
+  // Close to the parked plane on purpose: the job needs you already in the cockpit
+  // (needsPlane) and a marker only trips within ~4 m, so any further out and you would
+  // taxi straight past her with no way to take it.
+  if (addJobMarker) addJobMarker(PLANE_SPAWN.x + 3, PLANE_SPAWN.z - 2,
+    'POSTMISTRESS PIP', 'Mail sack for the far side of the ring. Fly it out and land it back here.', 'airmail');
   console.log(`airport at ${ax|0},${az|0} · runway ${RWL}m · free-flight`);
 } else {
   plane.position.set(1e6, 0, 1e6);   // no room found — keep it off-world, unboardable
@@ -10528,6 +10584,45 @@ const MISSION_DEFS = {
       if (!won) for (const d of dogs) if (d.following && !d.owned) {
         d.following = false; d.home = { x: d.x, z: d.z };
       }
+    },
+  },
+  airmail: {
+    needsPlane: true,
+    title: 'THE MAIL RUN', late: 'the post went by road in the end',
+    start(m) {
+      // the ring checkpoint farthest from the field, so the run crosses the whole map
+      const cps = ringCheckpoints();
+      let best = cps[0], bd = -1;
+      for (const c of cps) {
+        const d = Math.hypot(c.x - PLANE_SPAWN.x, c.z - PLANE_SPAWN.z);
+        if (d > bd) { bd = d; best = c; }
+      }
+      m.data.out = bd;
+      m.timed = true; m.t = bd/24 + 70;                  // out and back, with room to land
+      setTarget(best.x, best.z, 45, 'fly the sack out to the far marker');
+    },
+    update(m, dt, sub) {
+      if (mode !== 'plane' && m.stage === 0) return;     // ejecting mid-run is your problem
+      if (m.stage === 0) {
+        if (atTarget(plane.position, m.target)) {
+          m.stage = 1; m.t += 45;
+          toast('SACK AWAY — get home and land it');
+          banner('DROPPED', 'now back to the airfield — and put it on the ground');
+          setTarget(PLANE_SPAWN.x, PLANE_SPAWN.z, 55, 'back to the field, then land');
+        }
+        return;
+      }
+      // home leg: has to be a landing, not a fly-past
+      const gy = surfaceY(plane.position.x, plane.position.z);
+      if (mode === 'plane' && atTarget(plane.position, m.target) &&
+          plane.position.y < gy + 2.5 && planeSpeed < 9)
+        winMission(300, 'mail flown and put down clean');
+    },
+    hud(m) {
+      const p = mode === 'plane' ? plane.position : player.position;
+      const tg = m.target; if (!tg) return null;
+      return (m.stage === 0 ? 'outbound' : '<b>homebound</b> · land it') + ' · ' +
+        Math.round(Math.hypot(tg.x - p.x, tg.z - p.z)) + 'm';
     },
   },
   getaway: {
