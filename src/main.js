@@ -5465,14 +5465,42 @@ let mode = 'car';
 // keeps rendering exactly where it stands, and there is no resume bookkeeping.
 let paused = false;
 const helpEl = document.getElementById('help');
+// Every job in the game, in the order you are likely to meet them, with the name you
+// see over the giver's head. Drives the achievement panel's checklist — and a startup
+// check below shouts if this list and MISSION_DEFS ever drift apart.
+const JOB_LIST = [
+  ['donut',   'DONUT RUN'],      ['taxi',    'FARE GAME'],
+  ['mug',     'COLD ONE'],       ['feather', 'FEATHER FRENZY'],
+  ['dogwalk', 'THE ROUND-UP'],   ['street',  'BACK ALLEY DASH'],
+  ['race',    'RING RUSH'],      ['derby',   'DEMOLITION DERBY'],
+  ['rampage', 'SCRAP RUN'],      ['getaway', 'THE GETAWAY'],
+  ['soak',    'LOCKDOWN'],       ['airmail', 'THE MAIL RUN'],
+  ['fairjob', 'SAFETY CHECK'],
+];
+function achievementPanel() {
+  const done = JOB_LIST.filter(([id]) => jobsDone.has(id)).length;
+  const rows = JOB_LIST.map(([id, name]) => {
+    const got = jobsDone.has(id);
+    return '<span class="ach ' + (got ? 'got' : '') + '">' +
+           (got ? '✔' : '·') + ' ' + name + '</span>';
+  }).join('');
+  const pct = n => Math.round(n*100);
+  return '<b>JOBS</b> ' + done + ' / ' + JOB_LIST.length +
+         ' <em>(' + pct(done/JOB_LIST.length) + '%)</em>' +
+         '<div class="achlist">' + rows + '</div>' +
+         '<b>TROPHIES</b> ' + trophyCount + ' / ' + trophies.length +
+         ' <em>(' + pct(trophies.length ? trophyCount/trophies.length : 0) + '%)</em>' +
+         ' &nbsp; <b>COINS</b> ' + coinCount +          // no total: coins are scatter, not a set
+         ' &nbsp; <b>CHAOS</b> ' + chaosScore.toLocaleString();
+}
 function togglePause() {
   paused = !paused;
   helpEl.classList.toggle('show', paused);
   if (paused) {
-    const tr = document.getElementById('trophies').textContent;
     helpEl.querySelector('.obj').innerHTML =
-      (missionHUD() || 'No job on — walk into a red <b>!</b> to take one') +
-      '<br>' + coinCount + ' coins · ' + chaosScore.toLocaleString() + ' chaos · ' + tr;
+      (missionHUD() || 'No job on — walk into a red <b>!</b> to take one');
+    const a = helpEl.querySelector('.ach-wrap');
+    if (a) a.innerHTML = achievementPanel();
   }
 }
 addEventListener('keydown', e => {
@@ -7204,6 +7232,18 @@ function tryDog() {
 // object exists — so the two are cross-checked at startup and a drift shows up in the
 // console rather than as a giver you can never reach.
 const CAR_JOB = { donut: 1, taxi: 1, derby: 1, race: 1, street: 1, getaway: 1, rampage: 1 };
+// JOB_LIST drives the achievement panel's checklist, so it has to stay in step with the
+// jobs that actually exist — a missing entry silently under-reports the total you are
+// working toward. Checked at startup once MISSION_DEFS is up (see the audit near the end).
+function auditJobList() {
+  const defs = Object.keys(MISSION_DEFS).sort();
+  const listed = JOB_LIST.map(j => j[0]).sort();
+  const missing = defs.filter(k => !listed.includes(k));
+  const extra = listed.filter(k => !defs.includes(k));
+  if (missing.length || extra.length)
+    console.warn('JOB_LIST drift — missing:', missing, 'stale:', extra);
+  else console.log(`achievements: ${defs.length} jobs listed, all matched`);
+}
 
 // =================================================================
 //  ? CRATES
@@ -9589,8 +9629,23 @@ const trophies = [];
     baked(new THREE.CylinderGeometry(0.07, 0.07, 0.22, 16), 0, 0.20, 0),   // stem
     baked(new THREE.SphereGeometry(0.23, 16, 12).scale(1, 0.85, 1), 0, 0.48, 0),
   ]);
-  const mesh = instanced(geo, toon(0xffd23b), Math.max(1, ROOMS.length), false);
-  for (const R of ROOMS) {
+  // Capped at 100. One in every one of the 266 interiors meant 223 of them were in
+  // houses, which turned a collection into a chore. The shops and landmarks all keep
+  // theirs — they are the interesting ones — and the remaining slots go to houses picked
+  // by striding the list, so the ones that do have a trophy are scattered across the
+  // town instead of sitting on one street. Homes are the rooms whose name is an address,
+  // i.e. begins with a house number.
+  const TROPHY_CAP = 100;
+  const homes = [], others = [];
+  for (const R of ROOMS) (/^\d/.test(R.name) ? homes : others).push(R);
+  const chosen = others.slice(0, TROPHY_CAP);
+  const slots = TROPHY_CAP - chosen.length;
+  if (slots > 0 && homes.length) {
+    const stride = homes.length / slots;
+    for (let k = 0; k < slots; k++) chosen.push(homes[Math.min(homes.length - 1, Math.floor(k*stride))]);
+  }
+  const mesh = instanced(geo, toon(0xffd23b), Math.max(1, chosen.length), false);
+  for (const R of chosen) {
     const I = R.inner;
     // tuck it away from the doorway, and off anything solid the fit-out registered
     const spots = [];
@@ -9802,8 +9857,10 @@ function finishMission(won) {
   if (m.def.cleanup) m.def.cleanup(m, won);
   m.giver.cool = won ? 8 : 2.5;                  // a failed job re-arms fast for the retry
 }
+const jobsDone = new Set();              // which jobs you have actually finished
 function winMission(base, flavor) {
   const mult = 1 + stars*0.5, total = Math.round(base * mult);
+  if (MI) jobsDone.add(MI.id);
   addCoins(total); coinSfx();
   banner('+' + total + ' COINS', (flavor || 'job done') + (stars ? ' · wanted bonus x' + mult.toFixed(1) : ''));
   finishMission(true);
@@ -10842,6 +10899,10 @@ for (const e of ENTERABLE) setDoorBlock(e);
   console.log(`interiors: ${ROOMS.length} rooms, ${ENTERABLE.length} doors · colliders ${colliders.length} ·`, JSON.stringify(bad));
   const walkHouses = ENTERABLE.filter(e => e.home);
   console.log(`walk-in homes: ${walkHouses.length} enterable across the town`);
+  console.log(`trophies: ${trophies.length} placed (cap 100) · ` +
+    `${trophies.filter(t => /^\d/.test(t.room)).length} in homes, ` +
+    `${trophies.filter(t => !/^\d/.test(t.room)).length} in shops and landmarks`);
+  auditJobList();
 }
 
 function updateDoors(dt) {
@@ -11181,11 +11242,12 @@ function updateHUD(dt) {
 
   if (toastT > 0) { toastT -= dt; if (toastT <= 0) toastEl.classList.remove('show'); }
 
-  const left = coins.filter(c => !c.got).length;
   objEl.innerHTML = missionHUD() || (stars
     ? `<b>WANTED</b> · lose them to bank your combo`
     : (comboT > 0 ? 'Keep it going · <b>x' + comboMult + '</b>'
-                  : `Cause chaos · <b>${coins.length-left}/${coins.length}</b> coins`));
+                  // No coin total anywhere: coins are scatter you happen upon, not a set
+                  // to complete, and a running "90/381" made them read like a checklist.
+                  : `Cause chaos · <b>${coinCount}</b> coins`));
 
   // radar
   const W = 154, R = W/2, view = 190, sc = R/view;

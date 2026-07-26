@@ -211,6 +211,16 @@
   body.touch #speedo { left:20px; right:auto; top:150px; bottom:auto; text-align:left; }
   body.touch #speedo .val { font-size:38px; }
   body.touch #health { left:22px; right:auto; top:196px; bottom:auto; width:120px; }
+
+  /* the achievement panel inside the pause card */
+  #help .ach-wrap { margin-top:10px; padding-top:10px; border-top:2px solid rgba(255,255,255,.18);
+    font-size:14px; font-weight:800; line-height:1.7; }
+  #help .ach-wrap b { color:var(--sun); letter-spacing:1px; }
+  #help .ach-wrap em { font-style:normal; opacity:.6; font-weight:700; }
+  #help .achlist { display:grid; grid-template-columns:repeat(auto-fill, minmax(150px, 1fr));
+    gap:1px 14px; margin:6px 0 10px; font-size:12.5px; font-weight:700; }
+  #help .ach { opacity:.42; white-space:nowrap; }
+  #help .ach.got { opacity:1; color:#5ed85e; }
 </style>
 
 <div id="app"></div>
@@ -279,6 +289,7 @@
       </div>
     </div>
     <div class="obj"></div>
+    <div class="ach-wrap"></div>
     <div class="tips">Jobs wait under a red ! · crates hide coins (and worse) · the purple dot is the fair ·
       ramps pay for air time · deliver jobs while wanted for the bonus</div>
     <small>P RESUMES</small>
