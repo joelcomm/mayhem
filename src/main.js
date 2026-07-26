@@ -5735,12 +5735,61 @@ const toastEl = document.getElementById('toast');
 let toastT = 0;
 function toast(msg) { toastEl.textContent = msg; toastEl.classList.add('show'); toastT = 1.4; }
 
-function damageCar(n) { carHealth = Math.max(0, carHealth - n*armorMul); if (carHealth <= 0) explode(); }
+// ---- the burning wreck ----
+// A car used to go from driveable to gone the instant health hit zero, which made a
+// job like SCRAP RUN — where ramming things IS the job — unwinnable: the sixth big hit
+// killed the car and failed the mission with no warning. Now the last of the health
+// puts it on fire instead: the engine dies, you cannot drive it, and you have a few
+// seconds to bail out and run before it goes up. Stay in it (or stand next to it) and
+// the blast gets you.
+let carFire = 0;                         // seconds of fuse left, 0 = not burning
+const FIRE_AT = 22, FUSE = 6.5;
+function damageCar(n) {
+  carHealth = Math.max(0, carHealth - n*armorMul);
+  if (carHealth <= FIRE_AT && carFire <= 0) igniteCar();
+}
+function igniteCar() {
+  carFire = FUSE;
+  toast('ENGINE ON FIRE — GET OUT!');
+  banner('SHE\'S GOING UP', 'bail out and run — ' + Math.round(FUSE) + ' seconds');
+  crashSfx(20);
+}
+function blowUpCar() {
+  const cx = car.position.x, cz = car.position.z;
+  carFire = 0;
+  for (let k = 0; k < 3; k++) burst(cx, 1.0 + k*0.9, cz, k ? 0xff8a2b : 0xfff0b8, 22);
+  burst(cx, 2.2, cz, 0x40424a, 18);
+  shake = 2.6;
+  chaosHit(120);
+  // caught in it: thrown, hurt, and on fire is not a thing you walk away from calmly
+  const sub = mode === 'car' ? car.position : player.position;
+  const d = Math.hypot(sub.x - cx, sub.z - cz);
+  if (mode === 'car' || d < 9) {
+    if (mode === 'car') toggleVehicle();                 // blown clear of the seat
+    let ax = player.position.x - cx, az = player.position.z - cz;
+    if (!ax && !az) { ax = 1; az = 0; }                  // dead centre: throw them somewhere
+    applyRagdoll(player, playerRag, ax, az, 26);         // flung away from the blast
+    toast(d < 5 ? 'CAUGHT IN THE BLAST!' : 'SINGED!');
+  } else toast('THERE SHE GOES');
+  explode();                                             // respawns the car, fails the job
+}
+function updateCarFire(dt) {
+  if (carFire <= 0) return;
+  carFire -= dt;
+  // flames and black smoke while the fuse burns, faster as it runs out
+  smokeT -= dt;
+  if (smokeT <= 0) {
+    smokeT = carFire < 2.5 ? 0.03 : 0.07;
+    emit(tmpV.set(car.position.x + rnd(-0.7, 0.7), 1.1 + Math.random()*0.9, car.position.z + rnd(-1.2, 1.2)),
+         Math.random() < 0.6 ? 0xff8a2b : 0x2b2f38, 1.1);
+  }
+  if (carFire <= 0) blowUpCar();
+}
 function explode() {
   missionEvent('carWrecked');
   burst(car.position.x, 1.2, car.position.z, 0xff8a2b, 16);
   burst(car.position.x, 1.6, car.position.z, 0x40424a, 10);
-  shake = 2.0; carHealth = 100; toast('OW! MY CAR!');
+  shake = 2.0; carHealth = 100; carFire = 0; toast('OW! MY CAR!');
   clearHeat();
   car.position.set(SPAWN.x, surfaceY(SPAWN.x, SPAWN.z), SPAWN.z);
   heading = SPAWN.heading; speed = 0; carVY = 0; drowning = 0; airT = 0; airPeak = 0;
@@ -5759,7 +5808,8 @@ function resetAll() {
 }
 function updateCar(dt) {
   const driving = mode === 'car' && drowning <= 0;
-  const thr = driving && (keys.KeyW||keys.ArrowUp) ? 1 : 0;
+  // a burning car has no engine — you coast to a stop and get out
+  const thr = (carFire <= 0) && driving && (keys.KeyW||keys.ArrowUp) ? 1 : 0;
   const brk = driving && (keys.KeyS||keys.ArrowDown) ? 1 : 0;
   const left = driving && (keys.KeyA||keys.ArrowLeft) ? 1 : 0;
   const right = driving && (keys.KeyD||keys.ArrowRight) ? 1 : 0;
@@ -5830,7 +5880,7 @@ function updateCar(dt) {
       // car shrugs most of it off so a bout isn't lost to attrition
       if (other.derby) derbyHit(other, impact);
       else if (other.rival) rivalHit(other, impact);
-      damageCar(impact*(other.derby ? 0.16 : 0.45));
+      damageCar(impact*(other.derby ? 0.16 : 0.24));
       shake = Math.min(1.6, shake + 0.4 + impact*0.02);
       burst(other.x, 1.2, other.z, 0xffe27a, 6);
     } else { speed *= 0.62; }
@@ -5941,8 +5991,13 @@ function updatePlayer(dt) {
   const res = collideCircle(player.position.x + fx*drive*spd*dt, player.position.z + fz*drive*spd*dt, 0.75, colliders, player.position.y);
   const rt = collideTraffic(res.x, res.z, 0.75);
   const rc = TIRECOLS.length ? collideTires(rt.x, rt.z, 0.75, player.position.y) : rt;
-  player.position.x = THREE.MathUtils.clamp(rc.x, -TOWN-40, TOWN+40);
-  player.position.z = THREE.MathUtils.clamp(rc.z, -TOWN-40, TOWN+40);
+  // Matched to the car's bound. On foot this used to stop at TOWN+40, which was fine
+  // when nothing stood outside the blocks — but the set pieces now live out on the green
+  // belt, and that limit cut straight through them: the stadium's far side sits at
+  // TOWN+46 and the runway reaches TOWN+230, so you walked into an invisible wall
+  // halfway round the bowl and could never walk the length of the airfield.
+  player.position.x = THREE.MathUtils.clamp(rc.x, -TOWN-900, TOWN+900);
+  player.position.z = THREE.MathUtils.clamp(rc.z, -TOWN-900, TOWN+900);
   const pgy = surfaceY(player.position.x, player.position.z, player.position.y);
   playerVel.y -= GRAV*dt;
   if (chuteOpen && !playerOnGround && playerVel.y < -CHUTE_FALL) playerVel.y = -CHUTE_FALL;   // canopy drag
@@ -7133,8 +7188,23 @@ function updateDogs(dt) {
   for (const d of dogs) {
     if (!d.placed) continue;
     const br = d.br;
+    d.riding = false;
     if (d.owned) {
       // McGraw's own three: they sit where he put them. No roam, no bolting, no lead.
+    } else if (d.following && mode === 'car') {
+      // Your pack piles into the back rather than being left on the kerb — or worse,
+      // chasing the car down the street. They ride the car's frame, two abreast, and
+      // are simply put back on their feet behind you when you get out.
+      follow++;
+      const cy = car.rotation.y;
+      const rx = Math.cos(cy), rz = -Math.sin(cy);       // the car's right
+      const bx = -Math.sin(cy), bz = -Math.cos(cy);      // the car's back
+      const row = Math.floor(d.order/2), col = (d.order % 2) ? 0.4 : -0.4;
+      d.x = car.position.x + bx*(0.5 + row*0.62) + rx*col;
+      d.z = car.position.z + bz*(0.5 + row*0.62) + rz*col;
+      d.yaw = cy;
+      d.riding = true;
+      d.rideY = car.position.y + 0.62;                   // sat up on the back seat
     } else if (d.following) {
       follow++;
       // Conga line: each dog aims at a slot a little further back along your trail.
@@ -7191,9 +7261,9 @@ function updateDogs(dt) {
     // ---- draw ----
     // Two transforms: the body (lifted onto the legs) and the legs themselves. Every
     // body part shares the body matrix, so a dog costs one matrix write per part mesh.
-    const gy = surfaceY(d.x, d.z);
+    const gy = d.riding ? d.rideY : surfaceY(d.x, d.z);   // sat in the car, or on the ground
     const legH = br.legs * br.s;
-    const bounce = d.dash > 0 || d.following ? Math.abs(Math.sin(d.phase))*0.09*br.s : 0;
+    const bounce = !d.riding && (d.dash > 0 || d.following) ? Math.abs(Math.sin(d.phase))*0.09*br.s : 0;
     const zs = br.s * (br.long || 1);                  // dachshunds stretch along the nose axis
     dummy.position.set(d.x, gy + legH + bounce, d.z);
     dummy.rotation.set(0, d.yaw, 0);
@@ -11614,6 +11684,7 @@ function animate() {
   if (riverWater) riverWater.uniforms.uTime.value += dt;
   updateHeadlights();
   updateCar(dt);
+  updateCarFire(dt);
   updatePlane(dt);
   updatePlayer(dt);
   updateRoomState(dt);
