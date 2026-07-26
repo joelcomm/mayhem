@@ -51,7 +51,11 @@
 
   /* The HUD is pointer-events:none so clicks fall through to the canvas (look, kick).
      This is the one thing you can actually press, so it opts back in. */
+  /* `top` is set at runtime from the controls legend's real height (placeMuteBtn);
+     the value here is only the pre-measure fallback. z-index so a growing legend can
+     never bury it again. */
   #mute { position:absolute; right:18px; top:172px; width:46px; height:46px; padding:0;
+    z-index:3;
     pointer-events:auto; cursor:pointer; font-size:21px; line-height:1; color:#fff;
     font-family:inherit; -webkit-tap-highlight-color:transparent;
     transition:background .15s, transform .1s; }

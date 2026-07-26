@@ -6475,6 +6475,17 @@ let sirenCtx = null, sirenOut = null;
 let muted = false;
 try { muted = localStorage.getItem('mm_mute') === '1'; } catch (e) {}
 const muteBtn = document.getElementById('mute');
+// Sit the speaker button just under the controls legend, measured rather than guessed.
+// Its old fixed top was hand-tuned to clear a seven-line legend exactly, so the moment
+// a line was added ("X drop job") the panel grew down over the button and swallowed it.
+// Re-measured on load and on resize; the touch layout puts it elsewhere and is left be.
+function placeMuteBtn() {
+  if (!muteBtn || document.body.classList.contains('touch')) return;
+  const c = document.getElementById('controls');
+  if (!c) return;
+  muteBtn.style.top = Math.round(c.getBoundingClientRect().bottom + 12) + 'px';
+}
+addEventListener('resize', placeMuteBtn);
 function setMuted(v) {
   muted = v;
   try { localStorage.setItem('mm_mute', v ? '1' : '0'); } catch (e) {}
@@ -6494,6 +6505,7 @@ if (muteBtn) muteBtn.addEventListener('click', e => {
   muteBtn.blur();                    // else Space/Enter re-triggers it while driving
 });
 setMuted(muted);                     // paint the remembered state onto the button
+placeMuteBtn();                      // and sit it clear of however tall the legend is
 // Everything that makes a noise goes through one master gain instead of straight to
 // the destination, so mute is a single number rather than a flag every sound site has
 // to remember to check — and killing the gain leaves the scheduled notes and the
