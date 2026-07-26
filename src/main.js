@@ -4397,6 +4397,15 @@ function rejoin(t) {
   t.rox = t.x - lx; t.roz = t.z - lz; t.royaw = dy;
   t.rpitch = t.pitch; t.rroll = t.roll; t.ry = t.y;
   t.rec = 1;
+  // Ease back at a plausible DRIVING speed, not in a fixed 0.6 s however far it was
+  // thrown. The old fixed rate was tuned for a ten-metre shunt; a full-speed ram launches
+  // a car eighty metres, and closing eighty metres in 0.6 s is 130 m/s — the car simply
+  // vanished from where it landed and reappeared in its lane. Now the duration scales
+  // with the distance, so a nudge tidies up quickly and a big launch visibly drives back.
+  const off = Math.hypot(t.rox, t.roz);
+  t.recDur = THREE.MathUtils.clamp(off / 9, 0.5, 6);
+  // and keep the relocator's hands off it while you are still watching it (below)
+  t.noMove = Math.max(t.noMove || 0, t.recDur + 10);
 }
 // Keep at least one civilian car in view. 165 cars spread over the whole graph leave
 // some junctions empty, which reads as a ghost town — so if none is within sight of the
@@ -4443,9 +4452,14 @@ function ensureCarInSight(dt) {
   if (!spot) return;
   // Move the farthest civilian car onto that spot and hand it back to the graph, so it
   // drives in naturally from there rather than blinking into existence.
+  // Pick the farthest car to move — but never one the player has just had their hands
+  // on. A car you rammed at speed lands well off the road and is briefly the farthest
+  // thing out there, so it was the prime candidate to be picked up and teleported
+  // somewhere else — while you were still looking at the wreck you just made.
   let far = null, fd = -1;
   for (const t of traffic) {
     if (t.cop || t.derby || t.racer || t.rival || t.knock > 0) continue;
+    if (t.rec > 0 || (t.noMove || 0) > 0) continue;
     const dx = t.x - sub.x, dz = t.z - sub.z, d = dx*dx + dz*dz;
     if (d > fd) { fd = d; far = t; }
   }
@@ -4460,6 +4474,7 @@ function updateTraffic(dt) {
   if (tauntT > 0) tauntT -= dt;
   for (const t of traffic) {
     if (t.hitCooldown > 0) t.hitCooldown -= dt;
+    if (t.noMove > 0) t.noMove -= dt;      // grace period against being relocated
     if (t.knock > 0) {
       t.knock -= dt;
       // knocked cars collide like everything else — they used to sail straight through
@@ -4576,7 +4591,7 @@ function updateTraffic(dt) {
     t.yaw = Math.atan2(dir.dx, dir.dz);
     t.fx = dir.dx; t.fz = dir.dz;
     if (t.rec > 0) {                       // ease out of wherever the shove left it
-      t.rec = Math.max(0, t.rec - dt*1.7);
+      t.rec = Math.max(0, t.rec - dt/(t.recDur || 0.6));
       const k = t.rec*t.rec*(3 - 2*t.rec);  // smoothstep, so it arrives without a kink
       t.x += t.rox*k; t.z += t.roz*k; t.yaw += t.royaw*k;
       t.y = t.ry*k; t.pitch = t.rpitch*k; t.roll = t.rroll*k;
