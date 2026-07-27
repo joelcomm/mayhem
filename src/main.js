@@ -5997,12 +5997,27 @@ function updatePlayer(dt) {
     playerShadow.position.set(player.position.x, 0.09, player.position.z); return;
   }
   if (playerIFrames > 0) playerIFrames -= dt;
+  // Camera-relative movement, the way every third-person game does it: W is "away from
+  // the camera", A and D strafe rather than spin you on the spot, and the mouse does the
+  // turning. The old scheme steered the body with A/D and only ever walked along your
+  // facing, which is tank controls — you had to turn, then press W, to go anywhere.
   const fwd = (keys.KeyW||keys.ArrowUp)?1:0, back = (keys.KeyS||keys.ArrowDown)?1:0;
-  const tl = (keys.KeyA||keys.ArrowLeft)?1:0, tr = (keys.KeyD||keys.ArrowRight)?1:0;
+  const left = (keys.KeyA||keys.ArrowLeft)?1:0, right = (keys.KeyD||keys.ArrowRight)?1:0;
   const sprint = keys.ShiftLeft || keys.ShiftRight;
-  player.rotation.y += (tl - tr) * 2.9 * dt;
-  const drive = fwd - back, spd = sprint ? RUN : WALK;
-  const fx = Math.sin(player.rotation.y), fz = Math.cos(player.rotation.y);
+  const spd = sprint ? RUN : WALK;
+  // camera basis, flattened onto the ground
+  const cfx = Math.sin(camYaw), cfz = Math.cos(camYaw);     // forward, away from the camera
+  const crx = Math.cos(camYaw), crz = -Math.sin(camYaw);    // camera-right
+  let mx = cfx*(fwd - back) + crx*(right - left);
+  let mz = cfz*(fwd - back) + crz*(right - left);
+  const mlen = Math.hypot(mx, mz);
+  const drive = mlen > 0.001 ? 1 : 0;                       // for the walk animation below
+  if (mlen > 0.001) {
+    mx /= mlen; mz /= mlen;                                 // no diagonal speed bonus
+    // turn to face where you are actually going, rather than snapping
+    player.rotation.y = lerpAngle(player.rotation.y, Math.atan2(mx, mz), 1 - Math.exp(-dt*14));
+  }
+  const fx = mx, fz = mz;
   const res = collideCircle(player.position.x + fx*drive*spd*dt, player.position.z + fz*drive*spd*dt, 0.75, colliders, player.position.y);
   const rt = collideTraffic(res.x, res.z, 0.75);
   const rc = TIRECOLS.length ? collideTires(rt.x, rt.z, 0.75, player.position.y) : rt;
@@ -6036,7 +6051,7 @@ function updatePlayer(dt) {
     toast('SPLASH!'); shake = 1.2; resetAll();
   }
   playerVsPeds(dt);
-  const moving = drive !== 0 || tl || tr;
+  const moving = drive !== 0;      // A/D are strafes now, so any input shows up in drive
   const u = player.userData; u.phase += dt*(sprint?13:9)*(moving?1:0);
   const sw = Math.sin(u.phase)*(moving?0.62:0);
   u.legL.rotation.x = sw; u.legR.rotation.x = -sw; u.armL.rotation.x = -sw; u.armR.rotation.x = sw;
@@ -11138,6 +11153,45 @@ const mapMarker = (() => {
   return g;
 })();
 
+// Keep the chase camera out of the walls. It sits a fixed distance behind you, so backing
+// up against a building put it straight through the brickwork and you ended up looking at
+// the inside of a shop. March from your head out to where the camera wants to sit, and
+// stop it just short of the first thing in the way — the standard third-person fix.
+// Colliders are 2-D boxes, so this is a cheap walk; the list is narrowed to the ones whose
+// box actually straddles the ray first, which keeps it to a single pass over the set.
+const camNear = [];
+function sweepCamera(sx, sy, sz, want) {
+  const dx = want.x - sx, dy = want.y - sy, dz = want.z - sz;
+  const len = Math.hypot(dx, dz);
+  if (len < 0.25) return;
+  const pad = 0.42;
+  camNear.length = 0;
+  const loX = Math.min(sx, want.x) - pad, hiX = Math.max(sx, want.x) + pad;
+  const loZ = Math.min(sz, want.z) - pad, hiZ = Math.max(sz, want.z) + pad;
+  for (const c of colliders) {
+    if (c.jump !== undefined && sy >= c.jump) continue;   // low rails you can see over
+    if (c.minX > hiX || c.maxX < loX || c.minZ > hiZ || c.maxZ < loZ) continue;
+    camNear.push(c);
+  }
+  if (!camNear.length) return;
+  // Stop at the last sample known to be clear. No minimum distance: a floor sounds like
+  // it protects against the camera ending up in your head, but when the wall is closer
+  // than the floor it simply shoves the camera back through the wall — which is the very
+  // thing being fixed. Jammed right against brick it goes near first-person, which is
+  // what you want there anyway.
+  const N = 16;
+  for (let i = 1; i <= N; i++) {
+    const t = i/N, x = sx + dx*t, z = sz + dz*t;
+    let hit = false;
+    for (const c of camNear)
+      if (x > c.minX - pad && x < c.maxX + pad && z > c.minZ - pad && z < c.maxZ + pad) { hit = true; break; }
+    if (hit) {
+      const back = ((i - 1)/N) * 0.94;
+      want.set(sx + dx*back, sy + dy*back, sz + dz*back);
+      return;
+    }
+  }
+}
 const camTarget = new THREE.Vector3(), desired = new THREE.Vector3();
 function updateCamera(dt, now) {
   mapMarker.visible = mapView;
@@ -11202,6 +11256,10 @@ function updateCamera(dt, now) {
   const cp = Math.cos(camPitch), sp = Math.sin(camPitch);
   const dx = Math.sin(camYaw)*cp, dy = sp, dz = Math.cos(camYaw)*cp;
   desired.set(subject.x - dx*dist, subject.y + eye - dy*dist, subject.z - dz*dist);
+  // Only outdoors: indoors the room clamp below already owns the camera, and every wall
+  // of the room you are standing in is a collider, so sweeping there would jam the view
+  // into the back of your head.
+  if (!inPlane && rt < 0.5) sweepCamera(subject.x, subject.y + eye, subject.z, desired);
   if (!inPlane) clampCameraToRoom(desired);
   if (desired.y < 1.0) desired.y = 1.0;
   camera.position.lerp(desired, camSettled ? Math.min(1, dt*(9 + 30*rc)) : 1);
