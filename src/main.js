@@ -6012,11 +6012,12 @@ function updatePlayer(dt) {
   let mz = cfz*(fwd - back) + crz*(right - left);
   const mlen = Math.hypot(mx, mz);
   const drive = mlen > 0.001 ? 1 : 0;                       // for the walk animation below
-  if (mlen > 0.001) {
-    mx /= mlen; mz /= mlen;                                 // no diagonal speed bonus
-    // turn to face where you are actually going, rather than snapping
-    player.rotation.y = lerpAngle(player.rotation.y, Math.atan2(mx, mz), 1 - Math.exp(-dt*14));
-  }
+  if (mlen > 0.001) { mx /= mlen; mz /= mlen; }             // no diagonal speed bonus
+  // THE MOUSE TURNS YOU. The body always faces where the camera is pointed, so A and D
+  // genuinely strafe — you slide sideways still facing forward — and S walks you
+  // backwards rather than spinning you round. Facing the direction of travel instead
+  // (which is what this did first) is Zelda-style, and makes D read as a turn.
+  player.rotation.y = lerpAngle(player.rotation.y, camYaw, 1 - Math.exp(-dt*18));
   const fx = mx, fz = mz;
   const res = collideCircle(player.position.x + fx*drive*spd*dt, player.position.z + fz*drive*spd*dt, 0.75, colliders, player.position.y);
   const rt = collideTraffic(res.x, res.z, 0.75);
