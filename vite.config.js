@@ -12,7 +12,14 @@ import { viteSingleFile } from 'vite-plugin-singlefile';
 //
 // Output goes to docs/ rather than dist/ so GitHub Pages can serve it straight from
 // the branch with no extra workflow.
+// A build stamp baked in at compile time. Browsers hold on to this page harder than you
+// expect, and "is this the new build?" was otherwise unanswerable without diffing the
+// file — you cannot tell a stale tab from a fresh one by looking at it. The stamp is
+// printed to the console on load and shown in the pause panel.
+const BUILD_STAMP = new Date().toISOString().slice(0, 16).replace('T', ' ') + ' UTC';
+
 export default defineConfig({
+  define: { __BUILD__: JSON.stringify(BUILD_STAMP) },
   base: './',                       // relative asset paths: works at / and at /mayhem/
   build: {
     outDir: 'docs',

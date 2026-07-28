@@ -5506,7 +5506,8 @@ function achievementPanel() {
          '<b>TROPHIES</b> ' + trophyCount + ' / ' + trophies.length +
          ' <em>(' + pct(trophies.length ? trophyCount/trophies.length : 0) + '%)</em>' +
          ' &nbsp; <b>COINS</b> ' + coinCount +          // no total: coins are scatter, not a set
-         ' &nbsp; <b>CHAOS</b> ' + chaosScore.toLocaleString();
+         ' &nbsp; <b>CHAOS</b> ' + chaosScore.toLocaleString() +
+         '<div class="bstamp">build ' + __BUILD__ + '</div>';
 }
 function togglePause() {
   paused = !paused;
@@ -11012,6 +11013,7 @@ for (const e of ENTERABLE) setDoorBlock(e);
   console.log(`interiors: ${ROOMS.length} rooms, ${ENTERABLE.length} doors · colliders ${colliders.length} ·`, JSON.stringify(bad));
   const walkHouses = ENTERABLE.filter(e => e.home);
   console.log(`walk-in homes: ${walkHouses.length} enterable across the town`);
+  console.log(`%cPublic Nuisance — build ${__BUILD__}`, 'font-weight:bold');
   console.log(`trophies: ${trophies.length} placed (cap 100) · ` +
     `${trophies.filter(t => /^\d/.test(t.room)).length} in homes, ` +
     `${trophies.filter(t => !/^\d/.test(t.room)).length} in shops and landmarks`);
