@@ -6008,7 +6008,11 @@ function updatePlayer(dt) {
   const spd = sprint ? RUN : WALK;
   // camera basis, flattened onto the ground
   const cfx = Math.sin(camYaw), cfz = Math.cos(camYaw);     // forward, away from the camera
-  const crx = Math.cos(camYaw), crz = -Math.sin(camYaw);    // camera-right
+  // Screen-right is forward CROSS up, not up cross forward — the two differ by a sign and
+  // I had the wrong one, which swapped A and D. Sanity check: at camYaw 0 you face +Z with
+  // +Y up, and since X cross Y = Z, looking ALONG +Z puts +X on your LEFT. So right is -X
+  // there, which is what this returns.
+  const crx = -Math.cos(camYaw), crz = Math.sin(camYaw);    // camera-right
   let mx = cfx*(fwd - back) + crx*(right - left);
   let mz = cfz*(fwd - back) + crz*(right - left);
   const mlen = Math.hypot(mx, mz);
