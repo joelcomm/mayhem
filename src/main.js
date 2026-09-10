@@ -10,6 +10,10 @@ import { OutputPass } from 'three/examples/jsm/postprocessing/OutputPass.js';
 import { Pass, FullScreenQuad } from 'three/examples/jsm/postprocessing/Pass.js';
 import * as BGU from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import GUI from 'lil-gui';
+import {kit,actor,material,skins,blink} from './upgrade/characters.js';
+import {RoundedBoxGeometry} from 'three/examples/jsm/geometries/RoundedBoxGeometry.js';
+import {RoomEnvironment} from 'three/examples/jsm/environments/RoomEnvironment.js';
+import { HANDLING, traction, boostStep, routeThrough } from './upgrade/driving.js';
 
 // =================================================================
 //  RENDERER / SCENE
@@ -24,7 +28,10 @@ renderer.outputColorSpace = THREE.SRGBColorSpace;
 app.appendChild(renderer.domElement);
 
 const scene = new THREE.Scene();
-const townFog = new THREE.Fog(0xbfe6f7, 520, 1900);
+const pmrem=new THREE.PMREMGenerator(renderer),roomEnv=new RoomEnvironment();
+scene.environment=pmrem.fromScene(roomEnv,.04).texture;roomEnv.dispose();pmrem.dispose();
+renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.04;
+const townFog = new THREE.Fog(0xd8dce0, 400, 1700);
 scene.fog = townFog;
 
 const camera = new THREE.PerspectiveCamera(60, innerWidth/innerHeight, 0.4, 4000);
@@ -104,10 +111,10 @@ function toonRamp(steps) {
 const RAMP = toonRamp(3);
 const matCache = new Map();
 function toon(color) {                       // shared per colour, so merging stays cheap
-  if (!matCache.has(color)) matCache.set(color, new THREE.MeshToonMaterial({ color, gradientMap: RAMP }));
+  if (!matCache.has(color)) matCache.set(color, new THREE.MeshStandardMaterial({ color, }));
   return matCache.get(color);
 }
-function toonMapped(map) { return new THREE.MeshToonMaterial({ map, gradientMap: RAMP }); }
+function toonMapped(map) { return new THREE.MeshStandardMaterial({ map,roughness:.95,envMapIntensity:.25 }); }
 // A thin bright edge where the surface curls away from the camera — the classic
 // animated-film rim. Injected into the toon shader rather than a second pass: one
 // smoothstep on the view angle, tinted mostly by the surface's own (instance)
@@ -146,8 +153,8 @@ function tagNoInk(root) {
 {
   const c = document.createElement('canvas'); c.width = 8; c.height = 256;
   const g = c.getContext('2d'), grd = g.createLinearGradient(0,0,0,256);
-  grd.addColorStop(0.00, '#2a86d8'); grd.addColorStop(0.45, '#63b8ec');
-  grd.addColorStop(0.78, '#a9dcf6'); grd.addColorStop(1.00, '#dff2fc');
+  grd.addColorStop(0.00, '#356ca2'); grd.addColorStop(0.45, '#89bdd1');
+  grd.addColorStop(0.78, '#f1d9b7'); grd.addColorStop(1.00, '#ffe9c6');
   g.fillStyle = grd; g.fillRect(0,0,8,256);
   const t = new THREE.CanvasTexture(c); t.colorSpace = THREE.SRGBColorSpace;
   const dome = new THREE.Mesh(new THREE.SphereGeometry(3400, 24, 12),
@@ -155,11 +162,11 @@ function tagNoInk(root) {
   dome.renderOrder = -10; scene.add(dome);
   var skyDome = dome;                      // tinted through the day by updateSky()
 }
-const hemi = new THREE.HemisphereLight(0xcdeaff, 0x6f8a52, 2.1);
+const hemi = new THREE.HemisphereLight(0xc5deff, 0x80644f, 1.75);
 scene.add(hemi);
-const sunDir = new THREE.Vector3(0.42, 0.78, 0.32).normalize();
+const sunDir = new THREE.Vector3(-0.65, 0.57, 0.42).normalize();
 let riverWater = null;                        // the river's ShaderMaterial — uTime fed per frame
-const sun = new THREE.DirectionalLight(0xfff6e2, 2.5);
+const sun = new THREE.DirectionalLight(0xffd5a0, 2.8);
 sun.castShadow = true;
 sun.shadow.mapSize.set(4096, 4096);
 const SH = 120;
@@ -218,7 +225,7 @@ function updateSky(dt) {
 
 // fat storybook clouds — clusters of flattened spheres
 {
-  const cloudMat = new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP, fog: false });
+  const cloudMat = new THREE.MeshStandardMaterial({ color: 0xffffff, fog: false });
   const lobes = [];
   for (let i = 0; i < 7; i++)
     lobes.push(baked(new THREE.SphereGeometry(rnd(9,17), 7, 5), rnd(-26,26), rnd(-3,4), rnd(-9,9)));
@@ -503,7 +510,7 @@ function tex(c, rep, aniso) {
 
 // grass everywhere, then paved surfaces laid on top
 {
-  const { c, g } = noiseCanvas(128, '#77c157', 16);
+  const { c, g } = noiseCanvas(128, '#6d8852', 16);
   for (let i = 0; i < 240; i++) {                       // tufts
     g.fillStyle = prng()<0.5 ? 'rgba(112,186,80,.55)' : 'rgba(134,206,98,.55)';
     g.fillRect(prng()*128, prng()*128, 3, 6);
@@ -695,7 +702,7 @@ for (let i = 0; i < GN; i++) for (let j = 0; j < GN; j++) {
   }
 }
 {
-  const { c: rc, g: rg } = noiseCanvas(256, '#5b5570', 20);
+  const { c: rc, g: rg } = noiseCanvas(256, '#4c5158', 20);
   rg.strokeStyle = 'rgba(40,36,54,.35)'; rg.lineWidth = 3;
   for (let i = 0; i < 4; i++) { rg.beginPath(); const y = prng()*256; rg.moveTo(0,y); rg.lineTo(256, y+rnd(-18,18)); rg.stroke(); }
   surface(roadPos, roadUV, toonMapped(tex(rc, null, 16)), -2);   // road sits above the grass
@@ -925,9 +932,9 @@ function surfMat(color, kind) {
     // looking at a blue rectangle. It also keeps the ink pass off the glass, so the
     // outlines you see through a window are the shelves' own.
     surfCache.set(k, S.see
-      ? new THREE.MeshToonMaterial({ color, gradientMap: RAMP, transparent: true,
+      ? new THREE.MeshStandardMaterial({ color, transparent: true,
                                      opacity: 0.3, depthWrite: false })
-      : new THREE.MeshToonMaterial({ color, gradientMap: RAMP, map: S.tex }));
+      : new THREE.MeshStandardMaterial({ color, map: S.tex,bumpMap:S.tex,bumpScale:.035,roughness:.9,envMapIntensity:.25 }));
   }
   return surfCache.get(k);
 }
@@ -2898,7 +2905,7 @@ const OPENING_DOOR = (() => {
 // lawns, driveways and parking aprons
 {
   const { c } = noiseCanvas(128, '#7fc95d', 14);
-  surface(lawnPos, null, toon(0x74c05a));
+  surface(lawnPos, null, toon(0x78965c));
   const { c: dc } = noiseCanvas(128, '#b9b2a4', 14);
   surface(drivePos, drivewayUV, toonMapped(tex(dc, null, 8)), -2);
   const { c: lc, g: lg } = noiseCanvas(256, '#6d6880', 16);
@@ -3330,7 +3337,7 @@ const TUNNEL = { x: 0, z: 0, ux: 1, uz: 0, len: 120 };
       mid.x - TUNNEL.ux*sd*34 + lat.x*sd*42, -2, mid.z - TUNNEL.uz*sd*34 + lat.z*sd*42));
   }
   const hm = new THREE.Mesh(merge(hill),
-    new THREE.MeshToonMaterial({ color: 0x5f9a4a, gradientMap: RAMP, side: THREE.DoubleSide }));
+    new THREE.MeshStandardMaterial({ color: 0x5f9a4a, side: THREE.DoubleSide }));
   hm.castShadow = true; hm.receiveShadow = true; scene.add(hm);
   TUNNEL.len = hiS - loS;
   // walk the road polyline to a station (mid=0, positive toward nxt), because the
@@ -3348,7 +3355,7 @@ const TUNNEL = { x: 0, z: 0, ux: 1, uz: 0, len: 120 };
   // the vault: two open-ended half-cylinder shells, one per road segment, overlapping
   // under the summit so the curving carriageway never leaves the tube. BackSide, so
   // the walls are what you see from inside — and daylight shows at the far mouth.
-  const vaultMat = new THREE.MeshToonMaterial({ color: 0x8b8378, gradientMap: RAMP, side: THREE.DoubleSide });
+  const vaultMat = new THREE.MeshStandardMaterial({ color: 0x8b8378, side: THREE.DoubleSide });
   const dirA = { x: (prev.x-mid.x)/Lp, z: (prev.z-mid.z)/Lp };
   const lenA = 6 - loS, cA = (-loS + 2)/2 - 2;           // covers stations loS-2 .. 4
   const lenB = hiS + 6, cB = (hiS - 2)/2;                // covers stations -4 .. hiS+2
@@ -3535,7 +3542,7 @@ for (let i = 0; i < 1600; i++) {
     baked(new THREE.SphereGeometry(1.5, 12, 9), 0.35, 6.5, -1.15),
     baked(new THREE.SphereGeometry(1.35, 12, 9), -0.9, 5.6, 1.4),
   ]);
-  const LEAFC = [0x3f8f3a, 0x4aa044, 0x357f33, 0x56aa4a];
+  const LEAFC = [0x58794a, 0x819450, 0x456949, 0xa3a163];
   // nothing scattered may sit on a carriageway, whatever placed it
   {
     // no trees on or in the tunnel mountain: it has no colliders, so the woodland
@@ -3553,7 +3560,7 @@ for (let i = 0; i < 1600; i++) {
     treeSpots.length = 0; treeSpots.push(...keep);
   }
   const tr = instanced(trunk, toon(0x7a5230), treeSpots.length);
-  const lv = instanced(leaf, new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP }), treeSpots.length);
+  const lv = instanced(leaf, new THREE.MeshStandardMaterial({ color: 0xffffff, }), treeSpots.length);
   const col = new THREE.Color();
   treeSpots.forEach((t, i) => {
     dummy.position.set(t.x, groundH(t.x, t.z), t.z); dummy.rotation.set(0, prng()*6.28, 0);
@@ -4178,13 +4185,13 @@ function carGeo(type) {
   const s = CAR_TYPES[type];
   const paint = [], dark = [], chrome = [], glass = [], lamp = [];
   const bodyY = s.clr + s.bodyH/2;
-  paint.push(baked(BOX(s.W, s.bodyH, s.L), 0, bodyY, 0));
+  paint.push(baked(new RoundedBoxGeometry(s.W,s.bodyH,s.L,2,.16), 0, bodyY, 0));
   // rounded nose and tail
   paint.push(baked(new THREE.CylinderGeometry(s.bodyH/2, s.bodyH/2, s.W, 20, 1, false, 0, Math.PI), 0, bodyY, s.L/2, 0, 0, Math.PI/2));
   paint.push(baked(new THREE.CylinderGeometry(s.bodyH/2, s.bodyH/2, s.W, 20, 1, false, 0, Math.PI), 0, bodyY, -s.L/2, 0, Math.PI, Math.PI/2));
   if (s.roofH > 0) {
     const cy = s.clr + s.bodyH + s.roofH/2;
-    paint.push(baked(BOX(s.roofW, s.roofH, s.roofL), 0, cy, s.roofZ));
+    paint.push(baked(new RoundedBoxGeometry(s.roofW,s.roofH,s.roofL,2,.14), 0, cy, s.roofZ));
     paint.push(baked(new THREE.CylinderGeometry(s.roofH/2, s.roofH/2, s.roofW, 20, 1, false, 0, Math.PI), 0, cy, s.roofZ + s.roofL/2, 0, 0, Math.PI/2));
     glass.push(baked(BOX(s.roofW*1.02, s.roofH*0.62, s.roofL*0.92), 0, cy+0.06, s.roofZ));
   } else {
@@ -4224,12 +4231,12 @@ function carGeo(type) {
   return { paint: merge(paint), dark: merge(dark), chrome: merge(chrome), glass: merge(glass), lamp: merge(lamp) };
 }
 const VEH_MATS = {
-  paint:  addRim(new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP })),
+  paint:  addRim(new THREE.MeshStandardMaterial({ color: 0xffffff,roughness:.32,metalness:.18 })),
   // dark and chrome get their own materials rather than the toon() cache: the cached
   // ones are shared with street furniture, which must not pick up the rim
-  dark:   addRim(new THREE.MeshToonMaterial({ color: 0x2b2f38, gradientMap: RAMP })),
-  chrome: addRim(new THREE.MeshToonMaterial({ color: 0xd8dde4, gradientMap: RAMP })),
-  glass:  new THREE.MeshToonMaterial({ color: 0x9fdcf2, gradientMap: RAMP, transparent: true, opacity: 0.75 }),
+  dark:   addRim(new THREE.MeshStandardMaterial({ color: 0x2b2f38, })),
+  chrome: addRim(new THREE.MeshStandardMaterial({ color: 0xd8dde4,roughness:.25,metalness:.8 })),
+  glass:  new THREE.MeshStandardMaterial({ color: 0x9fdcf2, transparent: true, opacity: 0.75 }),
   lamp:   new THREE.MeshBasicMaterial({ color: 0xfff3c4 }),
 };
 const VEH_INST = {};
@@ -4751,49 +4758,49 @@ const FACE_STYLES = [
 // Hemispheres, not spheres: a full sphere hangs below the crown and reads as a beard.
 const dome = (r, sy, y) => new THREE.SphereGeometry(r, 16, 12, 0, Math.PI*2, 0, Math.PI*0.52)
   .scale(1, sy, 1).translate(0, y, -0.01);
-const hairShort = dome(0.295, 0.95, 1.72);
-const hairTall  = merge([
+let hairShort = dome(0.295, 0.95, 1.72);
+let hairTall  = merge([
   baked(new THREE.SphereGeometry(0.25, 16, 12).scale(1, 2.5, 1), 0, 2.6, -0.02),
   dome(0.285, 0.5, 1.74),
 ]);
-const hairSpiky = merge(
+let hairSpiky = merge(
   [[-0.21,0.08],[-0.08,0.15],[0.08,0.15],[0.21,0.08],[-0.13,-0.11],[0.13,-0.11]].map(([sx, sz]) =>
     baked(new THREE.ConeGeometry(0.1, 0.34, 16), sx, 2.05, sz, 0.22*sz, 0, -0.5*sx))
 );
-const hairBun   = merge([
+let hairBun   = merge([
   dome(0.29, 0.85, 1.72),
   baked(new THREE.SphereGeometry(0.17, 16, 12), 0, 2.06, -0.08),
 ]);
-const hairBald  = merge([                       // just a ring round the sides
+let hairBald  = merge([                       // just a ring round the sides
   baked(new THREE.TorusGeometry(0.26, 0.05, 6, 14), 0, 1.74, -0.02, Math.PI/2),
 ]);
-const hairCap   = merge([                       // a ball cap: crown plus a brim
+let hairCap   = merge([                       // a ball cap: crown plus a brim
   dome(0.295, 0.75, 1.73),
   baked(BOX(0.4, 0.06, 0.3), 0, 1.8, 0.34),
 ]);
-const hairAfro  = baked(new THREE.SphereGeometry(0.4, 16, 12), 0, 1.88, -0.02);
-const hairLong  = merge([                       // crown with a curtain down the back
+let hairAfro  = baked(new THREE.SphereGeometry(0.4, 16, 12), 0, 1.88, -0.02);
+let hairLong  = merge([                       // crown with a curtain down the back
   dome(0.295, 0.95, 1.72),
   baked(BOX(0.5, 0.72, 0.16), 0, 1.42, -0.27),
 ]);
-const hairMohawk = merge(
+let hairMohawk = merge(
   [[-0.18, 0.22], [-0.06, 0.3], [0.06, 0.3], [0.18, 0.22]].map(([sz, h]) =>
     baked(BOX(0.09, h, 0.15), 0, 1.95 + h/2 - 0.1, sz - 0.02))
 );
 // Hats. Each has to clear the r 0.28 skull the way the hairstyles do, and each needs a
 // silhouette that reads at fifty metres — a brim, a roll, a peak — because at that range
 // the colour is all you get otherwise.
-const hairBeanie = merge([
+let hairBeanie = merge([
   dome(0.305, 0.92, 1.72),
   baked(new THREE.TorusGeometry(0.288, 0.055, 8, 18), 0, 1.75, -0.01, Math.PI/2),   // turned-up roll
   baked(new THREE.SphereGeometry(0.07, 10, 8), 0, 2.06, -0.01),                     // bobble
 ]);
-const hairFedora = merge([
+let hairFedora = merge([
   dome(0.275, 0.66, 1.75),
   baked(new THREE.CylinderGeometry(0.47, 0.5, 0.05, 20), 0, 1.79, -0.01),           // brim
   baked(new THREE.CylinderGeometry(0.285, 0.285, 0.07, 18), 0, 1.83, -0.01),        // band
 ]);
-const hairHardhat = merge([
+let hairHardhat = merge([
   dome(0.3, 0.82, 1.71),
   baked(BOX(0.07, 0.1, 0.5), 0, 1.95, -0.01),                                       // centre ridge
   baked(new THREE.CylinderGeometry(0.34, 0.34, 0.05, 18, 1, false, -0.9, 1.8), 0, 1.74, 0.02),  // front peak
@@ -4812,7 +4819,7 @@ const texShirtStripe = surfCanvas(64, (g, P) => {
 });
 // a rounded toe on the shoe: a small merge that stops the crowd reading as a pile of
 // rectangles once you are close enough to see them
-const shoeGeo = merge([
+let shoeGeo = merge([
   BOX(0.25, 0.13, 0.36).translate(0, -0.87, 0.07),
   baked(new THREE.SphereGeometry(0.125, 12, 8).scale(1, 0.62, 1), 0, -0.87, 0.24),
 ]);
@@ -4820,14 +4827,14 @@ const shoeGeo = merge([
 // in town was the colour of its owner's shirt — invisible at a distance, glaring the
 // moment you shoulder past someone. It is its own mesh now, drawn with the arm's
 // matrix (so it swings for free) but coloured skin.
-const armGeo = BOX(0.16, 0.58, 0.16).translate(0, -0.29, 0);
-const handGeo = baked(new THREE.SphereGeometry(0.105, 12, 9).scale(1, 0.92, 0.8), 0, -0.62, 0);
+let armGeo = BOX(0.16, 0.58, 0.16).translate(0, -0.29, 0);
+let handGeo = baked(new THREE.SphereGeometry(0.105, 12, 9).scale(1, 0.92, 0.8), 0, -0.62, 0);
 // The head is what every camera angle puts front and centre, so it carries the most
 // detail: an egg rather than a ball, ears, and a neck. The neck is the one that does
 // the work — without it the head visibly floats a centimetre above the collar.
 // (The skull stays a true sphere at r 0.28. Egg-shaping it by 6% in Y pushed the crown
 // through every one of the nine hairstyles, which are all cut to fit this radius.)
-const headGeo = merge([
+let headGeo = merge([
   baked(new THREE.SphereGeometry(0.28, 22, 16), 0, 1.72, 0),
   baked(new THREE.SphereGeometry(0.085, 12, 9).scale(0.5, 1.05, 0.85), -0.272, 1.70, -0.015),
   baked(new THREE.SphereGeometry(0.085, 12, 9).scale(0.5, 1.05, 0.85),  0.272, 1.70, -0.015),
@@ -4843,7 +4850,7 @@ const browGeo = merge([
 // The torso is scaled on X per person (shoulder width), so everything merged into it
 // has to squash gracefully — which rules out anything round. A collar band, a shoulder
 // shelf and a shirt hem overhanging the trousers are all boxes, and all scale right.
-const torsoGeo = merge([
+let torsoGeo = merge([
   BOX(1, 0.62, 0.3).translate(0, 1.16, 0),
   BOX(0.88, 0.09, 0.315).translate(0, 1.5, 0),        // shoulder shelf
   BOX(0.44, 0.075, 0.335).translate(0, 1.525, 0.005), // collar band
@@ -4851,14 +4858,30 @@ const torsoGeo = merge([
 ]);
 // One shared white toon material for every crowd part — its own object, not the
 // toon() cache's white, so the rim lands on people and never on white buildings.
-const crowdToon = addRim(new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP }));
+const crowdToon = addRim(new THREE.MeshStandardMaterial({ color: 0xffffff, }));
+
+const ART=kit();
+headGeo=ART.head;torsoGeo=ART.torso;shoeGeo=ART.shoe;armGeo=ART.arm;handGeo=ART.hand;
+hairShort=ART.hairs.short;
+hairTall=ART.hairs.tall;
+hairSpiky=ART.hairs.spiky;
+hairBun=ART.hairs.bun;
+hairBald=ART.hairs.bald;
+hairCap=ART.hairs.cap;
+hairAfro=ART.hairs.afro;
+hairLong=ART.hairs.long;
+hairMohawk=ART.hairs.mohawk;
+hairBeanie=ART.hairs.beanie;
+hairFedora=ART.hairs.fedora;
+hairHardhat=ART.hairs.hardhat;
+for(const f of FACE_STYLES)Object.assign(f,{skin:skins,eyes:ART.eyes,pupil:ART.pupils,muzzle:emptyGeo,nose:ART.nose,mouth:ART.mouth,brow:ART.brows});
 const CI = {
-  legL:  instanced(BOX(0.2, 0.85, 0.2).translate(0,-0.425,0), crowdToon, CROWD_MAX),
-  legR:  instanced(BOX(0.2, 0.85, 0.2).translate(0,-0.425,0), crowdToon, CROWD_MAX),
+  legL:  instanced(ART.leg, crowdToon, CROWD_MAX),
+  legR:  instanced(ART.leg, crowdToon, CROWD_MAX),
   shoeL: instanced(shoeGeo, crowdToon, CROWD_MAX),
   shoeR: instanced(shoeGeo, crowdToon, CROWD_MAX),
   torso: instanced(torsoGeo, crowdToon, CROWD_MAX),
-  torsoS:instanced(torsoGeo, addRim(new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP, map: texShirtStripe })), CROWD_MAX),
+  torsoS:instanced(torsoGeo, addRim(new THREE.MeshStandardMaterial({ color: 0xffffff, map: texShirtStripe })), CROWD_MAX),
   armL:  instanced(armGeo, crowdToon, CROWD_MAX),
   armR:  instanced(armGeo, crowdToon, CROWD_MAX),
   // both hands share one mesh at twice the capacity — a left and a right hand are the
@@ -4885,13 +4908,18 @@ const CI = {
 // instance simply draws nothing.
 for (let s = 0; s < FACE_STYLES.length; s++) {
   const S = FACE_STYLES[s];
-  CI['eyes'+s]  = instanced(S.eyes,  new THREE.MeshToonMaterial({ color:0xffffff, gradientMap:RAMP }), CROWD_MAX);
+  CI['eyes'+s]  = instanced(S.eyes,  new THREE.MeshStandardMaterial({ color:0xffffff, }), CROWD_MAX);
   CI['pupil'+s] = instanced(S.pupil, new THREE.MeshBasicMaterial({ color:0x14192e }), CROWD_MAX, false);
   CI['muzzle'+s]= instanced(S.muzzle, crowdToon, CROWD_MAX);
   CI['nose'+s]  = instanced(S.nose,  crowdToon, CROWD_MAX);
   CI['mouth'+s] = instanced(S.mouth, new THREE.MeshBasicMaterial({ color:0x7a3b34 }), CROWD_MAX, false);
   CI['brow'+s]  = instanced(S.brow,  crowdToon, CROWD_MAX);
 }
+CI.trim=instanced(ART.trim,material(0xf3e8d4),CROWD_MAX);
+CI.detail=instanced(ART.detail,material(0x29454b),CROWD_MAX);
+CI.sole=instanced(ART.sole,material(0xf3e8d4),CROWD_MAX*2);
+CI.iris=instanced(ART.iris,material(0x5c7c6f,'eye'),CROWD_MAX);
+CI.glints=instanced(ART.glints,new THREE.MeshBasicMaterial({color:0xffffff}),CROWD_MAX);
 const HAIR_MESH = { short:'hairShort', tall:'hairTall', spiky:'hairSpiky', bun:'hairBun', bald:'hairBald',
                     cap:'hairCap', afro:'hairAfro', long:'hairLong', mohawk:'hairMohawk',
                     beanie:'hairBeanie', fedora:'hairFedora', hardhat:'hairHardhat' };
@@ -4909,11 +4937,11 @@ const rootM = new THREE.Matrix4(), partM = new THREE.Matrix4(), cCnt = {};
 function renderCrowd(sub) {
   for (const k in CI) cCnt[k] = 0;
   const gazeT = performance.now() * 0.001;
-  const put2 = (key, col, px, py, pz, rx, rz, sx, sz) => {
+  const put2 = (key, col, px, py, pz, rx, rz, sx, sz, sy) => {
     const mesh = CI[key], i = cCnt[key];
     if (i >= mesh.instanceMatrix.count) return;      // hands hold two per person
     dummy.position.set(px, py, pz); dummy.rotation.set(rx||0, 0, rz||0);
-    dummy.scale.set(sx||1, 1, sz||1); dummy.updateMatrix();
+    dummy.scale.set(sx||1, sy||1, sz||1); dummy.updateMatrix();
     mesh.setMatrixAt(i, partM.multiplyMatrices(rootM, dummy.matrix));
     if (col) mesh.setColorAt(i, col);
     cCnt[key] = i+1;
@@ -4924,18 +4952,22 @@ function renderCrowd(sub) {
     dummy.rotation.set(g.rotation.x, g.rotation.y, g.rotation.z);
     dummy.scale.set(1, L.tall, 1); dummy.updateMatrix(); rootM.copy(dummy.matrix);
     put2(L.striped ? 'torsoS' : 'torso', L.shirt, 0,0,0, 0,0, sh, L.build);
+    put2('trim',null,0,0,0,0,0,sh,L.build);
+    if((g.position.x-sub.x)**2+(g.position.z-sub.z)**2<3600)put2('detail',null,0,0,0,0,0,sh,L.build);
+    for(const side of [-1,1])put2('sole',null,side*.14,.86,0,side<0?u.legL.rotation.x:u.legR.rotation.x);
     const f = L.face;                              // this person's face style (0-4)
     put2('head',    L.skin,  0,0,0);
     put2('muzzle'+f, L.skin, 0,0,0);
     put2('nose'+f,  L.skin,  0,0,0);
     put2('mouth'+f, null,    0,0,0);
-    put2('eyes'+f,  null,    0,0,0);
+    const eyelid=blink(gazeT+u.phase);
+    put2('eyes'+f,null,0,1.802*(1-eyelid),0,0,0,1,1,eyelid);
     // The pupils are the same mesh every frame, just parked a few millimetres off
     // centre — so a slow wander costs nothing and stops fourteen hundred people
     // staring dead ahead in unison. Everyone drifts on their own phase.
-    const gx = Math.sin(gazeT * 0.53 + u.phase) * 0.035;
-    const gy = Math.sin(gazeT * 0.37 + u.phase * 1.7) * 0.018;
-    put2('pupil'+f, null, gx, gy, 0);
+    const gx = Math.sin(gazeT * 0.53 + u.phase) * 0.01;
+    const gy = Math.sin(gazeT * 0.37 + u.phase * 1.7) * 0.007;
+    if(eyelid>.4){put2('iris',null,gx,gy,0);put2('pupil'+f,null,gx,gy,0);put2('glints',null,gx,gy,0);}
     put2('brow'+f, L.hair, 0,0,0);
     put2(HAIR_MESH[L.style], L.hair, 0,0,0);
     if (L.specs) put2('glasses', L.specs, 0,0,0);
@@ -5347,11 +5379,23 @@ function buildPlayerCar(type, color) {
     const m = new THREE.Mesh(geo, mat); m.castShadow = true; m.receiveShadow = true; grp.add(m);
     return m;
   };
-  mk(g.paint, addRim(new THREE.MeshToonMaterial({ color, gradientMap: RAMP })));
+  mk(g.paint, addRim(new THREE.MeshStandardMaterial({ color, })));
   mk(g.dark, VEH_MATS.dark);
   mk(g.chrome, VEH_MATS.chrome);
   mk(g.glass, VEH_MATS.glass);
   mk(g.lamp, VEH_MATS.lamp);
+  // Edition livery: cream racing stripes, rear lamps and a small rear wing.
+  const spec = CAR_TYPES[type];
+  const detail = (w,h,d,x,y,z,col) => { const m=new THREE.Mesh(BOX(w,h,d),toon(col));m.position.set(x,y,z);m.castShadow=true;grp.add(m); };
+  for(const side of [-1,1]) {
+    detail(.19,.025,Math.max(.5,spec.L*.19),side*.28,spec.clr+spec.bodyH+.022,spec.L*.35,0xffedc7);
+    detail(.19,.025,.7,side*.28,spec.clr+spec.bodyH+.022,-spec.L*.39,0xffedc7);
+    detail(.52,.18,.05,side*spec.W*.32,spec.clr+spec.bodyH*.65,-spec.L/2-.025,0xff5f46);
+  }
+  if(type==='convert'||type==='compact') {
+    detail(spec.W*.86,.09,.32,0,spec.clr+spec.bodyH+.26,-spec.L*.39,0x17383c);
+    for(const side of [-1,1]) detail(.08,.25,.12,side*.75,spec.clr+spec.bodyH+.12,-spec.L*.39,0x17383c);
+  }
   tagNoInk(grp);                     // the glass, so the windscreen isn't outlined
   return grp;
 }
@@ -5360,59 +5404,19 @@ const car = new THREE.Group(); scene.add(car);
 // default XYZ order the pitch axis is the world's, and a car heading along X rolls
 // instead. With x=0 the two orders compose identically, so nothing else moves.
 car.rotation.order = 'YXZ';
-let carRig = null, carType = 'convert';
+let carRig = null, carType = 'convert', carPaint = 0xf07ab0;
 let riderSeat = null;                    // set once the rider is built (see seatRider)
 function setPlayerCar(type, color) {
   if (carRig) car.remove(carRig);
-  carType = type; carRig = buildPlayerCar(type, color); car.add(carRig);
+  carType = type; carPaint = color; carRig = buildPlayerCar(type, color); car.add(carRig);
   if (riderSeat) riderSeat(type);        // null until the rider exists, below
 }
 setPlayerCar('convert', 0xf07ab0);
 
 // the visible driver, a full mesh rather than an instance
-function buildPerson(look) {
-  const g = new THREE.Group();
-  const put3 = (geo, color) => {
-    const m = new THREE.Mesh(geo, addRim(new THREE.MeshToonMaterial({ color, gradientMap: RAMP })));
-    m.castShadow = true; g.add(m);
-    return m;
-  };
-  // the hero is built from the same geometry as the crowd, so he doesn't look like a
-  // visitor from a different game the moment he stands next to somebody
-  put3(torsoGeo.clone().scale(0.62, 1, 1), look.shirt);
-  put3(headGeo.clone(), look.skin);
-  put3(muzzleGeo.clone(), look.skin);
-  const style = look.style || 'short';
-  const HG = { short:hairShort, tall:hairTall, spiky:hairSpiky, bun:hairBun, bald:hairBald };
-  put3((HG[style] || hairShort).clone(), look.hair);
-  put3(browGeo.clone(), look.hair);
-  g.add(new THREE.Mesh(mouthGeo.clone(), new THREE.MeshBasicMaterial({ color:0x7a3b34 })));
-  g.add(new THREE.Mesh(baked(eyePair, 0, 1.85, 0.185), new THREE.MeshToonMaterial({ color:0xffffff, gradientMap:RAMP })));
-  g.add(new THREE.Mesh(baked(pupilPair, 0, 1.85, 0.185), new THREE.MeshBasicMaterial({ color:0x14192e })));
-  const limb = (px, color, w, len, top, hand) => {
-    const j = new THREE.Group(); j.position.set(px, top, 0);
-    const geo = BOX(w, len, w).translate(0, -len/2, 0);
-    const m = new THREE.Mesh(geo, addRim(new THREE.MeshToonMaterial({ color, gradientMap: RAMP })));
-    m.castShadow = true; j.add(m);
-    if (hand) {                       // skin, not sleeve — same split as the crowd
-      const h = new THREE.Mesh(handGeo.clone().translate(0, 0.62 - len - 0.04, 0),
-        addRim(new THREE.MeshToonMaterial({ color: look.skin, gradientMap: RAMP })));
-      h.castShadow = true; j.add(h);
-    }
-    g.add(j); return j;
-  };
-  const legL = limb(-0.14, look.pants, 0.2, 0.85, 0.86);
-  const legR = limb( 0.14, look.pants, 0.2, 0.85, 0.86);
-  for (const lg of [legL, legR]) {
-    const sh2 = new THREE.Mesh(shoeGeo.clone(), addRim(new THREE.MeshToonMaterial({ color: look.shoe || 0x2b2f38, gradientMap: RAMP })));
-    sh2.castShadow = true; lg.add(sh2);
-  }
-  const armL = limb(-0.37, look.shirt, 0.16, 0.58, 1.42, true);
-  const armR = limb( 0.37, look.shirt, 0.16, 0.58, 1.42, true);
-  g.userData = { legL, legR, armL, armR, phase: 0 };
-  return g;
-}
-const HERO_LOOK = { skin:0xffd90f, hair:0x2a1e16, shirt:0xffffff, pants:0x2f6fc4, shoe:0x2b2f38, style:'short' };
+const artActors=[];
+function buildPerson(look){const g=actor(ART,look);artActors.push(g);return g;}
+const HERO_LOOK = { skin:0xe7b18a, hair:0x382722, shirt:0x287f7b, pants:0x273c52, shoe:0xd77743, style:'short' };
 const player = buildPerson(HERO_LOOK);
 player.visible = false; scene.add(player);
 const playerVel = new THREE.Vector3();
@@ -5433,7 +5437,7 @@ rider.scale.setScalar(0.92); car.add(rider);
   u.armL.rotation.x = u.armR.rotation.x = -1.15;      // hands on the wheel
   u.armL.rotation.z = 0.18; u.armR.rotation.z = -0.18;
 }
-const RIDER_CROWN = 2.02 * 0.92;                      // head top in car-local units
+const RIDER_CROWN = 2.16 * 0.92;                      // head top in car-local units
 function seatRider(type) {
   const s = CAR_TYPES[type] || CAR_TYPES.sedan;
   const roof = s.clr + s.bodyH + s.roofH;
@@ -5462,7 +5466,7 @@ const chute = new THREE.Group();
 {
   const canopy = new THREE.Mesh(
     new THREE.SphereGeometry(2.7, 18, 10, 0, Math.PI*2, 0, Math.PI*0.52),
-    new THREE.MeshToonMaterial({ color: 0xe8532f, gradientMap: RAMP, side: THREE.DoubleSide }));
+    new THREE.MeshStandardMaterial({ color: 0xe8532f, side: THREE.DoubleSide }));
   canopy.position.y = 3.4; chute.add(canopy);
   const shroud = new THREE.Mesh(new THREE.ConeGeometry(2.5, 2.5, 12, 1, true),
     new THREE.MeshBasicMaterial({ color: 0x2b2f38, wireframe: true }));
@@ -5520,12 +5524,17 @@ function togglePause() {
   }
 }
 addEventListener('keydown', e => {
+  if (dispatchOpen || e.target.closest?.('select, input')) return;
+  if (e.repeat && ['KeyP','KeyM','KeyF','KeyR','KeyC','KeyJ','KeyE'].includes(e.code)) return;
   sirenInit();
   keys[e.code] = true;
   if (['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code)) e.preventDefault();
   // flying uses Ctrl (nose down) and Q/E (roll); swallow them so the page doesn't act on them
   if (mode === 'plane' && ['ControlLeft','ControlRight','KeyQ','KeyE'].includes(e.code)) e.preventDefault();
+  if (e.code === 'KeyJ') { openDispatch(); return; }
+  if (e.code === 'KeyE' && nearbyOffer && !MI && !paused) { acceptOffer(); return; }
   if (e.code === 'KeyP') togglePause();
+  if (paused) return;
   if (e.code === 'Space' && mode === 'foot' && !playerRag.active && !riding && !paused) {
     if (playerOnGround) { playerVel.y = JUMP; playerOnGround = false; canDouble = true; }
     else if (canDouble) {                            // a second tap in the air: jump again, higher
@@ -5808,14 +5817,14 @@ function explode() {
   shake = 2.0; carHealth = 100; carFire = 0; toast('OW! MY CAR!');
   clearHeat();
   car.position.set(SPAWN.x, surfaceY(SPAWN.x, SPAWN.z), SPAWN.z);
-  heading = SPAWN.heading; speed = 0; carVY = 0; drowning = 0; airT = 0; airPeak = 0;
+  heading = SPAWN.heading; speed = 0; motionX = motionZ = 0; carVY = 0; drowning = 0; airT = 0; airPeak = 0;
   car.rotation.set(0, heading, 0); camYaw = heading;
 }
 function resetAll() {
   missionEvent('reset');
-  setPlayerCar('convert', 0xf07ab0);
+  motionX = motionZ = 0; driftChain = 0;
   car.position.set(SPAWN.x, surfaceY(SPAWN.x, SPAWN.z), SPAWN.z);
-  heading = SPAWN.heading; speed = 0; carVY = 0; drowning = 0; airT = 0; airPeak = 0;
+  heading = SPAWN.heading; speed = 0; motionX = motionZ = 0; carVY = 0; drowning = 0; airT = 0; airPeak = 0;
   car.rotation.set(0, heading, 0); camYaw = heading;
   mode = 'car'; player.visible = false; rider.visible = true;
   playerRag.active = false; player.rotation.set(0,0,0); player.position.y = 0;
@@ -5823,6 +5832,8 @@ function resetAll() {
   if (typeof planeHome === 'function') planeHome();     // park the plane back on the apron
 }
 function updateCar(dt) {
+  if (dt <= 0) return;
+  const handling = HANDLING[carType] || HANDLING.convert;
   const driving = mode === 'car' && drowning <= 0;
   // a burning car has no engine — you coast to a stop and get out
   const thr = (carFire <= 0) && driving && (keys.KeyW||keys.ArrowUp) ? 1 : 0;
@@ -5831,25 +5842,32 @@ function updateCar(dt) {
   const right = driving && (keys.KeyD||keys.ArrowRight) ? 1 : 0;
   const hand = driving && keys.Space ? 1 : 0;
 
-  if (thr) speed += ACCEL*dt;
+  if (thr) speed += ACCEL*handling.acceleration*dt;
   else if (brk) { if (speed > 0) speed -= BRAKE*dt; else speed -= ACCEL*0.6*dt; }
   else { if (speed > 0) speed = Math.max(0, speed-DRAG*dt); else if (speed < 0) speed = Math.min(0, speed+DRAG*dt); }
-  speed = THREE.MathUtils.clamp(speed, MAX_REV, MAX_SPEED);
-  if (hand) speed *= (1 - 1.7*dt);
+  boosting = driving && !carFire && !!keys.ShiftLeft && speed > 6 && boostFuel > 2 && !hand;
+  boostFuel = boostStep(boostFuel, boosting, dt);
+  if (boosting) speed += ACCEL*1.4*dt;
+  speed = THREE.MathUtils.clamp(speed, MAX_REV, MAX_SPEED*(boosting ? 1.38 : 1.08));
+  if (hand) speed *= Math.exp(-0.58*dt);
 
   const steerIn = right - left;
   steerSmooth += (steerIn - steerSmooth) * Math.min(1, dt*10);   // input bites sooner
   const frac = Math.abs(speed)/MAX_SPEED;
   // More bite overall, and less of it taken away by speed. At MAX_SPEED this is ~1.2 rad/s,
   // a ~35 m turning circle — it used to be 0.6 rad/s and ~70 m, wider than a whole block.
-  const authority = 2.2 * (1 - frac*0.45);
+  const authority = 2.2 * handling.turn * (1 - Math.min(frac,1.4)*0.4) * (hand ? 1.3 : 1);
   const dir = speed >= 0 ? 1 : -1;
   heading -= steerSmooth * authority * (Math.min(Math.abs(speed),16)/16) * dir * dt;
   drift += (((hand && Math.abs(speed) > 14 && steerIn) ? 1 : 0) - drift) * Math.min(1, dt*5);
 
   const fx = Math.sin(heading), fz = Math.cos(heading);
-  const res = collideCircle(car.position.x + fx*speed*dt, car.position.z + fz*speed*dt, 1.8, colliders);
+  if (Math.abs(speed) < .5) { motionX = 0; motionZ = 0; }
+  const velocity = traction(motionX, motionZ, heading, speed, !!hand, handling.grip, dt);
+  motionX = velocity.x; motionZ = velocity.z;
+  const res = collideCircle(car.position.x + motionX*dt, car.position.z + motionZ*dt, 1.8, colliders);
   if (res.hit) {
+    motionX *= .2; motionZ *= .2; driftChain = 0;
     if (Math.abs(speed) > 6) crashSfx(Math.abs(speed));
     if (Math.abs(speed) > 11) { damageCar(Math.abs(speed)*0.32); shake = Math.min(1.2, shake+0.25); }
     speed *= 0.34;
@@ -5857,6 +5875,7 @@ function updateCar(dt) {
   if (Math.abs(speed) > 5) hitCratesAt(res.x, res.z, 2.4);    // and a car goes straight through
   const rt = collideTraffic(res.x, res.z, 1.7);
   if (rt.hit && rt.who >= 0) {
+    motionX *= .45; motionZ *= .45; driftChain = 0;
     const other = traffic[rt.who], impact = Math.abs(speed);
     if (impact > 3 && other.racer) {
       // You can't take a race rival out by ramming: it shrugs the hit off and keeps
@@ -5954,8 +5973,8 @@ function updateCar(dt) {
     if (Math.abs(speed) > 2) hitPropsAt(hx, hz, fx*sgn, fz*sgn, speed, 2.0);
   }
 
-  car.rotation.y = heading + drift*0.45*steerIn;
-  car.rotation.z += ((-steerIn*frac*0.07) - car.rotation.z) * Math.min(1, dt*6);
+  car.rotation.y = heading;
+  car.rotation.z += ((-steerIn*frac*0.12) - car.rotation.z) * Math.min(1, dt*6);
   carShadow.position.set(car.position.x, surfaceY(car.position.x, car.position.z) + 0.09, car.position.z);
   carShadow.rotation.z = -heading;
 
@@ -6932,7 +6951,7 @@ function busted() {
   clearHeat();
   shake = 1.8; carHealth = 100;
   car.position.set(SPAWN.x, surfaceY(SPAWN.x, SPAWN.z), SPAWN.z);
-  heading = SPAWN.heading; speed = 0; carVY = 0; drowning = 0; airT = 0; airPeak = 0;
+  heading = SPAWN.heading; speed = 0; motionX = motionZ = 0; carVY = 0; drowning = 0; airT = 0; airPeak = 0;
   car.rotation.set(0, heading, 0); camYaw = heading;
   // wherever they caught you, you restart in the car
   mode = 'car'; player.visible = false; rider.visible = true;
@@ -7042,7 +7061,7 @@ const chickens = [];
     baked(BOX(0.07, 0.13, 0.15), 0, 0.87, 0.27),
   ]);
   const N = 12;
-  const cBody = instanced(bodyGeo, new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP }), N);
+  const cBody = instanced(bodyGeo, new THREE.MeshStandardMaterial({ color: 0xffffff, }), N);
   const cTrim = instanced(trimGeo, toon(0xe8952f), N, false);
   cTrim.instanceMatrix = cBody.instanceMatrix;         // shared: written once, drawn twice
   scene.add(cBody, cTrim);
@@ -7160,7 +7179,7 @@ const DOGPARK = { x: 0, z: 0, ok: false };
   const tailPlumeGeo = merge([baked(new THREE.SphereGeometry(0.11, 10, 8).scale(1, 1, 2.1), 0, 0.44, -0.62)]);
   const tailThinGeo  = merge([baked(BOX(0.07, 0.07, 0.42), 0, 0.42, -0.68)]);
   const TOTAL = DOG_N + DOG_OWNED;
-  const M = (g, n, sh) => { const m = instanced(g, new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP }), n, sh); scene.add(m); return m; };
+  const M = (g, n, sh) => { const m = instanced(g, new THREE.MeshStandardMaterial({ color: 0xffffff, }), n, sh); scene.add(m); return m; };
   const dBody = M(bodyGeo, TOTAL, true);
   const dLegs = M(legGeo, TOTAL, false);
   const dSnout = instanced(snoutGeo, toon(0x2a2e33), TOTAL, false);
@@ -7391,7 +7410,7 @@ const crates = [];
   qTex.wrapS = qTex.wrapT = THREE.ClampToEdgeWrapping;
   const CR = 1.25;
   const mesh = instanced(BOX(CR, CR, CR).translate(0, CR/2, 0),
-    new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP, map: qTex }), 90, true);
+    new THREE.MeshStandardMaterial({ color: 0xffffff, map: qTex }), 90, true);
   for (const b of mapBoxes) {
     if (crates.length >= 90 || b.kind !== 'house') continue;
     if (vary(b.x, b.z, 100) >= 46) continue;              // roughly half the houses
@@ -7490,7 +7509,7 @@ function petGeo(cat) {
     g.add(ear);
   }
   // and a face: bulging crowd-style eyes with pupils, and a nose on the muzzle tip
-  const eyeMat = new THREE.MeshToonMaterial({ color: 0xffffff, gradientMap: RAMP });
+  const eyeMat = new THREE.MeshStandardMaterial({ color: 0xffffff, });
   const pupilMat = new THREE.MeshBasicMaterial({ color: 0x14192e });
   for (const sx of [-1, 1]) {
     const eye = new THREE.Mesh(new THREE.SphereGeometry(cat ? 0.06 : 0.075, 12, 9), eyeMat);
@@ -7805,6 +7824,7 @@ let addJobMarker = null;
 }
 let markerBob = 0;
 function updateMarkers(dt, sub) {
+  nearbyOffer = null;
   markerBob += dt*2.6;
   for (const m of MARKERS) {
     if (m.cool > 0) {                       // giver re-arms a moment after the job ends
@@ -7828,7 +7848,7 @@ function updateMarkers(dt, sub) {
         } else if (def && def.needsPlane && mode !== 'plane') {
           if (mode === 'foot') { m.nagT = (m.nagT || 0) - dt;
             if (m.nagT <= 0) { toast('GET IN THE PLANE FIRST'); m.nagT = 3; } }
-        } else if (!MI) startMission(m.mission, m);
+        } else if (!MI) nearbyOffer = m;
       } else {
         m.done = true;
         m.spr.visible = false; m.disc.visible = false;
@@ -8058,7 +8078,7 @@ function findAirfield(w, d) {
   const site = findGreen(58, 58);
   if (site) {
     const cx = site.x, cz = site.z;
-    const mat = new THREE.MeshToonMaterial({ color: 0xe8792b, gradientMap: RAMP, side: THREE.DoubleSide });
+    const mat = new THREE.MeshStandardMaterial({ color: 0xe8792b, side: THREE.DoubleSide });
     // steeper than they look sensible: a shallow wedge just lifts the car, a ~22-25°
     // kicker throws it. Length is short relative to height for exactly that reason.
     const specs = [                               // yaw, distance out, width, length, height
@@ -8136,8 +8156,8 @@ let riding = null, rideExitCd = 0;
       for (let k = 0; k < 12; k++) {
         const seg = new THREE.Mesh(
           new THREE.ConeGeometry(8.2, 2.4, 8, 1, true, k*Math.PI/6, Math.PI/6),
-          new THREE.MeshToonMaterial({ color: k % 2 ? 0xd0392b : 0xf6f3ea,
-                                       gradientMap: RAMP, side: THREE.DoubleSide }));
+          new THREE.MeshStandardMaterial({ color: k % 2 ? 0xd0392b : 0xf6f3ea,
+                                       side: THREE.DoubleSide }));
         seg.position.y = 7.4; spin.add(seg);
       }
       const SEATS = 8;
@@ -8623,7 +8643,7 @@ if (TIREFIRE) {
     baked(new THREE.TorusGeometry(0.4, 0.07, 8, 14).rotateY(Math.PI/2), -0.5, 0.86, 0),
     baked(new THREE.TorusGeometry(0.4, 0.07, 8, 14).rotateY(Math.PI/2),  0.5, 0.86, 0),
   ]);
-  const trophyM = new THREE.Mesh(tg, new THREE.MeshToonMaterial({ color: 0xffd23b, gradientMap: RAMP }));
+  const trophyM = new THREE.Mesh(tg, new THREE.MeshStandardMaterial({ color: 0xffd23b, }));
   trophyM.position.set(top.x, top.h + 0.1, top.z); scene.add(trophyM);
   summitTrophy = { g: trophyM, x: top.x, z: top.z, y: top.h, got: false, spin: 0 };
 
@@ -8791,7 +8811,7 @@ function setPenGate(open) {
 //  permanent and pilot-controlled — throttle, pitch, bank-to-turn, lift above a
 //  takeoff speed, gravity when you stall.
 // =================================================================
-const RAMP_GLASS = new THREE.MeshToonMaterial({ color: 0x243049, gradientMap: RAMP });
+const RAMP_GLASS = new THREE.MeshStandardMaterial({ color: 0x243049, });
 let planeSpeed = 0, planePitch = 0, planeRoll = 0, planeHeading = 0;
 const PLANE_SPAWN = { x: 0, z: 0, heading: 0 };
 const plane = new THREE.Group(); plane.rotation.order = 'YXZ'; plane.visible = false; scene.add(plane);
@@ -9836,7 +9856,7 @@ const SHOP = [
   { key: 'ride', name: 'NEW RIDE', lvl: 0, max: 99, cost: [250],
     blurb: ['—'],
     apply() { GARAGE.ride = (GARAGE.ride + 1) % RIDES.length;
-              setPlayerCar(RIDES[GARAGE.ride], rpick(CAR_COLS)); } },
+              ownedCars.add(RIDES[GARAGE.ride]); setPlayerCar(RIDES[GARAGE.ride], rpick(CAR_COLS)); } },
 ];
 const shopEl = document.getElementById('shop');
 const priceOf = it => it.key === 'ride' ? 250 : it.cost[it.lvl];
@@ -9867,7 +9887,10 @@ function drawShop() {
       '</td><td>' + it.name + '</td><td>' + state + '</td><td>' +
       (maxed ? 'MAX' : p) + '</td></tr>';
   });
-  shopEl.innerHTML = h + '</table>';
+  h+='</table><div class="showroom">';
+  for (const type of RIDES) h+='<button data-ride="'+type+'" '+(carType===type?'disabled':'')+'>'+CAR_LABELS[type]+'<small>'+ (carType===type?'EQUIPPED':ownedCars.has(type)?'OWNED · SELECT':'250 COINS')+'</small></button>';
+  const next=h+'</div>';
+  if (shopEl.innerHTML!==next) shopEl.innerHTML=next;
 }
 function updateGarage() {
   const near = mode === 'foot' && !playerRag.active &&
@@ -9965,10 +9988,12 @@ const atTarget = (p, tg) => tg && (p.x - tg.x)**2 + (p.z - tg.z)**2 < tg.r*tg.r;
 function startMission(id, giver) {
   const def = MISSION_DEFS[id]; if (!def) return;
   retryGiver = null;
-  MI = { id, def, giver, stage: 0, t: 0, timed: false, target: null, data: {} };
+  selectedJob = null; nearbyOffer = null;
+  MI = { elapsed: 0, id, def, giver, stage: 0, t: 0, timed: false, target: null, data: {} };
   giver.spr.visible = false; giver.disc.visible = false;
   banner(def.title, giver.name + ': ' + giver.line);
   def.start(MI);
+  if (MI) MI.initialTime=MI.t;
 }
 function finishMission(won) {
   const m = MI; MI = null;
@@ -9978,10 +10003,16 @@ function finishMission(won) {
 const jobsDone = new Set();              // which jobs you have actually finished
 function winMission(base, flavor) {
   const mult = 1 + stars*0.5, total = Math.round(base * mult);
-  if (MI) jobsDone.add(MI.id);
+  if (MI) {
+    jobsDone.add(MI.id);
+    const old = missionRecords[MI.id];
+    const medal = MI.timed ? (MI.t/Math.max(1,MI.initialTime)>.45?'GOLD':MI.t/Math.max(1,MI.initialTime)>.2?'SILVER':'BRONZE') : 'COMPLETE';
+    missionRecords[MI.id] = { medal, wins: (old?.wins || 0)+1, best: Math.min(old?.best || Infinity, MI.elapsed), reward: Math.max(old?.reward || 0,total) };
+  }
   addCoins(total); coinSfx();
   banner('+' + total + ' COINS', (flavor || 'job done') + (stars ? ' · wanted bonus x' + mult.toFixed(1) : ''));
   finishMission(true);
+  saveProgress();
 }
 // X: walk away from the job you took. Without this, a job you have lost interest in
 // leaves its arrow and beacon hanging over you until you either finish it or fail it.
@@ -10012,6 +10043,7 @@ function missionEvent(ev) {
 function missionTarget() {
   if (MI && MI.target) return MI.target;
   if (!MI && retryGiver) return { x: retryGiver.x, z: retryGiver.z, r: 4 };
+  if (selectedJob) return {x:selectedJob.x,z:selectedJob.z,r:4};
   return null;
 }
 function missionHUD() {
@@ -10033,6 +10065,7 @@ function missionHUD() {
 function updateMissions(dt, sub) {
   if (bannerT > 0) { bannerT -= dt; if (bannerT <= 0) bannerEl.classList.remove('show'); }
   if (MI) {
+    MI.elapsed += dt;
     if (MI.timed) {
       MI.t -= dt;
       if (MI.t <= 0) { MI.t = 0; failMission(MI.def.late || 'out of time'); }
@@ -10042,7 +10075,7 @@ function updateMissions(dt, sub) {
   updateGate(dt);
   updateSpray(dt);
   updateRoundHUD();
-  let tg = MI && MI.target;
+  let tg = (MI && MI.target) || (!MI && selectedJob ? { x: selectedJob.x, z: selectedJob.z, r:4 } : null);
   if (!MI && retryGiver) {                       // failed: guide back to the giver
     const dx = retryGiver.x - sub.x, dz = retryGiver.z - sub.z;
     if (dx*dx + dz*dz < 144) retryGiver = null;  // close enough — the "!" takes over
@@ -10936,7 +10969,7 @@ roomLight.visible = false; scene.add(roomLight);
 // two InstancedMeshes (leaf, knob) rather than a hinge Group each — a swinging
 // door is just its instance matrix recomputed. The unit leaf has its hinge
 // edge at the origin; per-door width/height ride in the instance scale.
-const DOOR_MAT = new THREE.MeshToonMaterial({ color: 0x8c4a2f, gradientMap: RAMP });
+const DOOR_MAT = new THREE.MeshStandardMaterial({ color: 0x8c4a2f, });
 // A deep leaf (0.7, most of the WALL_T reveal) rather than a thin plane: a thin door set
 // at the outer face leaves the doorway's depth open at the sides, so from an angle you
 // see straight past it into the lit room. The plug closes that sightline. Paired with a
@@ -11404,12 +11437,7 @@ function updateHUD(dt) {
 
   if (toastT > 0) { toastT -= dt; if (toastT <= 0) toastEl.classList.remove('show'); }
 
-  objEl.innerHTML = missionHUD() || (stars
-    ? `<b>WANTED</b> · lose them to bank your combo`
-    : (comboT > 0 ? 'Keep it going · <b>x' + comboMult + '</b>'
-                  // No coin total anywhere: coins are scatter you happen upon, not a set
-                  // to complete, and a running "90/381" made them read like a checklist.
-                  : `Cause chaos · <b>${coinCount}</b> coins`));
+
 
   // radar
   const W = 154, R = W/2, view = 190, sc = R/view;
@@ -11420,7 +11448,7 @@ function updateHUD(dt) {
   rd.save(); rd.beginPath(); rd.arc(R,R,R,0,7); rd.clip();
   rd.fillStyle = '#79c46a'; rd.fillRect(0,0,W,W);
   rd.translate(R,R); rd.rotate(-hd);
-  rd.strokeStyle = '#5b5570'; rd.lineCap = 'round';
+  rd.strokeStyle = '#4c5158'; rd.lineCap = 'round';
   for (const st of STREETS) {
     const ax=(st.ax-px)*sc, az=(st.az-pz)*sc, bx=(st.bx-px)*sc, bz=(st.bz-pz)*sc;
     if (Math.min(ax,bx) > R || Math.max(ax,bx) < -R || Math.min(az,bz) > R || Math.max(az,bz) < -R) continue;
@@ -11489,6 +11517,7 @@ function updateHUD(dt) {
     rd.fillStyle = '#ffd23b'; rd.strokeStyle = '#14192e'; rd.lineWidth = 2;
     rd.beginPath(); rd.arc(bx, bz, 4 + Math.sin(markerBob*3)*1.2, 0, 7); rd.fill(); rd.stroke();
   }
+  if(routePoints.length>1){rd.strokeStyle='#77f6d9';rd.lineWidth=2;rd.beginPath();routePoints.forEach((p,i)=>{const x=(p.x-px)*sc,z=(p.z-pz)*sc;if(i===0)rd.moveTo(x,z);else rd.lineTo(x,z);});rd.stroke();}
   rd.restore();
   // heading wedge
   rd.save(); rd.translate(R,R);
@@ -11541,8 +11570,8 @@ for (const rt of [composer.renderTarget1, composer.renderTarget2]) {
 // scaled by the device ratio at setSize time. Otherwise a line is half as heavy on a
 // retina display as on a plain one — the one thing a screen-space outline must not do.
 const inkParams = {
-  on: true, thickness: 1.0, depthSense: 0.9,
-  fadeNear: 150, fadeFar: 340, strength: 1.0, debug: 'off',
+  on: true, thickness: .65, depthSense: 1.1,
+  fadeNear: 70, fadeFar: 220, strength: .4, debug: 'off',
 };
 const INK_DEBUG = { off: 0, depth: 1, edges: 2 };
 
@@ -11754,15 +11783,18 @@ tagNoInk(scene);
 const clock = new THREE.Clock();
 function animate() {
   requestAnimationFrame(animate);
-  const dt = paused ? 0 : Math.min(clock.getDelta(), 0.05);
+  const frameDelta = Math.min(clock.getDelta(), 0.05);
+  const dt = paused ? 0 : frameDelta;
   const now = performance.now();
   const sub = mode === 'car' ? car.position : mode === 'plane' ? plane.position : player.position;
 
   if (window.syncTouch) window.syncTouch();
   updateLights(dt);
   updateSky(dt);
+  artTime+=dt;for(let i=artActors.length-1;i>=0;i--){const a=artActors[i];if(!a.parent){artActors.splice(i,1);continue;}const b=blink(artTime+i*.71);a.userData.eyes.scale.y=b;a.userData.eyes.position.y=1.802*(1-b);a.userData.face.rotation.y=Math.sin(artTime*.5+i)*.035;}
   if (riverWater) riverWater.uniforms.uTime.value += dt;
   updateHeadlights();
+  updateGamepad();
   updateCar(dt);
   updateCarFire(dt);
   updatePlane(dt);
@@ -11794,6 +11826,7 @@ function animate() {
   renderCrowd(sub);
   updateCamera(dt, now);
   updateHUD(dt);
+  updateUpgrade(dt);
 
   // follow the subject in y as well: the shadow camera's far plane is 620, so a room
   // volume at y=-400 would otherwise fall outside it entirely
@@ -11815,7 +11848,7 @@ function animate() {
     b.g.position.set(Math.cos(b.t)*b.r, b.h + Math.sin(b.t*2.1)*5, Math.sin(b.t)*b.r);
     b.g.rotation.y = -b.t + Math.PI/2;
   }
-  composer.render();
+  if(artStudioOpen)renderArtStudio(frameDelta);else composer.render();
 }
 
 const loader = document.getElementById('loader');
@@ -11829,13 +11862,15 @@ let gameStarted = false;
 function beginGame() {
   if (gameStarted) return;
   gameStarted = true;
+  document.activeElement?.blur();
   startScreen.classList.remove('show');
   paused = false;
-  sirenInit();                                       // the tap/keypress is the audio gesture too
+  sirenInit();
+  if (!jobsDone.size) { selectedJob = MARKERS.find(m => m.mission === 'donut') || null; banner('WELCOME TO MAPLEWOOD', 'Follow the cyan route to your first delivery • J opens Dispatch'); }
 }
 // Capture phase so the first key just dismisses the splash instead of also driving/jumping.
-addEventListener('keydown', e => { if (!gameStarted) { e.preventDefault(); e.stopPropagation(); beginGame(); } }, true);
-startScreen.addEventListener('pointerdown', e => { e.preventDefault(); beginGame(); });
+addEventListener('keydown', e => { if (!gameStarted && !artStudioOpen && ['Enter','Space'].includes(e.code) && !e.target.closest?.('button, select')) { e.preventDefault(); e.stopPropagation(); beginGame(); } }, true);
+document.getElementById('launch').addEventListener('click', () => beginGame());
 let prog = 0;
 const li = setInterval(() => {
   prog = Math.min(100, prog + 25); bar.style.width = prog + '%';
@@ -11847,3 +11882,259 @@ const li = setInterval(() => {
     animate();
   }
 }, 110);
+
+// =================================================================
+// AFTER HOURS EDITION — progression, dispatch, navigation and arcade feedback
+// =================================================================
+let motionX = 0, motionZ = 0, boostFuel = 100, boosting = false;
+let driftChain = 0, driftGrace = 0, driftTick = 0, bestDrift = 0;
+let dispatchOpen = false, nearbyOffer = null, selectedJob = null;
+const ownedCars = new Set(['convert']);
+let nearMissCooldown = 0;
+let missionRecords = {}, upgradeClock = 0, routeClock = 0, saveClock = 0;
+let saveAvailable = true, dispatchWasPaused = false;
+const SAVE_KEY = 'public-nuisance-after-hours-v1';
+const edition = document.getElementById('edition');
+const dispatchEl = document.getElementById('dispatch');
+const jobCards = document.getElementById('job-cards');
+const offerEl = document.getElementById('offer');
+const districtEl = document.getElementById('district');
+const JOB_INFO = {
+  donut: ['DELIVERY','Donut run','Fresh donuts. A ticking clock. One very hungry power plant.','car'],
+  taxi: ['TAXI','Fare game','Pick up Rita and make it across town. Stop gently to collect your fare.','car'],
+  mug: ['ON FOOT','Cold one','Visit The Rusty Mug and bring Lou a drink.','foot'],
+  feather: ['ON FOOT','Feather frenzy','Sixty seconds in the farmyard. Seven chickens. One left boot.','foot'],
+  dogwalk: ['ON FOOT','The round-up','Round up the neighborhood dogs and bring them home.','foot'],
+  street: ['STREET RACE','Back alley dash','Beat the grid through the streets of Maplewood.','car'],
+  race: ['TIME TRIAL','Ring rush','Follow the checkpoints and make every corner count.','car'],
+  derby: ['DEMOLITION','Demolition derby','Trade paint. Outlast the other drivers. Own the arena.','car'],
+  rampage: ['CHAOS','Scrap run','Launch six vehicles and give the scrap yard something to work with.','car'],
+  getaway: ['PURSUIT','The getaway','Deliver the ride while the law is on your tail.','car'],
+  soak: ['MINIGAME','Lockdown','Keep the prison break under control with your super-soaker.','foot'],
+  airmail: ['FLIGHT','The mail run','Take to the skies and make your deliveries from above.','plane'],
+  fairjob: ['EXPLORATION','Safety check','The fair is open. Give its rides a very thorough inspection.','foot'],
+};
+const CAR_LABELS = {convert:'SUNSET GT',sedan:'METRO S',wagon:'LONGHAUL',compact:'POCKET ROCKET',truck:'BRUISER'};
+const finite = (n,max=1e9) => Number.isFinite(n) ? Math.max(0,Math.min(max,n)) : 0;
+function saveProgress() {
+  try {
+    localStorage.setItem(SAVE_KEY, JSON.stringify({ version:1, coins:coinCount, chaos:chaosScore,
+      jobs:[...jobsDone], trophies:trophies.filter(t=>t.got).map(t=>t.i),
+      upgrades:SHOP.slice(0,3).map(s=>s.lvl), car:carType, paint:carPaint,
+      records:missionRecords, owned:[...ownedCars], bestDrift, quality:document.getElementById('quality').value }));
+    saveAvailable = true;
+  } catch { saveAvailable = false; }
+}
+function loadProgress() {
+  try {
+    const raw=localStorage.getItem(SAVE_KEY); if(!raw) return;
+    const data=JSON.parse(raw); if(data.version!==1) return;
+    for(const id of Array.isArray(data.owned)?data.owned:[])if(RIDES.includes(id))ownedCars.add(id);
+    coinCount=finite(data.coins); chaosScore=finite(data.chaos); bestDrift=finite(data.bestDrift);
+    for(const id of Array.isArray(data.jobs)?data.jobs:[]) if(JOB_INFO[id]) jobsDone.add(id);
+    const collected=new Set(Array.isArray(data.trophies)?data.trophies:[]);
+    for(const t of trophies) t.got=collected.has(t.i);
+    trophyCount=trophies.filter(t=>t.got).length;
+    SHOP.slice(0,3).forEach((s,i)=>{s.lvl=Math.floor(finite(data.upgrades?.[i],s.max));s.apply();});
+    if(RIDES.includes(data.car)) {setPlayerCar(data.car,finite(data.paint,0xffffff)); GARAGE.ride=RIDES.indexOf(data.car);}
+    for(const id of Object.keys(JOB_INFO)) {
+      const r=data.records?.[id]; if(r && Number.isFinite(r.best)) missionRecords[id]={wins:finite(r.wins),best:finite(r.best),reward:finite(r.reward),medal:['GOLD','SILVER','BRONZE','COMPLETE'].includes(r.medal)?r.medal:'COMPLETE'};
+    }
+    if(['high','balanced','low'].includes(data.quality)) document.getElementById('quality').value=data.quality;
+    coinEl.innerHTML=coinCount+' <small>COINS</small>';
+    document.getElementById('launch').textContent='CONTINUE YOUR RUN ↗';
+    document.getElementById('save-note').textContent='Your town is waiting. Progress restored.';
+  } catch { document.getElementById('save-note').textContent='A fresh start in Maplewood.'; }
+}
+function applyQuality() {
+  const q=document.getElementById('quality').value;
+  renderer.setPixelRatio(Math.min(devicePixelRatio,q==='high'?2:q==='balanced'?1.4:1));
+  renderer.shadowMap.enabled=q!=='low';
+  renderer.setSize(innerWidth,innerHeight); composer.setSize(innerWidth,innerHeight);
+}
+function acceptOffer() {
+  if(!nearbyOffer || MI || paused) return;
+  startMission(nearbyOffer.mission,nearbyOffer);
+}
+function openDispatch() {
+  if(!gameStarted || dispatchOpen) return;
+  dispatchWasPaused=paused; dispatchOpen=true; paused=true;
+  for(const k in keys) keys[k]=false;
+  document.exitPointerLock?.();
+  dispatchEl.classList.add('show'); renderDispatch();
+  document.getElementById('close-dispatch').focus();
+}
+function closeDispatch() {
+  dispatchOpen=false; paused=dispatchWasPaused; dispatchEl.classList.remove('show');
+  document.activeElement?.blur();
+}
+function renderDispatch() {
+  jobCards.replaceChildren();
+  const sub=mode==='car'?car.position:mode==='plane'?plane.position:player.position;
+  const filter=document.getElementById('job-filter').value;
+  for(const [id] of JOB_LIST) {
+    const giver=MARKERS.find(m=>m.mission===id); if(!giver) continue;
+    const info=JOB_INFO[id], record=missionRecords[id];
+    if(filter==='unfinished' && jobsDone.has(id)) continue;
+    if(filter==='driving' && info[3]!=='car') continue;
+    const button=document.createElement('button'); button.className='job-card'+(selectedJob===giver?' selected':'');
+    const distance=Math.round(roadDist(sub.x,sub.z,giver.x,giver.z));
+    button.innerHTML='<span class="job-type">'+info[0]+(jobsDone.has(id)?' • COMPLETE':'')+'</span><strong>'+info[1]+'</strong><p>'+info[2]+'</p><span class="job-meta">'+distance+' m away'+(record?' · '+record.medal+' · '+fmtT(record.best):' · '+info[3].toUpperCase())+'</span><span class="job-arrow">↗</span>';
+    button.addEventListener('click',()=>{
+      if(MI) {document.getElementById('dispatch-status').textContent='Finish your active job, or close Dispatch and press X to drop it.';return;}
+      selectedJob=giver; routeClock=0; closeDispatch(); banner('ROUTE SET',info[1]+' • follow the cyan line • E to accept when you arrive');
+    });
+    jobCards.append(button);
+  }
+  document.getElementById('dispatch-status').textContent=MI?'ACTIVE: '+MI.def.title:'Choose a job to plot a route. Accept it when you arrive.';
+  document.getElementById('dispatch-progress').textContent=jobsDone.size+' / 13 JOBS COMPLETE';
+  drawDispatchMap();
+}
+let routePoints=[];
+const routeMaterial=new THREE.LineBasicMaterial({color:0x63f7ec,transparent:true,opacity:.9,depthWrite:false});
+const routeLine=new THREE.Line(new THREE.BufferGeometry(),routeMaterial); routeLine.frustumCulled=false; scene.add(routeLine);
+function refreshRoute() {
+  const target=MI?.target || selectedJob;
+  if(!target) {routeLine.visible=false; routePoints=[];return;}
+  const sub=mode==='car'?car.position:mode==='plane'?plane.position:player.position;
+  const path=routeThrough(NET.nodes,NET.edges,nearestNode(sub.x,sub.z),nearestNode(target.x,target.z));
+  routePoints=[{x:sub.x,z:sub.z},...path.map(i=>NET.nodes[i]),target];
+  const points=routePoints.map(p=>new THREE.Vector3(p.x,surfaceY(p.x,p.z)+.24,p.z));
+  routeLine.geometry.dispose();routeLine.geometry=new THREE.BufferGeometry().setFromPoints(points);
+  routeLine.visible=mode==='car' && !mapView;
+}
+function drawDispatchMap() {
+  const cv=document.getElementById('dispatch-map'),c=cv.getContext('2d'),W=cv.width,H=cv.height;
+  const xs=NET.nodes.map(n=>n.x), zs=NET.nodes.map(n=>n.z);
+  const minX=Math.min(...xs)-50,maxX=Math.max(...xs)+50,minZ=Math.min(...zs)-50,maxZ=Math.max(...zs)+50;
+  const sc=Math.min((W-50)/(maxX-minX),(H-50)/(maxZ-minZ));
+  const xy=p=>[W/2+(p.x-(minX+maxX)/2)*sc,H/2+(p.z-(minZ+maxZ)/2)*sc];
+  c.fillStyle='#142f32';c.fillRect(0,0,W,H);
+  c.strokeStyle='#203d40'; c.lineWidth=1;
+  for(let x=0;x<W;x+=32){c.beginPath();c.moveTo(x,0);c.lineTo(x,H);c.stroke();}
+  for(let y=0;y<H;y+=32){c.beginPath();c.moveTo(0,y);c.lineTo(W,y);c.stroke();}
+  for(const e of NET.edges){const a=xy(NET.nodes[e.a]),b=xy(NET.nodes[e.b]);c.strokeStyle=e.hw?'#819b86':'#456568';c.lineWidth=e.hw?4:2;c.beginPath();c.moveTo(...a);c.lineTo(...b);c.stroke();}
+  for(const m of MARKERS.filter(m=>m.mission)){const p=xy(m);c.fillStyle=jobsDone.has(m.mission)?'#7d9b8b':'#ffca74';c.beginPath();c.arc(...p,4,0,7);c.fill();}
+  const sub=mode==='car'?car.position:mode==='plane'?plane.position:player.position,p=xy(sub);
+  c.shadowColor='#6dfbe9';c.shadowBlur=18;c.fillStyle='#6dfbe9';c.beginPath();c.arc(...p,7,0,7);c.fill();c.shadowBlur=0;
+  c.font='bold 13px sans-serif';c.fillStyle='#f6e8cb';c.fillText('YOU ARE HERE',p[0]+14,p[1]+4);
+}
+// A fixed-size skid pool: no allocations and no accumulating scenery during long runs.
+const skidGeo=new THREE.PlaneGeometry(.19,1.6).rotateX(-Math.PI/2);
+const skidMesh=new THREE.InstancedMesh(skidGeo,new THREE.MeshBasicMaterial({color:0x272a37,transparent:true,opacity:.46,depthWrite:false}),320);
+skidMesh.instanceMatrix.setUsage(THREE.DynamicDrawUsage);skidMesh.frustumCulled=false;
+const skidDummy=new THREE.Object3D();let skidIndex=0;
+for(let i=0;i<320;i++){skidDummy.position.set(0,-100,0);skidDummy.updateMatrix();skidMesh.setMatrixAt(i,skidDummy.matrix);}scene.add(skidMesh);
+function laySkid() {
+  for(const side of [-1,1]) {
+    const x=car.position.x-Math.sin(heading)*1.6+Math.cos(heading)*side*.95;
+    const z=car.position.z-Math.cos(heading)*1.6-Math.sin(heading)*side*.95;
+    skidDummy.position.set(x,surfaceY(x,z)+.045,z);skidDummy.rotation.set(0,heading,0);skidDummy.updateMatrix();
+    skidMesh.setMatrixAt(skidIndex++%320,skidDummy.matrix);
+  }
+  skidMesh.instanceMatrix.needsUpdate=true;
+}
+function updateUpgrade(dt) {
+  if(dt>0) {
+    nearMissCooldown=Math.max(0,nearMissCooldown-dt);
+    if (mode==='car' && speed>23 && nearMissCooldown===0) {
+      const close=traffic.some(t=>!t.cop && Math.hypot(t.x-car.position.x,t.z-car.position.z)>3.7 && Math.hypot(t.x-car.position.x,t.z-car.position.z)<5.2);
+      if(close) {nearMissCooldown=2.5;chaosHit(30);addCoins(5);toast('CLOSE CALL +30');}
+    }
+    const lateral=Math.abs(motionX*Math.cos(heading)-motionZ*Math.sin(heading));
+    const sliding=mode==='car' && Math.abs(speed)>12 && lateral>3 && airT===0 && !carFire && !drowning;
+    if(sliding) {driftChain+=dt*(lateral*4);driftGrace=.85;driftTick-=dt;
+      if(driftTick<=0){driftTick=.07;laySkid();emit(tmpV.set(car.position.x,car.position.y+.3,car.position.z),new THREE.Vector3(0,1.2,0),0xdcd6bf,.55,.55,1.2);}
+    } else if(driftChain>0) {
+      driftGrace-=dt;
+      if(driftGrace<=0){const score=Math.floor(driftChain);if(score>=35){chaosHit(score);addCoins(Math.min(60,Math.floor(score/8)));bestDrift=Math.max(bestDrift,score);toast('DRIFT BANKED +'+score);}driftChain=0;}
+    }
+    if(boosting){driftTick-=dt;if(driftTick<=0){driftTick=.045;emit(tmpV.set(car.position.x-Math.sin(heading)*2.8,car.position.y+.65,car.position.z-Math.cos(heading)*2.8),new THREE.Vector3(-Math.sin(heading)*4,.3,-Math.cos(heading)*4),0x79f9ed,.6,.22,1);}}
+    routeClock-=dt; if(routeClock<=0){routeClock=1.4;refreshRoute();}
+    saveClock+=dt;if(saveClock>4){saveClock=0;saveProgress();}
+  }
+  upgradeClock+=dt;
+  upgradeClock=0;
+  document.body.classList.toggle('boosting',boosting && !paused);
+  document.body.classList.toggle('map-open',mapView);
+  document.getElementById('boost-fill').style.width=boostFuel+'%';
+  document.getElementById('boost-state').textContent=boosting?'BOOSTING':boostFuel<15?'RECHARGING':'SHIFT • BOOST';
+  document.getElementById('ride-name').textContent=mode==='car'?(CAR_LABELS[carType]||carType):mode==='plane'?'AIRMAIL EXPRESS':'ON FOOT';
+  const rank=jobsDone.size>=10?'TOWN LEGEND':jobsDone.size>=5?'LOCAL MENACE':jobsDone.size>=1?'TROUBLEMAKER':'NEW IN TOWN';
+  document.getElementById('rank').textContent=rank;
+  document.getElementById('rank-fill').style.width=(jobsDone.size/13*100)+'%';
+  document.getElementById('save-state').textContent=saveAvailable?'● AUTOSAVE ON':'SAVING UNAVAILABLE';
+  document.getElementById('drift-readout').textContent=driftChain>=15?'DRIFT  '+Math.floor(driftChain):'';
+  const sub=mode==='car'?car.position:mode==='plane'?plane.position:player.position;
+  districtEl.textContent=Math.abs(sub.x)>TOWN*.8 || Math.abs(sub.z)>TOWN*.8?'COUNTY OUTSKIRTS':sub.z<0?'NORTHSIDE • MAPLEWOOD':'DOWNTOWN • MAPLEWOOD';
+  offerEl.hidden=!nearbyOffer || !!MI || paused;
+  if(nearbyOffer) document.getElementById('offer-name').textContent=JOB_INFO[nearbyOffer.mission]?.[1] || nearbyOffer.mission;
+  let objectiveHTML;
+  if (MI) objectiveHTML='<span class="eyebrow">JOB IN PROGRESS</span>'+missionHUD();
+  else if (stars) objectiveHTML='<span class="eyebrow">POLICE PURSUIT</span><b>Lose the heat.</b><span class="objective-detail">Break away to bank your combo · '+stars+' wanted stars</span>';
+  else if (selectedJob) objectiveHTML='<span class="eyebrow">YOUR NEXT MOVE</span><b>'+JOB_INFO[selectedJob.mission][1]+'</b><span class="objective-detail">Follow the cyan route · '+Math.round(Math.hypot(sub.x-selectedJob.x,sub.z-selectedJob.z))+' m · E to accept nearby</span>';
+  else objectiveHTML='<span class="eyebrow">THE TOWN IS YOURS</span><b>Make a little trouble.</b><span class="objective-detail">J · Find your next job in Dispatch</span>';
+  if (objEl.innerHTML !== objectiveHTML) objEl.innerHTML=objectiveHTML;
+  document.getElementById('dispatch-button').textContent=MI?'J  ·  ACTIVE JOB':'J  ·  DISPATCH';
+}
+// Gamepad mirrors the existing input path; menu controls remain keyboard/touch accessible.
+let padPrevious={}, padUsed=false;
+function updateGamepad() {
+  const pad=navigator.getGamepads?.()[0]; if(!pad || paused || !gameStarted) return;
+  const axis=pad.axes[0]||0;
+  const active=Math.abs(axis)>.15 || pad.buttons.some(b=>b.pressed);
+  if(!active && !padUsed)return;
+  keys.KeyA=axis<-.2;keys.KeyD=axis>.2;
+  keys.KeyW=pad.buttons[7]?.pressed || (pad.axes[1]||0)<-.2;
+  keys.KeyS=pad.buttons[6]?.pressed || (pad.axes[1]||0)>.2;
+  keys.Space=!!pad.buttons[0]?.pressed;keys.ShiftLeft=!!pad.buttons[2]?.pressed;
+  if(pad.buttons[3]?.pressed && !padPrevious[3]) {if(nearbyOffer) acceptOffer();else toggleVehicle();}
+  if(pad.buttons[9]?.pressed && !padPrevious[9]) openDispatch();
+  padPrevious={3:pad.buttons[3]?.pressed,9:pad.buttons[9]?.pressed};padUsed=active;
+}
+document.getElementById('dispatch-button').addEventListener('click',openDispatch);
+document.getElementById('close-dispatch').addEventListener('click',closeDispatch);
+document.getElementById('job-filter').addEventListener('change',renderDispatch);
+document.getElementById('accept-offer').addEventListener('click',()=>{acceptOffer();document.activeElement?.blur();});
+document.getElementById('quality').addEventListener('change',()=>{applyQuality();saveProgress();});
+document.getElementById('pause-button').addEventListener('click',()=>{document.exitPointerLock?.();togglePause();});
+document.getElementById('resume-button').addEventListener('click',()=>{togglePause();document.activeElement?.blur();});
+addEventListener('keydown',e=>{if(dispatchOpen && (e.code==='Escape'||e.code==='KeyJ')){e.preventDefault();e.stopImmediatePropagation();closeDispatch();}},true);
+addEventListener('blur',()=>{for(const k in keys)keys[k]=false;motionX=motionZ=0;if(gameStarted&&!paused)togglePause();saveProgress();});
+addEventListener('pagehide',saveProgress);
+shopEl.addEventListener('click', e=>{
+  const button=e.target.closest('[data-ride]');if(!button || !GARAGE.open || paused)return;
+  const type=button.dataset.ride;if(!RIDES.includes(type))return;
+  if(!ownedCars.has(type)){if(coinCount<250){toast('250 COINS TO UNLOCK');return;}addCoins(-250);ownedCars.add(type);}
+  setPlayerCar(type,carPaint);GARAGE.ride=RIDES.indexOf(type);motionX=motionZ=0;saveProgress();drawShop();
+});
+loadProgress();applyQuality();
+
+let artTime=0;
+
+// Inspect the same actors used in gameplay, with close-up and turntable controls.
+let artStudioOpen=false,artStudio=null,artWasPaused=false;
+const studioUI=document.createElement('div');studioUI.hidden=true;studioUI.id='character-studio';
+studioUI.style.cssText='position:fixed;inset:0;z-index:25;pointer-events:none;color:#f4ebd7;font-family:Arial';
+studioUI.innerHTML='<div style="position:absolute;top:28px;left:4vw"><small>THE PEOPLE OF MAPLEWOOD</small><h2 style="font:32px Georgia">A town with character.</h2></div><div style="position:absolute;bottom:30px;left:50%;transform:translateX(-50%);display:flex;gap:10px;pointer-events:auto"><button data-view="next">NEXT CHARACTER →</button><button data-view="turn">ROTATE ↻</button><button data-view="zoom">FACE / BODY</button><button data-view="close">BACK ×</button></div>';
+for(const b of studioUI.querySelectorAll('button'))b.style.cssText='padding:12px;border:1px solid #71918a;background:#16393f;color:#f4ebd7;font-size:10px;cursor:pointer';
+document.body.append(studioUI);
+function openArtStudio(){artWasPaused=paused;paused=true;artStudioOpen=true;studioUI.hidden=false;Object.keys(keys).forEach(k=>keys[k]=false);document.exitPointerLock?.();for(const id of ['start','hud','edition','help'])document.getElementById(id).style.visibility='hidden';}
+function closeArtStudio(){artStudioOpen=false;paused=artWasPaused;studioUI.hidden=true;for(const id of ['start','hud','edition','help'])document.getElementById(id).style.visibility='';document.activeElement?.blur();}
+const castButton=document.createElement('button');castButton.textContent='MEET MAPLEWOOD →';castButton.style.cssText='background:none;border:0;color:#8bf0d3;cursor:pointer;padding:14px 0;font-size:11px;letter-spacing:1px';castButton.onclick=openArtStudio;document.querySelector('#start .start-actions').append(castButton);
+const pauseCast=castButton.cloneNode(true);pauseCast.onclick=openArtStudio;document.querySelector('#help .card').append(pauseCast);
+studioUI.addEventListener('click',e=>{const action=e.target.dataset.view;if(action==='close')closeArtStudio();else if(artStudio)artStudio[action]?.();});
+addEventListener('keydown',e=>{if(artStudioOpen){e.stopImmediatePropagation();if(e.code==='Escape')closeArtStudio();}},true);
+function renderArtStudio(dt){
+ if(!artStudio){
+  const sc=new THREE.Scene();sc.background=new THREE.Color(0x1c383e);sc.environment=scene.environment;
+  const cam=new THREE.PerspectiveCamera(32,innerWidth/innerHeight,.1,50);
+  sc.add(new THREE.HemisphereLight(0xd4e9fa,0x71533e,2));const light=new THREE.DirectionalLight(0xffdfb8,3);light.position.set(-3,5,4);sc.add(light);
+  const rim=new THREE.DirectionalLight(0x91e1ed,2);rim.position.set(3,3,-2);sc.add(rim);
+  const floor=new THREE.Mesh(new THREE.CylinderGeometry(.8,.9,.12,48),material(0x42636a));floor.position.y=-.075;sc.add(floor);
+  const looks=[HERO_LOOK,{skin:0x945c40,hair:0x292021,shirt:0xd47752,pants:0x294b52,style:'bun'},{skin:0xcc906a,hair:0x31464a,shirt:0x376073,pants:0x514239,style:'cap'},{skin:0xf4cba9,hair:0xc7bbaa,shirt:0x927694,pants:0x3b465b,style:'long'},{skin:0x694331,hair:0x211b19,shirt:0xc9a349,pants:0x45655f,style:'afro'}];
+  let index=0,figure=actor(ART,looks[0]),time=0,angle=0,zoom=false;sc.add(figure);
+  artStudio={next(){sc.remove(figure);figure=actor(ART,looks[++index%looks.length]);sc.add(figure);},turn(){angle+=Math.PI/2;},zoom(){zoom=!zoom;},render(dt){time+=dt;cam.aspect=innerWidth/innerHeight;cam.updateProjectionMatrix();cam.position.set(0,zoom?1.82:1.5,zoom?2:5.5);cam.lookAt(0,zoom?1.76:1.1,0);figure.rotation.y=angle+Math.sin(time*.5)*.08;const b=blink(time);figure.userData.eyes.scale.y=b;figure.userData.eyes.position.y=1.802*(1-b);renderer.render(sc,cam);}};
+ }
+ artStudio.render(dt);
+}
