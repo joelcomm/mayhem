@@ -1127,8 +1127,8 @@ let TIREFIRE = null;
 const STADIUM = { gate: [], cx: 0, cz: 0, rx: 0, rz: 0 };
 const PRISON = { drop: [], col: null, gate: null, newCols: [] };
 
-const WALL_COLS = [0xf2d9b0, 0xf6c9c1, 0xcfe6c8, 0xc9dcef, 0xe6d4ea, 0xfbe7a8, 0xf0efe6, 0xd9c7a8];
-const ROOF_COLS = [0xa8493f, 0x4f7d8c, 0x7b5ea7, 0x9a6b3f, 0x3f7a55, 0x8c3f5e, 0x4a5a7d];
+const WALL_COLS = [0xe4cda9, 0xdcae98, 0xa9bca4, 0xa7bcc5, 0xc7b4b1, 0xe8d49c, 0xe8e1ce, 0xb9b09a];
+const ROOF_COLS = [0x854c40, 0x465f69, 0x605c68, 0x80634d, 0x4d665b, 0x77575c, 0x434e60];
 const DOOR_COLS = [0x8c4a2f, 0x3f5f8c, 0x6a3f6a, 0x2f6a52, 0xa03f3f];
 const TRIM = 0xfdfcf7, GLASS = 0x8fd3ef;
 
@@ -1227,6 +1227,25 @@ function makeHouse(cx, cz, fx, fz, w, d, walkIn) {
     put(TRIM, L(baked(BOX(0.12, 1.6, 0.3), wx, wy, front + 0.06)));           // mullion
     put(TRIM, L(baked(BOX(1.8, 0.12, 0.3), wx, wy, front + 0.06)));
   }
+  // Architectural detail uses the coordinate hash, preserving the town seed.
+  for (const wy of winY) for (const wx of colsX) {
+    for (const side of [-1,1]) {
+      put(door, L(baked(BOX(.48,2.0,.18),wx+side*1.48,wy,front+.06)));
+      for(let slat=0;slat<4;slat++)
+        put(TRIM,L(baked(BOX(.36,.055,.04),wx+side*1.48,wy-.65+slat*.42,front+.17)));
+    }
+    put(0xa46b50,L(baked(BOX(2.35,.38,.55),wx,wy-1.38,front+.22)));
+    put(0x486c49,L(baked(BOX(2.16,.20,.43),wx,wy-1.12,front+.24)));
+    for(let f=0;f<5;f++) {
+      const flower=[0xe2b85c,0xcd786a,0xe9d6a8][vary(cx+f,cz,3)];
+      put(flower,L(baked(new THREE.IcosahedronGeometry(.14,0),wx-.86+f*.43,wy-.96,front+.30)));
+    }
+  }
+  // Corner boards and gutters create a readable silhouette without blocking doors.
+  for(const side of [-1,1]) {
+    put(TRIM,L(baked(BOX(.22,h,.22),side*(w/2+.03),h/2,front)));
+    put(0x535c5d,L(baked(new THREE.CylinderGeometry(.07,.07,h,6),side*(w/2+.22),h/2,front-.15)));
+  }
   // side windows
   for (const s of [1,-1]) {
     put(TRIM, L(baked(BOX(0.18, 1.9, 2.1), s*(w/2+0.05), h*0.55, 0)));
@@ -1289,6 +1308,20 @@ function makeShop(cx, cz, fx, fz, w, d, name, bodyCol, signCol) {   // bodyCol i
   put(TRIM,     L(baked(BOX(w*0.92, 0.34, 0.28), 0, 3.88, front + 1.85)));     // valance
   for (const s of [-1, 1])
     put(TRIM, L(baked(BOX(0.16, 1.5, 0.16), s*w*0.42, 3.6, front + 1.7, 0.5)));  // brackets
+  // Canvas stripes sit above the awning surface, with a scalloped valance.
+  const stripeCount=Math.max(6,Math.floor(w/.9)), stripeW=w*.9/stripeCount;
+  for(let stripe=0;stripe<stripeCount;stripe++) {
+    const sx=-w*.45+stripeW*(stripe+.5);
+    if(stripe%2===0)put(TRIM,L(baked(BOX(stripeW*.93,.04,1.96),sx,4.41,front+.915,-.22)));
+    put(stripe%2===0?TRIM:signCol,L(baked(new THREE.CylinderGeometry(stripeW*.47,stripeW*.47,.12,10),sx,3.88,front+2.01,Math.PI/2)));
+  }
+  // Recessed corner pilasters, layered cornice and brass lamps frame the storefront.
+  for(const side of [-1,1]) {
+    put(TRIM,L(baked(BOX(.38,h,.32),side*w*.48,h/2,front+.1)));
+    put(0x3d5354,L(baked(BOX(.48,.12,.65),side*w*.44,h-3.35,front+.35)));
+    put(0xe7bd73,L(baked(new THREE.SphereGeometry(.19,8,6),side*w*.44,h-3.53,front+.58)));
+  }
+  put(TRIM,L(baked(BOX(w+1.6,.16,d+1.6),0,h+.77,0)));
   // Mullions across the glazing band, so the shopfront isn't one blue slab, and a kick
   // plate along the bottom. Both are dropped for a walk-in and rebuilt around the
   // doorway in the deferred pass: they run the full width of the frontage, and the
@@ -3542,7 +3575,13 @@ for (let i = 0; i < 1600; i++) {
     baked(new THREE.SphereGeometry(1.5, 12, 9), 0.35, 6.5, -1.15),
     baked(new THREE.SphereGeometry(1.35, 12, 9), -0.9, 5.6, 1.4),
   ]);
-  const LEAFC = [0x58794a, 0x819450, 0x456949, 0xa3a163];
+  const leafColors=[], leafPos=leaf.getAttribute('position');
+  for(let i=0;i<leafPos.count;i++) {
+    const shade=THREE.MathUtils.clamp(.64+(leafPos.getY(i)-2)*.065,.62,1.0);
+    leafColors.push(shade,Math.min(1,shade*1.025),shade*.91);
+  }
+  leaf.setAttribute('color',new THREE.Float32BufferAttribute(leafColors,3));
+  const LEAFC = [0x66834e, 0x91a363, 0x4f765a, 0xb3a65f];
   // nothing scattered may sit on a carriageway, whatever placed it
   {
     // no trees on or in the tunnel mountain: it has no colliders, so the woodland
@@ -3560,11 +3599,11 @@ for (let i = 0; i < 1600; i++) {
     treeSpots.length = 0; treeSpots.push(...keep);
   }
   const tr = instanced(trunk, toon(0x7a5230), treeSpots.length);
-  const lv = instanced(leaf, new THREE.MeshStandardMaterial({ color: 0xffffff, }), treeSpots.length);
+  const lv = instanced(leaf, new THREE.MeshStandardMaterial({ color: 0xffffff, vertexColors:true, roughness:.96 }), treeSpots.length);
   const col = new THREE.Color();
   treeSpots.forEach((t, i) => {
     dummy.position.set(t.x, groundH(t.x, t.z), t.z); dummy.rotation.set(0, prng()*6.28, 0);
-    dummy.scale.setScalar(t.s); dummy.updateMatrix();
+    dummy.scale.set(t.s*(.85+vary(t.x,t.z,5)*.06),t.s*(.9+vary(t.z,t.x,5)*.08),t.s); dummy.updateMatrix();
     tr.setMatrixAt(i, dummy.matrix); lv.setMatrixAt(i, dummy.matrix);
     lv.setColorAt(i, col.setHex(rpick(LEAFC)));
   });
@@ -3601,8 +3640,18 @@ for (const st of STREETS) {
   }
 }
 const PROP_DEFS = {
-  lamp:    { parts:[[0x6b6f76, BOX(0.35,7,0.35), 0,3.5,0], [0x6b6f76, BOX(2.4,0.3,0.3), 1.0,6.9,0],
-                    [0xfff0b8, BOX(1.1,0.4,0.6), 1.9,6.6,0]], mass:6, radius:0.4 },
+  lamp: { parts:[
+    [0x344e50,new THREE.CylinderGeometry(.13,.23,7,10),0,3.5,0],
+    [0x344e50,new THREE.CylinderGeometry(.32,.42,.55,10),0,.28,0],
+    [0xc3a574,new THREE.CylinderGeometry(.24,.24,.16,10),0,1.05,0],
+    [0x344e50,BOX(2.4,.18,.18),1,6.9,0],
+    [0x344e50,new THREE.CylinderGeometry(.52,.3,.25,8),1.9,6.85,0],
+    [0xffe2a0,new THREE.CylinderGeometry(.30,.24,.55,8),1.9,6.48,0],
+    [0x344e50,new THREE.CylinderGeometry(.35,.35,.10,8),1.9,6.18,0],
+    [0x537f7b,BOX(.85,1.5,.07),.64,5.35,0],
+    [0xe7d8b7,BOX(.60,.12,.085),.64,5.65,0],
+    [0xe7d8b7,new THREE.SphereGeometry(.17,8,6),.64,5.14,.05]
+  ],mass:6,radius:.4 },
   hydrant: { parts:[[0xd0392b, new THREE.CylinderGeometry(0.34, 0.42, 1.15, 16), 0,0.58,0],
                     [0xd0392b, new THREE.SphereGeometry(0.36, 16, 12), 0,1.2,0],
                     [0xd0392b, new THREE.CylinderGeometry(0.16, 0.16, 1.0, 16), 0,0.75,0, 0,0,Math.PI/2]], mass:2.4, radius:0.5 },

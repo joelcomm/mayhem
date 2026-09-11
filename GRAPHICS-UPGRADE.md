@@ -20,3 +20,6 @@ Production build and three driving tests passed. Character geometry attributes c
 
 ## Preview
 Serve docs with python3 -m http.server 8946 --bind 127.0.0.1 --directory docs, then open http://127.0.0.1:8946/.
+
+## Town visual pass
+House shutters, flower boxes, corner trim and gutters; striped scalloped shop awnings and cornices; lantern streetlights with banners; shaded foliage with varied crown proportions; coordinated exterior and roof palettes. Town seed, entrances and roads preserved. Production build and three driving tests passed; browser checked with no warnings or errors.
